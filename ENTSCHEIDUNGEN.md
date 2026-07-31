@@ -398,11 +398,21 @@ VPS-Betrieb seine einzige Stellschraube für die Streuung.
 Der Widerspruch wurde gemeldet und vor der Umsetzung entschieden, nicht still
 aufgelöst.
 
-**Am lebenden Objekt bestätigt (31.07.2026):** `verifikation.py` schickt das
-echte Payload einmal mit `temperature` an die API. `claude-opus-5` antwortet
-mit HTTP 400 — die Entscheidung steht damit nicht auf einer Dokumentationszeile,
-sondern auf einer Messung. Der Testfall bleibt im Skript und meldet es, falls
-ein Anbieter seine Haltung ändert.
+**Am lebenden Objekt gemessen (31.07.2026):** `verifikation.py` schickt das
+echte Payload einmal mit `temperature` an beide APIs. Die Antworten fallen
+unterschiedlich aus, und das ist der Grund, warum diese Notiz hier steht:
+
+- `claude-opus-5` antwortet mit **HTTP 400**. Der Parameter ist entfernt.
+- `gemini-3.1-pro-preview` antwortet mit **HTTP 200** und ignoriert ihn.
+
+Die Doktrin gilt für beide, aber aus verschiedenen Gründen: bei Anthropic
+scheitert der Aufruf, bei Google wirkt er nur nicht — bis eine künftige
+Generation ebenfalls mit 400 antwortet. Wer die Gemini-Seite später
+„repariert", indem er `temperature` wieder einbaut, bekommt kein
+Fehlersignal und glaubt, es hätte Wirkung. Genau davor steht dieser Absatz.
+
+Die Messung läuft bei jeder Verifikation mit und meldet, wenn ein Anbieter
+seine Haltung ändert.
 
 ## Der Judge heißt `gemini-3.1-pro-preview`, nicht `gemini-3.1-pro`
 
