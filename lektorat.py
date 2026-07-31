@@ -458,7 +458,7 @@ def main():
                                      + letzte + "\n\n")
                         body += "=== ZU BEARBEITENDER TEXT ===\n" + aktuell
 
-                        neu = G.chat(cfg, system, body, temp)
+                        neu = G.chat(cfg, system, body, temp, rolle=stufe)
                         if not neu:
                             raise RuntimeError(f"leere Antwort ({stufe})")
 

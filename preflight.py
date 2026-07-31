@@ -112,6 +112,299 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Fallenblock wirft Ausnahme", repr(e))
 
+    selbsttest_backends(b)
+
+
+# ------------------------------------------------------------------
+# Backend-Selbsttest: prueft Payloads und Auswertung gegen Attrappen.
+#
+# Das ersetzt den Mini-Echtlauf ueberall dort, wo keine Schluessel
+# vorliegen — und faengt genau die Fehlerklasse, die beim Lesen unsichtbar
+# bleibt: ein Sampling-Parameter, der sich in ein Payload schleicht, kostet
+# bei Opus 5 und kuenftigen Gemini-Generationen HTTP 400 mitten im Lauf.
+# ------------------------------------------------------------------
+SAMPLING = ("temperature", "top_p", "top_k", "topP", "topK",
+            "generationConfig")
+
+
+def _schluessel_tief(obj):
+    """Alle Schluessel eines verschachtelten Payloads."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield k
+            yield from _schluessel_tief(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _schluessel_tief(v)
+
+
+class _Antwort:
+    """Attrappe einer requests-Antwort."""
+
+    def __init__(self, status, koerper=None, kopf=None):
+        self.status_code = status
+        self._koerper = koerper or {}
+        self.headers = kopf or {}
+        self.text = json.dumps(self._koerper)
+
+    def json(self):
+        return self._koerper
+
+
+def selbsttest_backends(b):
+    cfg = dict(G.STANDARD)
+    cfg.update({"modell_uebersetzung": "claude-opus-5",
+                "modell_annotation":   "gemini-3.6-flash",
+                "effort_uebersetzung": "hoch",
+                "effort_annotation":   "niedrig"})
+
+    # --- Routing: Rolle -> Modell -> Backend, inklusive Rueckfallpfad ----
+    try:
+        fehler = []
+        if G.backend_name(G.modell_fuer(cfg, "uebersetzung")) != "anthropic":
+            fehler.append("uebersetzung landet nicht bei Anthropic")
+        if G.backend_name(G.modell_fuer(cfg, "annotation")) != "google":
+            fehler.append("annotation landet nicht bei Google")
+        # Leerer Schluessel muss auf Ollama zurueckfallen (VPS-Rueckfallpfad).
+        if G.backend_name(G.modell_fuer(dict(G.STANDARD), "stil")) != "ollama":
+            fehler.append("leeres modell_stil faellt nicht auf Ollama zurueck")
+        if G.effort_fuer(cfg, "annotation") != "low":
+            fehler.append("Effort 'niedrig' wird nicht auf 'low' abgebildet")
+        if fehler:
+            b.add("FEHLER", "Rollen-Routing falsch", "; ".join(fehler))
+        else:
+            b.add("OK", "Rollen-Routing und Effort-Abbildung korrekt")
+    except Exception as e:
+        b.add("FEHLER", "Rollen-Routing wirft Ausnahme", repr(e))
+
+    # --- Anthropic-Payload ---------------------------------------------
+    try:
+        p = G.AnthropicBackend().payload(cfg, "SYSTEM", "USER",
+                                         "uebersetzung", "claude-opus-5")
+        schluessel = set(_schluessel_tief(p))
+        fehler = []
+        drin = schluessel & set(SAMPLING)
+        if drin:
+            fehler.append(f"Sampling-Parameter im Payload: {sorted(drin)}")
+        if p.get("model") != "claude-opus-5":
+            fehler.append("Modell nicht aus der Rolle aufgeloest")
+        if p.get("output_config", {}).get("effort") != "high":
+            fehler.append("Effort fehlt oder ist nicht abgebildet")
+        if not p.get("max_tokens"):
+            fehler.append("max_tokens fehlt")
+        system = p.get("system")
+        if not isinstance(system, list) or not system:
+            fehler.append("System-Prompt ist keine Blockliste")
+        elif system[-1].get("cache_control", {}).get("type") != "ephemeral":
+            fehler.append("Cache-Marker fehlt auf dem letzten System-Block")
+        if fehler:
+            b.add("FEHLER", "Anthropic-Payload fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Anthropic-Payload: Cache-Marker und Effort gesetzt, "
+                        "keine Sampling-Parameter")
+    except Exception as e:
+        b.add("FEHLER", "Anthropic-Payload wirft Ausnahme", repr(e))
+
+    # --- Gemini-Payload -------------------------------------------------
+    try:
+        p = G.GeminiBackend().payload(cfg, "SYSTEM", "USER",
+                                      "annotation", "gemini-3.6-flash")
+        schluessel = set(_schluessel_tief(p))
+        fehler = []
+        drin = schluessel & set(SAMPLING)
+        if drin:
+            fehler.append(f"Sampling-Parameter im Payload: {sorted(drin)}")
+        if "system_instruction" not in p:
+            fehler.append("system_instruction fehlt")
+        if not p.get("contents"):
+            fehler.append("contents fehlt")
+        if fehler:
+            b.add("FEHLER", "Gemini-Payload fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Gemini-Payload: system_instruction gesetzt, "
+                        "keine Sampling-Parameter")
+    except Exception as e:
+        b.add("FEHLER", "Gemini-Payload wirft Ausnahme", repr(e))
+
+    # --- Antwortauswertung gegen Attrappen ------------------------------
+    try:
+        fehler = []
+        text, u = G.AnthropicBackend().antwort_lesen({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "Hier ist die Übersetzung:\n"
+                                                 "Der Hund schläft."}],
+            "usage": {"input_tokens": 120, "output_tokens": 30,
+                      "cache_read_input_tokens": 900,
+                      "cache_creation_input_tokens": 40}})
+        if text != "Der Hund schläft.":
+            fehler.append(f"Anthropic-Text falsch gesaeubert: {text!r}")
+        if (u["ein"], u["aus"], u["cache_lesen"], u["cache_schreiben"]) \
+                != (120, 30, 900, 40):
+            fehler.append(f"Anthropic-Usage falsch: {u}")
+
+        text, u = G.GeminiBackend().antwort_lesen({
+            "candidates": [{"finishReason": "STOP",
+                            "content": {"parts": [{"text": "Die Katze."}]}}],
+            "usageMetadata": {"promptTokenCount": 55,
+                              "candidatesTokenCount": 12}})
+        if text != "Die Katze.":
+            fehler.append(f"Gemini-Text falsch: {text!r}")
+        if (u["ein"], u["aus"]) != (55, 12):
+            fehler.append(f"Gemini-Usage falsch: {u}")
+
+        for name, backend_, antwort in (
+                ("Anthropic-Ablehnung", G.AnthropicBackend(),
+                 {"stop_reason": "refusal",
+                  "stop_details": {"category": "cyber"}, "content": []}),
+                ("Gemini-Abbruch", G.GeminiBackend(),
+                 {"candidates": [{"finishReason": "SAFETY", "content": {}}]})):
+            try:
+                backend_.antwort_lesen(antwort)
+                fehler.append(f"{name} wird nicht als Fehler gemeldet")
+            except G.ApiFehler:
+                pass
+        if fehler:
+            b.add("FEHLER", "Antwortauswertung fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Antwortauswertung: Text, Usage und Ablehnungen "
+                        "beider Anbieter korrekt")
+    except Exception as e:
+        b.add("FEHLER", "Antwortauswertung wirft Ausnahme", repr(e))
+
+    # --- Retry und Backoff ----------------------------------------------
+    try:
+        pausen, versuche = [], []
+
+        def post():
+            versuche.append(1)
+            if len(versuche) == 1:
+                return _Antwort(429, {"error": "rate"}, {"retry-after": "3"})
+            if len(versuche) == 2:
+                return _Antwort(503, {"error": "weg"})
+            return _Antwort(200, {"ok": True})
+
+        r = G.sende(post, 4, schlafen=pausen.append)
+        fehler = []
+        if r.status_code != 200:
+            fehler.append("kein Erfolg nach zwei Wiederholungen")
+        if len(pausen) != 2:
+            fehler.append(f"{len(pausen)} statt 2 Pausen")
+        elif abs(pausen[0] - 3.0) > 0.01:
+            fehler.append(f"'retry-after' ignoriert (wartete {pausen[0]:.1f}s)")
+        elif not 4.0 <= pausen[1] <= 4.6:
+            fehler.append(f"Backoff falsch ({pausen[1]:.1f}s statt ~4s)")
+
+        # 400 ist ein Anwendungsfehler: sofort melden, nicht wiederholen.
+        pausen2 = []
+        try:
+            G.sende(lambda: _Antwort(400, {"error": "kaputt"}), 4,
+                    schlafen=pausen2.append)
+            fehler.append("HTTP 400 wird nicht sofort gemeldet")
+        except G.ApiFehler:
+            if pausen2:
+                fehler.append("HTTP 400 wird faelschlich wiederholt")
+        if fehler:
+            b.add("FEHLER", "Retry-Verhalten falsch", "; ".join(fehler))
+        else:
+            b.add("OK", "Retry: 'retry-after' beachtet, Backoff bei 5xx, "
+                        "kein Wiederholen bei 400")
+    except Exception as e:
+        b.add("FEHLER", "Retry-Selbsttest wirft Ausnahme", repr(e))
+
+
+# ==================================================================
+def pruefe_belegung(cfg, b):
+    """Welche Rolle laeuft ueber welches Modell und welchen Anbieter."""
+    b.abschnitt("Modellbelegung")
+    for rolle in G.aktive_rollen(cfg):
+        modell = G.modell_fuer(cfg, rolle)
+        anbieter = G.backend_name(modell)
+        zusatz = (f", Effort {G.effort_fuer(cfg, rolle)}"
+                  if anbieter != "ollama" else "")
+        b.add("INFO", f"  {rolle}", f"{modell} ({anbieter}{zusatz})")
+
+
+def pruefe_api(cfg, b, backends, ping):
+    """Schluessel und Erreichbarkeit der genutzten API-Anbieter.
+
+    Der Ping schickt genau einen Token — er kostet praktisch nichts und
+    faengt abgelaufene Schluessel ab, bevor ein Volllauf startet."""
+    b.abschnitt("API-Anbieter")
+    if G.ist_colab():
+        b.add("INFO", "Laufumgebung", "Google Colab (Secrets ueber userdata)")
+    ok = True
+    for anbieter in sorted(backends & {"anthropic", "google"}):
+        var, secret = G.SCHLUESSEL[anbieter]
+        if not G.api_schluessel(anbieter, still=False):
+            b.add("FEHLER", f"Schluessel fuer {anbieter} fehlt",
+                  f"Colab: Secret '{secret}' hinterlegen und der Zelle "
+                  f"Zugriff geben.\n           "
+                  f"Sonst: export {var}=...")
+            ok = False
+            continue
+        b.add("OK", f"Schluessel fuer {anbieter} vorhanden")
+        if not ping:
+            continue
+        rolle = next(r for r in G.aktive_rollen(cfg)
+                     if G.backend_name(G.modell_fuer(cfg, r)) == anbieter)
+        modell = G.modell_fuer(cfg, rolle)
+        probe = dict(cfg)
+        probe["max_tokens_api"] = 1
+        try:
+            G.BACKENDS[anbieter].chat(probe, "Antworte mit OK.", "OK",
+                                      0.0, rolle=rolle, modell=modell)
+            b.add("OK", f"{modell} antwortet")
+        except SystemExit:
+            raise
+        except Exception as e:
+            # Ein am Limit abgeschnittener Ein-Token-Ping ist kein Fehler.
+            b.add("WARN", f"Ping an {modell} ohne verwertbare Antwort",
+                  f"{e}\n           Der Schluessel ist da; die Anfrage "
+                  f"selbst wird im Lauf erneut versucht.")
+    return ok
+
+
+def pruefe_kosten(cfg, b, woerter):
+    """Schaetzung vor dem Volllauf. Lieber zu hoch als zu niedrig."""
+    b.abschnitt("Kostenschaetzung")
+    faktor = G.token_faktor()
+    b.add("INFO", "Annahme", f"{faktor} Token je Quellwort (konservativ; "
+                             f"wird nach dem ersten Lauf an der gemessenen "
+                             f"Usage kalibriert)")
+    # Nicht jede Rolle sieht das ganze Buch: Judge und Vorbereitung arbeiten
+    # am Testauszug beziehungsweise an Konkordanzen, nicht am Volltext.
+    auszug = cfg["test_words_erzaehlung"] + cfg["test_words_dialog"]
+    umfang = {"judge": auszug, "vorbereitung": min(woerter, 20000)}
+
+    summe, unsicher, ohne_tarif = 0.0, False, []
+    for rolle in G.aktive_rollen(cfg):
+        modell = G.modell_fuer(cfg, rolle)
+        if G.backend_name(modell) == "ollama":
+            continue
+        t = G.tarif(modell)
+        if not t:
+            ohne_tarif.append(modell)
+            continue
+        n = umfang.get(rolle, woerter)
+        # Je Pass geht der Quelltext einmal rein und einmal (bearbeitet) raus;
+        # Kontextrueckschau und Prompt-Kopf schlagen grob als Aufschlag zu.
+        ein = n * faktor * 1.4
+        aus = n * faktor
+        d = (ein * t["ein"] + aus * t["aus"]) / 1e6
+        summe += d
+        unsicher = unsicher or not t["geprueft"]
+        b.add("INFO", f"  {rolle}", f"{modell}: rund {d:.2f} $ "
+                                    f"({n} Woerter)")
+    if ohne_tarif:
+        b.add("WARN", "Kein hinterlegter Tarif",
+              f"{', '.join(sorted(set(ohne_tarif)))} — Schaetzung "
+              f"unvollstaendig. Tarif in gemeinsam.TARIFE ergaenzen.")
+    b.add("INFO", "Summe (grob)", f"rund {summe:.2f} $ fuer {woerter} Woerter")
+    if unsicher:
+        b.add("WARN", "Teil der Tarife ist nicht verifiziert",
+              "Google-Tarife stehen mit Datum 31.07.2026 vorgemerkt und "
+              "werden in Paket 2 gegen die Anbieterdoku geprueft.")
+
 
 # ==================================================================
 def pruefe_ollama(cfg, b):
@@ -424,7 +717,8 @@ def pruefe_config(cfg, b):
     b.add("INFO", "Chunkgroesse",
           f"{cfg['chunk_words']} (Vergleichsvariante "
           f"{cfg['chunk_words_variante']})")
-    if cfg["chunk_words"] * 4 > cfg["num_ctx"]:
+    if "ollama" in G.benutzte_backends(cfg) \
+            and cfg["chunk_words"] * 4 > cfg["num_ctx"]:
         b.add("WARN", "num_ctx knapp fuer die Chunkgroesse",
               f"Revisionspass braucht etwa {cfg['chunk_words']*4} Token.")
     unbekannt = [p for p in cfg["lektorat_passes"]
@@ -466,10 +760,20 @@ def main():
         b.schreiben(REPORT)
         sys.exit(1)
 
-    if not pruefe_ollama(cfg, b):
-        b.schreiben(REPORT)
-        sys.exit(1)
-    pruefe_gpu(cfg, b)
+    # Die Pruefungen richten sich nach den tatsaechlich benutzten Anbietern:
+    # ohne Ollama-Rolle gibt es weder GPU- noch VRAM-Frage.
+    backends = G.benutzte_backends(cfg)
+    pruefe_belegung(cfg, b)
+
+    if "ollama" in backends:
+        if not pruefe_ollama(cfg, b):
+            b.schreiben(REPORT)
+            sys.exit(1)
+        pruefe_gpu(cfg, b)
+    if backends & {"anthropic", "google"}:
+        if not pruefe_api(cfg, b, backends, ping=not args.quick):
+            b.schreiben(REPORT)
+            sys.exit(1)
     pruefe_begleitdateien(cfg, b, args.streng)      # F4: immer
 
     if not args.quick:
@@ -478,6 +782,7 @@ def main():
         text = pruefe_text(cfg, b)
         if text:
             finde_zitate(text, b)
+            pruefe_kosten(cfg, b, len(text.split()))
 
     G.speichere_config(cfg)
     ok = b.schreiben(REPORT)

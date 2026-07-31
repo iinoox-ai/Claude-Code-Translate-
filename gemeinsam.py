@@ -12,6 +12,7 @@ Sprachrichtung beim Start aus, und projekt.json traegt "sprachpaar": "nl-de".
 import hashlib
 import json
 import os
+import random
 import re
 import sys
 import time
@@ -60,6 +61,28 @@ STANDARD = {
     "modell":                    "mistral-medium-3.5:128b-q8_0",
     "ollama_host":               "http://localhost:21434",
     "num_ctx":                   16384,
+
+    # API-Aera. Die Modellbelegung je Rolle steht in projekt.json; bleibt sie
+    # leer, faellt die Rolle auf 'modell'/'backend' zurueck (Ollama-Rueckfall).
+    "backend_standard":          "anthropic",
+    "modell_uebersetzung":       "",
+    "modell_revision":           "",
+    "modell_stil":               "",
+    "modell_korrektorat":        "",
+    "modell_vorbereitung":       "",
+    "modell_judge":              "",
+    "modell_annotation":         "",
+    "modell_vergleich":          "",
+    "effort_uebersetzung":       "hoch",
+    "effort_revision":           "hoch",
+    "effort_stil":               "hoch",
+    "effort_korrektorat":        "hoch",
+    "effort_vorbereitung":       "hoch",
+    "effort_judge":              "hoch",
+    "effort_annotation":         "niedrig",
+    "effort_vergleich":          "hoch",
+    "max_tokens_api":            32000,
+    "timeout_read_api":          600,       # Auftrag Paket 1: hoechstens 10 min
 
     "chunk_words":               800,
     "chunk_words_variante":      1200,      # fuer den Chunkgroessen-Vergleich
@@ -111,7 +134,13 @@ AENDERBAR = {
     "lektorat_ratio_min", "lektorat_ratio_max",
     "export_glossar", "export_bewertung", "glossar_quelle",
     "timeout_connect", "timeout_read", "max_retries",
-}
+    "backend_standard", "max_tokens_api", "timeout_read_api",
+} | {f"modell_{r}" for r in (
+    "uebersetzung", "revision", "stil", "korrektorat",
+    "vorbereitung", "judge", "annotation", "vergleich")
+} | {f"effort_{r}" for r in (
+    "uebersetzung", "revision", "stil", "korrektorat",
+    "vorbereitung", "judge", "annotation", "vergleich")}
 
 
 def lade_config(pfad=CONFIG, pflicht=True):
@@ -269,28 +298,249 @@ def projektbausteine(cfg):
 
 
 # ==================================================================
+# Laufumgebung und Schluessel
+# ==================================================================
+def ist_colab():
+    """Einzige Colab-Erkennung des Projekts. Bitte nirgendwo sonst."""
+    try:
+        import google.colab            # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+# Anzeigename -> (Umgebungsvariable, Colab-Secret)
+SCHLUESSEL = {
+    "anthropic": ("ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
+    "google":    ("GEMINI_API_KEY",    "GoogleKI"),
+}
+
+
+def api_schluessel(anbieter, still=True):
+    """Liest den Schluessel aus der Umgebung, in Colab aus userdata.
+
+    Gibt None zurueck, wenn keiner da ist. Der Wert wird nirgends geloggt
+    oder in eine Datei geschrieben."""
+    var, secret = SCHLUESSEL.get(anbieter, (None, None))
+    if not var:
+        return None
+    wert = os.environ.get(var)
+    if wert:
+        return wert.strip()
+    if ist_colab():
+        try:
+            from google.colab import userdata
+            wert = userdata.get(secret)
+            if wert:
+                os.environ[var] = wert.strip()      # fuer Unterprozesse
+                return wert.strip()
+        except Exception as e:
+            if not still:
+                print(f"  Colab-Secret '{secret}' nicht lesbar: {e}")
+    return None
+
+
+# ==================================================================
+# Rollen, Modelle, Backends
+# ==================================================================
+ROLLEN = ("uebersetzung", "revision", "stil", "korrektorat",
+          "vorbereitung", "judge", "annotation", "vergleich")
+
+# Das Backend ergibt sich aus dem Modellnamen, nicht aus der Konfiguration.
+# 'backend_standard' ist nur der Default fuer Rollen ohne eigenes Modell.
+PRAEFIXE = (("claude-", "anthropic"), ("gemini-", "google"))
+
+# projekt.json haelt die Stufen deutsch, die APIs erwarten englisch.
+EFFORT = {"niedrig": "low", "mittel": "medium", "hoch": "high",
+          "sehr_hoch": "xhigh", "maximal": "max"}
+
+
+def modell_fuer(cfg, rolle):
+    """Modellname der Rolle. Leer oder unbekannt -> 'modell' (Rueckfallpfad)."""
+    return (cfg.get(f"modell_{rolle}") or "").strip() or cfg.get(
+        "modell", STANDARD["modell"])
+
+
+def backend_name(modell):
+    for praefix, name in PRAEFIXE:
+        if modell.startswith(praefix):
+            return name
+    return "ollama"
+
+
+def effort_fuer(cfg, rolle):
+    stufe = (cfg.get(f"effort_{rolle}") or "hoch").strip().lower()
+    if stufe not in EFFORT:
+        sys.exit(f"FEHLER: effort_{rolle} ist '{stufe}'. Erlaubt: "
+                 f"{', '.join(EFFORT)}.")
+    return EFFORT[stufe]
+
+
+# ==================================================================
+# Tarife und Kosten
+# ==================================================================
+# Dollar je 1 Mio Token, Stand 31.07.2026.
+#
+# Die Anthropic-Werte sind gegen die Anbieterdokumentation geprueft. Die
+# Google-Werte sind vorgemerkt und in Paket 2 zu verifizieren —
+# ai.google.dev ist aus der Entwicklungsumgebung gesperrt (Netzwerkpolicy),
+# deshalb steht 'geprueft' dort auf False und die Kostenuebersicht sagt das
+# auch. Beim Wechsel auf ein Modell ohne Tarif wird geschaetzt, nicht geraten.
+TARIFE = {
+    "claude-opus-5":    {"ein":  5.00, "aus": 25.00, "geprueft": True},
+    "claude-fable-5":   {"ein": 10.00, "aus": 50.00, "geprueft": True},
+    "gemini-3.1-pro":   {"ein":  2.00, "aus": 12.00, "geprueft": False,
+                         "hinweis": "Tarif bis 200k-Prompt"},
+    "gemini-3.6-flash": {"ein":  1.50, "aus":  7.50, "geprueft": False},
+}
+
+# Wortzahl -> Token. Bewusst konservativ (hoch) angesetzt: der Tokenizer der
+# Opus-5-Aera zaehlt gegenueber aelteren bis etwa das 1,35-fache, und eine zu
+# niedrige Schaetzung vor einem fuenfstuendigen Lauf ist der teurere Fehler.
+# Nach dem ersten Echtlauf kalibriert 'token_faktor' gegen die gemessene
+# Usage in manifest.json.
+TOKEN_JE_WORT = 2.4
+
+
+def tarif(modell):
+    return TARIFE.get(modell)
+
+
+def token_faktor(manifest=None):
+    """Konservativer Schaetzwert, sofern keine Messung vorliegt.
+
+    Sobald 'kosten' in manifest.json echte Token neben echten Woertern
+    stehen hat, gilt das gemessene Verhaeltnis."""
+    try:
+        k = (manifest or {}).get("kosten", {})
+        woerter = k.get("_woerter_quelle", 0)
+        ein = sum(r.get("ein", 0) for r in k.values() if isinstance(r, dict))
+        if woerter > 500 and ein > 0:
+            return round(ein / woerter, 2)
+    except Exception:
+        pass
+    return TOKEN_JE_WORT
+
+
+def usage_buchen(rolle, modell, usage):
+    """Summiert Token je Rolle in manifest.json (F: Kosten sind Ergebnis).
+
+    Schlaegt das fehl, kostet das nur die Statistik — nie den Lauf."""
+    try:
+        m = {}
+        if os.path.exists(MANIFEST):
+            m = json.load(open(MANIFEST, encoding="utf-8"))
+        k = m.setdefault("kosten", {})
+        e = k.setdefault(rolle, {"modell": modell, "aufrufe": 0, "ein": 0,
+                                 "aus": 0, "cache_lesen": 0,
+                                 "cache_schreiben": 0})
+        e["modell"] = modell
+        e["aufrufe"] += 1
+        for feld in ("ein", "aus", "cache_lesen", "cache_schreiben"):
+            e[feld] += int(usage.get(feld, 0) or 0)
+        tmp = MANIFEST + ".tmp"
+        json.dump(m, open(tmp, "w", encoding="utf-8"),
+                  ensure_ascii=False, indent=2)
+        os.replace(tmp, MANIFEST)
+    except Exception:
+        pass
+
+
+def kosten_je_rolle(manifest):
+    """(Zeilen, Summe, unsicher) fuer die Kostenuebersicht."""
+    zeilen, summe, unsicher = [], 0.0, False
+    for rolle, e in sorted((manifest or {}).get("kosten", {}).items()):
+        if not isinstance(e, dict) or rolle.startswith("_"):
+            continue
+        t = tarif(e.get("modell", ""))
+        if t:
+            # Cache-Lesen kostet ein Zehntel, Cache-Schreiben das 1,25-fache.
+            d = (e["ein"] * t["ein"]
+                 + e["cache_lesen"] * t["ein"] * 0.1
+                 + e["cache_schreiben"] * t["ein"] * 1.25
+                 + e["aus"] * t["aus"]) / 1e6
+            summe += d
+            unsicher = unsicher or not t["geprueft"]
+        else:
+            d = None
+            unsicher = True
+        zeilen.append((rolle, e, d, t))
+    return zeilen, summe, unsicher
+
+
+# ==================================================================
 # Backend-Adapter (V11a) — schlank, ohne Fremdabhaengigkeit
 # ==================================================================
 class Backend:
     """Basisklasse. Ein weiterer Anbieter heisst: eine Unterklasse."""
 
-    def chat(self, cfg, system, user, temperature, num_ctx=None):
+    def chat(self, cfg, system, user, temperature, num_ctx=None,
+             rolle="uebersetzung", modell=""):
         raise NotImplementedError
 
     def verfuegbare_modelle(self, cfg):
         return []
 
 
+class ApiFehler(RuntimeError):
+    """Fehler eines API-Backends, den der Aufrufer als Versuch zaehlen darf."""
+
+
+def _warte(antwort, versuch):
+    """Wartezeit vor dem naechsten Versuch. 'retry-after' hat Vorrang."""
+    if antwort is not None:
+        kopf = antwort.headers.get("retry-after") if antwort.headers else None
+        if kopf:
+            try:
+                return min(60.0, max(1.0, float(kopf)))
+            except ValueError:
+                pass
+    return min(32.0, 2.0 ** versuch) + random.uniform(0, 0.5)
+
+
+def sende(post, max_retries, schlafen=time.sleep):
+    """Fuehrt 'post' aus und wiederholt bei 429 und 5xx mit Backoff.
+
+    4xx ausser 429 sind Anwendungsfehler und werden sofort gemeldet —
+    ein falsches Payload wird durch Wiederholen nicht richtig."""
+    letzter = None
+    for versuch in range(1, max(1, max_retries) + 1):
+        try:
+            r = post()
+        except requests.RequestException as e:
+            letzter = ApiFehler(f"Netzwerkfehler: {e}")
+            if versuch >= max_retries:
+                break
+            schlafen(_warte(None, versuch))
+            continue
+        if r.status_code == 200:
+            return r
+        text = (r.text or "")[:300]
+        if r.status_code == 429 or r.status_code >= 500:
+            letzter = ApiFehler(f"HTTP {r.status_code}: {text}")
+            if versuch >= max_retries:
+                break
+            schlafen(_warte(r, versuch))
+            continue
+        if r.status_code in (401, 403):
+            raise ApiFehler(
+                f"HTTP {r.status_code} — Schluessel fehlt, ist abgelaufen "
+                f"oder hat keine Berechtigung fuer dieses Modell.\n{text}")
+        raise ApiFehler(f"HTTP {r.status_code}: {text}")
+    raise letzter or ApiFehler("Anfrage fehlgeschlagen")
+
+
 class OllamaBackend(Backend):
     _think = True
 
-    def chat(self, cfg, system, user, temperature, num_ctx=None):
+    def chat(self, cfg, system, user, temperature, num_ctx=None,
+             rolle="uebersetzung", modell=""):
         host = cfg["ollama_host"]
         timeout = (cfg["timeout_connect"], cfg["timeout_read"])
 
         def post(mit_think):
             p = {
-                "model": cfg["modell"],
+                "model": modell or cfg["modell"],
                 "messages": [{"role": "system", "content": system},
                              {"role": "user", "content": user}],
                 "stream": False, "keep_alive": "60m",
@@ -319,23 +569,175 @@ class OllamaBackend(Backend):
         return [m["name"] for m in r.json().get("models", [])]
 
 
-BACKENDS = {"ollama": OllamaBackend()}
+class AnthropicBackend(Backend):
+    """Messages-API. Zwei Eigenheiten sind Absicht, nicht Versehen:
+
+    - Der System-Prompt traegt einen Cache-Marker. Er ist ueber alle Chunks
+      byteweise identisch; wer Bausteine umsortiert, zerstoert die
+      Trefferquote unbemerkt.
+    - Es gehen KEINE Sampling-Parameter raus. claude-opus-5 hat
+      temperature/top_p/top_k entfernt und antwortet darauf mit HTTP 400.
+      Die Tiefe steuert 'effort'. Begruendung in ENTSCHEIDUNGEN.md.
+    """
+
+    URL     = "https://api.anthropic.com/v1/messages"
+    VERSION = "2023-06-01"
+
+    def payload(self, cfg, system, user, rolle, modell):
+        return {
+            "model": modell,
+            "max_tokens": int(cfg.get("max_tokens_api", 32000)),
+            # Liste statt String: nur ein Block kann den Cache-Marker tragen.
+            "system": [{"type": "text", "text": system,
+                        "cache_control": {"type": "ephemeral"}}],
+            "messages": [{"role": "user", "content": user}],
+            "output_config": {"effort": effort_fuer(cfg, rolle)},
+        }
+
+    def antwort_lesen(self, d):
+        """(Text, Usage). Wirft bei Ablehnung, statt Leeres zurueckzugeben."""
+        if d.get("stop_reason") == "refusal":
+            grund = (d.get("stop_details") or {}).get("category") or "ohne Angabe"
+            raise ApiFehler(
+                f"Das Modell hat die Anfrage abgelehnt (Kategorie: {grund}). "
+                f"Der Chunk bleibt unuebersetzt.")
+        text = "".join(b.get("text", "") for b in d.get("content", [])
+                       if b.get("type") == "text")
+        u = d.get("usage") or {}
+        usage = {"ein": u.get("input_tokens", 0),
+                 "aus": u.get("output_tokens", 0),
+                 "cache_lesen": u.get("cache_read_input_tokens", 0),
+                 "cache_schreiben": u.get("cache_creation_input_tokens", 0)}
+        if d.get("stop_reason") == "max_tokens":
+            print("    WARNUNG: Ausgabe am max_tokens-Limit abgeschnitten.")
+        return saeubern(text), usage
+
+    def chat(self, cfg, system, user, temperature, num_ctx=None,
+             rolle="uebersetzung", modell=""):
+        schluessel = api_schluessel("anthropic")
+        if not schluessel:
+            sys.exit("FEHLER: ANTHROPIC_API_KEY fehlt.\n"
+                     "  Colab:  im Secrets-Reiter hinterlegen\n"
+                     "  sonst:  export ANTHROPIC_API_KEY=...")
+        p = self.payload(cfg, system, user, rolle, modell)
+        kopfzeilen = {"x-api-key": schluessel,
+                      "anthropic-version": self.VERSION,
+                      "content-type": "application/json"}
+        timeout = (cfg["timeout_connect"], cfg.get("timeout_read_api", 600))
+        r = sende(lambda: requests.post(self.URL, json=p, headers=kopfzeilen,
+                                        timeout=timeout),
+                  cfg["max_retries"])
+        text, usage = self.antwort_lesen(r.json())
+        usage_buchen(rolle, modell, usage)
+        return text
 
 
-def backend(cfg):
-    b = BACKENDS.get(cfg.get("backend", "ollama"))
+class GeminiBackend(Backend):
+    """generateContent.
+
+    Sendet KEINE Sampling-Parameter: die API ignoriert temperature/top_p/
+    top_k bei 3.6 Flash, kuenftige Generationen antworten mit HTTP 400.
+    Der Selbsttest prueft, dass das Payload sauber bleibt.
+    """
+
+    BASIS = "https://generativelanguage.googleapis.com/v1beta/models"
+
+    def payload(self, cfg, system, user, rolle, modell):
+        return {
+            "system_instruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": user}]}],
+        }
+
+    def antwort_lesen(self, d):
+        kandidaten = d.get("candidates") or []
+        if not kandidaten:
+            grund = (d.get("promptFeedback") or {}).get("blockReason")
+            raise ApiFehler(f"Keine Antwort erhalten (blockReason: "
+                            f"{grund or 'ohne Angabe'}).")
+        k = kandidaten[0]
+        ende = k.get("finishReason")
+        if ende in ("SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "RECITATION"):
+            raise ApiFehler(f"Antwort abgebrochen (finishReason: {ende}).")
+        text = "".join(t.get("text", "") for t
+                       in (k.get("content") or {}).get("parts", []))
+        if ende == "MAX_TOKENS":
+            print("    WARNUNG: Ausgabe am Token-Limit abgeschnitten.")
+        u = d.get("usageMetadata") or {}
+        usage = {"ein": u.get("promptTokenCount", 0),
+                 "aus": u.get("candidatesTokenCount", 0),
+                 "cache_lesen": u.get("cachedContentTokenCount", 0),
+                 "cache_schreiben": 0}
+        return saeubern(text), usage
+
+    def chat(self, cfg, system, user, temperature, num_ctx=None,
+             rolle="annotation", modell=""):
+        schluessel = api_schluessel("google")
+        if not schluessel:
+            sys.exit("FEHLER: GEMINI_API_KEY fehlt.\n"
+                     "  Colab:  Secret 'GoogleKI' hinterlegen\n"
+                     "  sonst:  export GEMINI_API_KEY=...")
+        p = self.payload(cfg, system, user, rolle, modell)
+        url = f"{self.BASIS}/{modell}:generateContent"
+        kopfzeilen = {"x-goog-api-key": schluessel,
+                      "content-type": "application/json"}
+        timeout = (cfg["timeout_connect"], cfg.get("timeout_read_api", 600))
+        r = sende(lambda: requests.post(url, json=p, headers=kopfzeilen,
+                                        timeout=timeout),
+                  cfg["max_retries"])
+        text, usage = self.antwort_lesen(r.json())
+        usage_buchen(rolle, modell, usage)
+        return text
+
+
+BACKENDS = {"ollama": OllamaBackend(), "anthropic": AnthropicBackend(),
+            "google": GeminiBackend()}
+
+
+def backend(cfg, modell=None):
+    """Backend zum Modellnamen. Ohne Modell gilt der alte Konfigurationsweg."""
+    name = backend_name(modell) if modell else cfg.get("backend", "ollama")
+    b = BACKENDS.get(name)
     if b is None:
-        sys.exit(f"FEHLER: unbekanntes Backend '{cfg.get('backend')}'. "
+        sys.exit(f"FEHLER: unbekanntes Backend '{name}'. "
                  f"Verfuegbar: {', '.join(BACKENDS)}")
     return b
 
 
-def chat(cfg, system, user, temperature, num_ctx=None):
-    return backend(cfg).chat(cfg, system, user, temperature, num_ctx)
+def chat(cfg, system, user, temperature, num_ctx=None, rolle="uebersetzung"):
+    """Der einzige Modellaufruf des Projekts.
+
+    Die Rolle loest Modell, Backend und Effort auf. Fehlt 'modell_<rolle>',
+    greift der Ollama-Rueckfallpfad — unveraendertes Altverhalten."""
+    modell = modell_fuer(cfg, rolle)
+    return backend(cfg, modell).chat(cfg, system, user, temperature,
+                                     num_ctx=num_ctx, rolle=rolle,
+                                     modell=modell)
 
 
 def modelle_vorhanden(cfg):
     return backend(cfg).verfuegbare_modelle(cfg)
+
+
+def aktive_rollen(cfg):
+    """Rollen, die dieser Lauf tatsaechlich aufruft.
+
+    'annotation' und 'vergleich' gehoeren zu spaeteren Paketen und rufen
+    noch kein Modell — sie stehen deshalb nicht drin."""
+    rollen = ["uebersetzung"]
+    if cfg.get("revision_pass"):
+        rollen.append("revision")
+    for stufe in cfg.get("lektorat_passes", []):
+        if stufe in ("stil", "korrektorat") and stufe not in rollen:
+            rollen.append(stufe)
+    if cfg.get("glossar_quelle") == "lokal":
+        rollen.append("vorbereitung")
+    if cfg.get("export_bewertung"):
+        rollen.append("judge")
+    return rollen
+
+
+def benutzte_backends(cfg):
+    return {backend_name(modell_fuer(cfg, r)) for r in aktive_rollen(cfg)}
 
 
 PREAMBEL = re.compile(

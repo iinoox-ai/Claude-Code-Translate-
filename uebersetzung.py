@@ -556,7 +556,8 @@ def main():
                 user += "=== ZU ÜBERSETZENDER TEXT ===\n" + quelle
 
                 entwurf = G.chat(cfg, p_ueb, user,
-                                 cfg["temperature_uebersetzung"])
+                                 cfg["temperature_uebersetzung"],
+                                 rolle="uebersetzung")
                 if not entwurf:
                     raise RuntimeError("leere Antwort in Pass 1")
 
@@ -577,7 +578,9 @@ def main():
                             + "=== NIEDERLÄNDISCHER AUSGANGSTEXT ===\n"
                             + quelle + "\n\n"
                             + "=== DEUTSCHER ENTWURF ===\n" + entwurf)
-                    rev = G.chat(cfg, p_rev, body, cfg["temperature_revision"])
+                    rev = G.chat(cfg, p_rev, body,
+                                 cfg["temperature_revision"],
+                                 rolle="revision")
                     r2 = G.verhaeltnis(quelle, rev)
                     if rev and cfg["ratio_min"] <= r2 <= cfg["ratio_max"]:
                         endfassung = rev
