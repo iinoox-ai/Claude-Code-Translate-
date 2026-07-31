@@ -633,7 +633,19 @@ def main():
                 print("  " + z)
         open(praefix + datei, "w", encoding="utf-8").write(ganz + "\n")
 
-    if args.test and messwerte and len(messwerte) >= 3 and args.variante == "A":
+    # Die Kalibrierung liest ALLE vorliegenden Chunks, nicht nur die in
+    # diesem Aufruf gerechneten. Sonst entscheidet der Zufall mit: Wird der
+    # Testlauf unterbrochen und setzt fort, blieben sonst zu wenige
+    # Messwerte uebrig und die Grenzen blieben still uneingemessen — genau
+    # das ist bei der Abbruchprobe am 31.07.2026 passiert.
+    if args.test and args.variante == "A":
+        messwerte = []
+        for i in range(n):
+            fertig = G.teil_lesen("uebersetzung", i, praefix)
+            if fertig and not chunks[i][1]:      # geschuetzte Absaetze nicht
+                messwerte.append(G.verhaeltnis(chunks[i][0], fertig))
+
+    if args.test and len(messwerte) >= 3 and args.variante == "A":
         messwerte.sort()
         med = messwerte[len(messwerte)//2]
         spanne = max(0.10, (messwerte[-1] - messwerte[0]) * 0.8)
@@ -642,7 +654,11 @@ def main():
         cfg["ratio_kalibriert"] = True
         G.speichere_config(cfg)
         print(f"\nPrüfgrenzen kalibriert: Median {med:.2f}, Bereich "
-              f"{cfg['ratio_min']:.2f}–{cfg['ratio_max']:.2f}")
+              f"{cfg['ratio_min']:.2f}–{cfg['ratio_max']:.2f} "
+              f"({len(messwerte)} Chunks)")
+    elif args.test and args.variante == "A":
+        print(f"\nPrüfgrenzen NICHT kalibriert: nur {len(messwerte)} "
+              f"verwertbare Chunks, mindestens 3 nötig.")
 
     print(f"\nFertig nach {(time.time()-start)/60:.0f} min.")
     print(f"  Endfassung: {praefix + G.F['uebersetzung']}")
