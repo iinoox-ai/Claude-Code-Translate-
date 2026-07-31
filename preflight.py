@@ -65,14 +65,19 @@ def selbsttest(cfg, b):
         b.add("FEHLER", "Normalisierer wirft Ausnahme", repr(e))
 
     try:
+        # Die zweite Zeile stammt aus dem Testauszug 1919: dort waren vier
+        # der neun gemeldeten Treffer Falschmeldungen auf -chen.
         n, treffer = G.diminutive_zaehlen(
             "Sie wollte sprechen, aber zwischen ihnen lag ein Zeichen. "
-            "Ein Häuschen, ein Mädchen, ein Fräulein.")
+            "Ein Häuschen, ein Mädchen, ein Fräulein. "
+            "Die Menschen der Deutschen hörten das Rauschen und das "
+            "Krachen, drüben bei den Griechen in München.")
         if n != 3:
             b.add("FEHLER", f"Diminutivzaehler liefert {n} statt 3",
                   f"Treffer: {treffer}")
         else:
-            b.add("OK", "Diminutivzaehler korrekt (3 von 3)")
+            b.add("OK", "Diminutivzaehler korrekt (3 von 3, sieben "
+                        "Falschmeldungen auf -chen abgewiesen)")
     except Exception as e:
         b.add("FEHLER", "Diminutivzaehler wirft Ausnahme", repr(e))
 
@@ -270,6 +275,35 @@ def selbsttest_backends(b):
                         "beider Anbieter korrekt")
     except Exception as e:
         b.add("FEHLER", "Antwortauswertung wirft Ausnahme", repr(e))
+
+    # --- Anzeige darf nicht den Rueckfallschluessel nennen ---------------
+    # uebersetzung.py meldete im Kopf 'cfg["modell"]' — den Ollama-Namen —
+    # obwohl ueber die Rolle laengst Opus 5 lief. Der Lauf war richtig, die
+    # Anzeige log. Payloadtests finden so etwas nicht, ein Blick in die
+    # Quelle schon.
+    try:
+        hier = os.path.dirname(os.path.abspath(__file__))
+        schuldig = []
+        for datei in ("uebersetzung.py", "lektorat.py", "konkordanz.py",
+                      "bewertung.py", "qa.py"):
+            pfad = os.path.join(hier, datei)
+            if not os.path.exists(pfad):
+                continue
+            for nr, zeile in enumerate(open(pfad, encoding="utf-8"), 1):
+                if "print(" not in zeile:
+                    continue
+                if "cfg['modell']" in zeile or 'cfg["modell"]' in zeile:
+                    schuldig.append(f"{datei}:{nr}")
+        if schuldig:
+            b.add("FEHLER", "Anzeige nennt den Ollama-Rueckfallschluessel",
+                  f"{', '.join(schuldig)}\n"
+                  f"           Im API-Betrieb stimmt cfg['modell'] nie. "
+                  f"G.modell_fuer(cfg, rolle) benutzen.")
+        else:
+            b.add("OK", "Kein Skript zeigt cfg['modell'] statt des "
+                        "Rollenmodells an")
+    except Exception as e:
+        b.add("WARN", "Anzeigepruefung nicht durchfuehrbar", repr(e))
 
     # --- Retry und Backoff ----------------------------------------------
     try:

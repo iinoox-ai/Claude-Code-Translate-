@@ -25,6 +25,7 @@ import difflib
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 
@@ -356,7 +357,12 @@ def main():
                             "Korrektorat")}
 
     text = open(quelle, encoding="utf-8").read()
-    print(f"Quelle: {quelle}\nFolge:  {' -> '.join(folge)}\n")
+    print(f"Quelle: {quelle}\nFolge:  {' -> '.join(folge)}")
+    for stufe in [s for s in folge if s in PASS]:
+        m = G.modell_fuer(cfg, stufe)
+        print(f"  {PASS[stufe][2]:<14} {m} ({G.backend_name(m)}, "
+              f"Effort {G.effort_fuer(cfg, stufe)})")
+    print()
 
     while folge and folge[0] == "det":
         folge.pop(0)
@@ -509,6 +515,36 @@ def main():
     print(f"\nFertig nach {(time.time()-start)/60:.0f} min.")
     print(f"  Ergebnis:   {ziel_datei}")
     print(f"  Änderungen: {praefix + DIFF}")
+    bericht = bericht_bauen(praefix)
+    if bericht:
+        print(f"  Bericht:    {bericht}")
+
+
+def bericht_bauen(praefix):
+    """Erzeugt den HTML-Bericht gleich mit.
+
+    Der Schritt, der den Diff schreibt, schreibt auch den Bericht — sonst
+    steht am Ende ein Befehl da, den jemand von Hand abtippen soll. Der
+    Aufruf geht ueber diffview.py im Code-Verzeichnis, damit dessen Logik
+    die einzige bleibt."""
+    diff = praefix + DIFF
+    if not os.path.exists(diff):
+        return None
+    ziel = praefix + "bericht.html"
+    code = os.path.dirname(os.path.abspath(__file__))
+    try:
+        r = subprocess.run(
+            [sys.executable, os.path.join(code, "diffview.py"), diff,
+             "--html", ziel],
+            capture_output=True, text=True, timeout=300)
+        if r.returncode != 0:
+            print(f"  WARNUNG: Bericht nicht erzeugt — "
+                  f"{(r.stderr or '').strip()[:200]}")
+            return None
+    except Exception as e:
+        print(f"  WARNUNG: Bericht nicht erzeugt — {e}")
+        return None
+    return ziel
 
 
 if __name__ == "__main__":

@@ -56,9 +56,12 @@ def main():
     print("Nach geprueftem Download aufraeumen mit:")
     print("  python3 pipeline.py neu")
     cfg = G.lade_config(pflicht=False)
-    print("\nModell entladen:")
-    print(f"  curl -s {cfg['ollama_host']}/api/generate "
-          f"-d '{{\"model\":\"{cfg['modell']}\",\"keep_alive\":0}}'")
+    # Ein Modell zu entladen gibt es nur auf dem Ollama-Rueckfallpfad —
+    # bei API-Backends laeuft nichts, das Speicher belegt.
+    if "ollama" in G.benutzte_backends(cfg):
+        print("\nModell entladen:")
+        print(f"  curl -s {cfg['ollama_host']}/api/generate "
+              f"-d '{{\"model\":\"{cfg['modell']}\",\"keep_alive\":0}}'")
 
 
 if __name__ == "__main__":

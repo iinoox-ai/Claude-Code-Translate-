@@ -87,13 +87,44 @@ Laufzeit gelöscht, neue VM, Zelle 1 erneut. Was dabei belegt ist:
 | Schreibsemantik | `fsync` + `os.replace` + Zurücklesen auf dem Drive-Mount fehlerfrei |
 | Resume auf Schrittebene | `selbsttest`, `preflight` und `konkordanz` wurden **nicht** wiederholt; der Lauf setzte am nächsten offenen Schritt an |
 
-**Was noch aussteht:** Der Lauf stand bei `PAUSE_glossar`, also **vor** dem
-ersten Übersetzungsschritt. Damit ist der Resume auf *Schrittebene* belegt,
-der auf *Chunkebene* — das Zählen der Dateien in `teile/` — aber noch nicht.
-Genau das ist die tragende Zusage des Entwurfs.
+**Damals noch offen:** Der Lauf stand bei `PAUSE_glossar`, also vor dem
+ersten Übersetzungsschritt. Belegt war damit nur der Resume auf
+Schrittebene.
 
-Die Probe ist deshalb zu wiederholen, sobald `test` oder `voll` läuft:
-mindestens drei Chunks abwarten, Stand notieren, Laufzeit löschen, Zelle 1
-erneut — und prüfen, dass der Zähler bei `n+1` weitermacht statt bei 1.
+### 31.07.2026 — Abbruchprobe vollständig nachvollzogen (Ian, Colab)
 
-**Die Abnahme von Paket 2 bleibt bis dahin offen.**
+Abbruch während `test` nach 3 von 5 Chunks, Laufzeit gelöscht, neue VM,
+nur Zelle 1 erneut. Die Ausgabe des Testschritts nach dem Neustart:
+
+```
+3 Chunks liegen vor, Fortsetzung ab 4.
+
+[4/5] 726 Wörter
+    Pass 1     40s  (0.98x)
+    Pass 2     55s  (0.98x)
+    [1/2] fertig  (Rest ca. 2 min)
+
+[5/5] 83 Wörter
+    …
+Fertig nach 2 min.
+```
+
+Der Zähler setzt bei 4 an, die drei fertigen Chunks werden nicht neu
+gerechnet, `projekt.json` blieb unverändert. Die Restzeitschätzung zählt
+korrekt die **verbliebenen** zwei Chunks (`[1/2]`, `[2/2]`), nicht alle
+fünf.
+
+**Damit ist die Abnahme von Paket 2 erfüllt:** Drive-Mount,
+Überschreibschutz, Schreibsemantik, Resume auf Schritt- und auf
+Chunkebene.
+
+### Ein Fund am Rande
+
+Der Kopf des Testlaufs meldete `Modell: mistral-medium-3.5:128b-q8_0` —
+den Ollama-Rückfallschlüssel. Gelaufen ist der Chunk über
+`claude-opus-5`; in Colab existiert kein Ollama, ein echter Aufruf dorthin
+wäre an der Verbindung gescheitert. Es war ausschließlich die Anzeige.
+
+Behoben, und der Selbsttest prüft jetzt, dass kein Skript `cfg["modell"]`
+statt des Rollenmodells ausgibt. Payloadtests finden so etwas nicht — sie
+prüfen, was rausgeht, nicht was auf dem Schirm steht.

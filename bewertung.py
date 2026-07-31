@@ -279,8 +279,8 @@ def main():
                 open("briefing_lektorat.md", "w", encoding="utf-8").write(t)
             print("\nExportpaket: bewertung_lektorat.md")
             print("Briefing:    briefing_lektorat.md")
-        print(f"\nBericht:  python3 diffview.py {TESTDIR}/lektorat_diff.txt "
-              f"--html {TESTDIR}/bericht.html")
+        # Der HTML-Bericht entsteht schon in lektorat.py; hier nur der Pfad.
+        print(f"\nBericht:  {TESTDIR}/bericht.html")
         return
 
     # --- Testuebersetzung ---
