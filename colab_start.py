@@ -106,30 +106,24 @@ def _technik_melden(ziel, quelle):
     for k, alt, neu in ab:
         zeilen.append(f"    {k}: Projekt {alt!r}  <->  Repo {neu!r}")
     zeilen.append("  Uebernehmen (kalibrierte Werte bleiben unberuehrt):")
-    zeilen.append("    colab_start.technik_uebernehmen(PROJEKT, code=CODE)")
+    zeilen.append("    colab_start.lauf('pipeline.py', 'technik', "
+                  "'--uebernehmen', code=CODE)")
     return zeilen
 
 
 def technik_uebernehmen(projekt=PROJEKT_STANDARD, code=CODE):
     """Uebertraegt NUR die technischen Schluessel aus dem Repo.
 
-    Modellnamen, Effort und API-Grenzen wandern mit dem Code. Alles
-    andere — kalibrierte Pruefgrenzen, Chunkgroesse, Anweisungen — bleibt,
-    wie das Projekt es hat."""
-    ziel = os.path.join(projekt, G.CONFIG)
-    quelle = os.path.join(code, G.CONFIG)
-    cfg, repo = _lies(ziel), _lies(quelle)
-    ab = G.technik_abweichung(cfg, repo)
+    Gleichwertig zu 'pipeline.py technik --uebernehmen'; im Notebook ist
+    das Unterkommando der sicherere Weg, weil es als eigener Prozess
+    laeuft und damit nie einen veralteten Modulimport erwischt."""
+    ab = G.technik_schreiben(os.path.join(projekt, G.CONFIG),
+                             os.path.join(code, G.CONFIG))
     if not ab:
         print("Keine technische Abweichung — nichts zu tun.")
         return []
-    for k, alt, neu in ab:
-        cfg[k] = neu
-        print(f"  {k}: {alt!r} -> {neu!r}")
-    tmp = ziel + ".tmp"
-    json.dump(cfg, open(tmp, "w", encoding="utf-8"),
-              ensure_ascii=False, indent=2, sort_keys=True)
-    os.replace(tmp, ziel)
+    for k, alt_, neu_ in ab:
+        print(f"  {k}: {alt_!r} -> {neu_!r}")
     print(f"\n{len(ab)} Einstellung(en) uebernommen. Kalibrierte Werte "
           f"blieben unberuehrt.")
     return ab
