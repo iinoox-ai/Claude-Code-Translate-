@@ -172,6 +172,8 @@ def merge_config(alt, neu):
     cfg = dict(alt)
     uebernommen, abgelehnt = {}, {}
     for k, v in neu.items():
+        if k.startswith("_"):
+            continue                    # Hinweiszeilen, keine Einstellung
         if k in GESCHUETZT:
             if alt.get(k) != v:
                 abgelehnt[k] = (v, "geschuetzt: von der Pipeline gesetzt")
