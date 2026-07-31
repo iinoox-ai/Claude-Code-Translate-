@@ -5,15 +5,29 @@ fertige Chunk liegt sofort in Drive, der Resume zählt Dateien in `teile/`
 statt einer Zustandsdatei zu glauben. Diese Notiz hält fest, wie das
 nachgeprüft wird — und was dabei herauskam.
 
+## Voraussetzung
+
+Die Probe braucht einen Schritt, der **Chunks übersetzt** — `test` oder
+`voll`. Ein Abbruch an einer Pause oder zwischen zwei Schritten belegt nur
+den Resume auf Schrittebene, und den kann das Manifest allein leisten.
+
 ## Ablauf
 
-1. **Lauf starten.** Zelle 1 des `colab_runner.ipynb` ausführen und warten,
-   bis mindestens drei Chunks durch sind (die Fortschrittszeile zeigt
-   `[n/m] … fertig`).
-2. **Chunkstand notieren.** Zelle 2 (`status`) in einer zweiten Ausführung
-   starten; die Zahl hinter dem Schrittnamen ist der Stand, etwa `4/121`.
-3. **VM hart trennen.** Laufzeit → *Sitzung beenden* (nicht nur den Tab
-   schließen — das Trennen soll unangekündigt kommen).
+1. **Lauf starten.** Zelle 1 ausführen. Sobald der Übersetzungsschritt
+   beginnt, meldet er `Eingabe: … in N Chunks` — diese Zahl merken.
+2. **Mitlesen.** Jeder fertige Chunk erzeugt zwei Zeilen:
+
+       [3/5] 812 Wörter
+           Pass 1     34s  (1.08x)
+           [3/5] fertig  (Rest ca. 2 min)
+
+   Warten, bis **mindestens drei** Chunks fertig sind. Den Stand aus der
+   letzten `fertig`-Zeile notieren.
+
+   Nicht über Zelle 4 (`status`) gehen: Colab arbeitet Zellen nacheinander
+   ab, sie würde nur eingereiht und liefe erst nach dem Lauf.
+3. **VM hart trennen.** Laufzeit → *Sitzung beenden*. Nicht nur den Tab
+   schließen — der Abbruch soll unangekündigt kommen.
 4. **Neue VM.** Notebook erneut öffnen, Laufzeit verbinden.
 5. **Zelle 1 erneut ausführen.** Sonst nichts. Kein `reset`, kein `neu`,
    keine Handgriffe im Dateibrowser.
@@ -25,10 +39,14 @@ nachgeprüft wird — und was dabei herauskam.
 - Die Ausgabe meldet `projekt.json im Projektordner vorhanden — unverändert
   übernommen`. Wird stattdessen „aus dem Repo kopiert" gemeldet, zeigt der
   Runner auf den falschen Ordner — **abbrechen und Pfad prüfen.**
-- Der Lauf setzt am ersten offenen Chunk fort. Die in Schritt 2 notierten
-  Chunks werden **nicht** neu gerechnet; der Zähler beginnt bei `n+1`.
-- Kein Datenverlust in `teile/`, keine doppelten Kosten für bereits
-  übersetzte Chunks.
+- Der Übersetzungsschritt meldet wörtlich:
+
+      3 Chunks liegen vor, Fortsetzung ab 4.
+
+  **Das ist der Kernsatz der Probe.** Er kommt aus `teile_vorhanden()`,
+  das Dateien zählt statt einer Zustandsdatei zu glauben.
+- Der Zähler beginnt bei `n+1`, die bereits übersetzten Chunks werden
+  nicht neu gerechnet — kein Datenverlust, keine doppelten Kosten.
 
 ## Was ein Fehlschlag bedeuten würde
 
@@ -41,7 +59,22 @@ nachgeprüft wird — und was dabei herauskam.
 
 ## Ergebnis
 
-### 31.07.2026 — teilweise nachvollzogen (Ian, Colab)
+### 31.07.2026 — Verifikation bestanden (Ian, Colab)
+
+`verifikation.py` im Projektordner, alle vier konfigurierten Modelle:
+
+| | |
+|---|---|
+| `claude-opus-5` | antwortet; Mini-Echtlauf sauber, 149 ein / 101 aus |
+| `gemini-3.1-pro-preview` | antwortet; Mini-Echtlauf sauber, 83 ein / 47 aus |
+| `claude-fable-5` (Paket 5) | antwortet |
+| `gemini-3.6-flash` (Paket 7) | antwortet |
+| Sampling | Opus 5 lehnt `temperature` mit HTTP 400 ab; Gemini akzeptiert und ignoriert (HTTP 200) |
+| Google-Tarife | beide auf der Preisseite belegt |
+
+Ergebnis: 0 Fehler, 1 Warnung (die Gemini-Beobachtung), **BESTANDEN**.
+
+### 31.07.2026 — Abbruchprobe teilweise nachvollzogen (Ian, Colab)
 
 Laufzeit gelöscht, neue VM, Zelle 1 erneut. Was dabei belegt ist:
 
