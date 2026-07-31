@@ -19,6 +19,7 @@ Alles, was der Lauf schreibt, entsteht relativ zum Arbeitsverzeichnis und
 liegt damit sofort dauerhaft in Drive.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -80,6 +81,60 @@ def secrets_laden():
     return stand
 
 
+def _lies(pfad):
+    try:
+        return json.load(open(pfad, encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _technik_melden(ziel, quelle):
+    """Meldet, wo die projekt.json technisch hinter dem Repo zurueckliegt.
+
+    Der Ueberschreibschutz ist richtig — er hat aber einen blinden Fleck:
+    Ein im Repo korrigierter Modellname erreicht ein laufendes Projekt
+    nie, und der Runner meldete bisher nur 'unveraendert uebernommen'.
+    Erkannt wird die Abweichung jetzt; uebernommen wird sie nur auf
+    ausdrueckliche Ansage."""
+    if not os.path.exists(quelle):
+        return []
+    ab = G.technik_abweichung(_lies(ziel), _lies(quelle))
+    if not ab:
+        return []
+    zeilen = [f"ACHTUNG: {len(ab)} technische Einstellung(en) weichen vom "
+              f"Repo ab:"]
+    for k, alt, neu in ab:
+        zeilen.append(f"    {k}: Projekt {alt!r}  <->  Repo {neu!r}")
+    zeilen.append("  Uebernehmen (kalibrierte Werte bleiben unberuehrt):")
+    zeilen.append("    colab_start.technik_uebernehmen(PROJEKT, code=CODE)")
+    return zeilen
+
+
+def technik_uebernehmen(projekt=PROJEKT_STANDARD, code=CODE):
+    """Uebertraegt NUR die technischen Schluessel aus dem Repo.
+
+    Modellnamen, Effort und API-Grenzen wandern mit dem Code. Alles
+    andere — kalibrierte Pruefgrenzen, Chunkgroesse, Anweisungen — bleibt,
+    wie das Projekt es hat."""
+    ziel = os.path.join(projekt, G.CONFIG)
+    quelle = os.path.join(code, G.CONFIG)
+    cfg, repo = _lies(ziel), _lies(quelle)
+    ab = G.technik_abweichung(cfg, repo)
+    if not ab:
+        print("Keine technische Abweichung — nichts zu tun.")
+        return []
+    for k, alt, neu in ab:
+        cfg[k] = neu
+        print(f"  {k}: {alt!r} -> {neu!r}")
+    tmp = ziel + ".tmp"
+    json.dump(cfg, open(tmp, "w", encoding="utf-8"),
+              ensure_ascii=False, indent=2, sort_keys=True)
+    os.replace(tmp, ziel)
+    print(f"\n{len(ab)} Einstellung(en) uebernommen. Kalibrierte Werte "
+          f"blieben unberuehrt.")
+    return ab
+
+
 def projektordner_richten(projekt, code=CODE):
     """Ordner anlegen, falls er fehlt; projekt.json beim Erstlauf kopieren.
 
@@ -95,6 +150,7 @@ def projektordner_richten(projekt, code=CODE):
     if os.path.exists(ziel):
         meldungen.append(f"{G.CONFIG} im Projektordner vorhanden — "
                          f"unveraendert uebernommen")
+        meldungen += _technik_melden(ziel, quelle)
     elif os.path.exists(quelle):
         shutil.copy2(quelle, ziel)
         meldungen.append(f"{G.CONFIG} aus dem Repo kopiert (Erstlauf). "
