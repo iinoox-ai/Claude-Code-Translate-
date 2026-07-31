@@ -379,6 +379,38 @@ def technik_abweichung(projekt_cfg, repo_cfg):
     return raus
 
 
+def _json_lesen(pfad):
+    try:
+        return json.load(open(pfad, encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def technik_vergleich(projekt_pfad, repo_pfad):
+    return technik_abweichung(_json_lesen(projekt_pfad),
+                              _json_lesen(repo_pfad))
+
+
+def technik_schreiben(projekt_pfad, repo_pfad):
+    """Uebertraegt NUR die technischen Schluessel. Gibt die Aenderungen zurueck.
+
+    Kalibrierte Pruefgrenzen, Chunkgroesse und alles andere Projekteigene
+    bleiben unberuehrt — deshalb wird hier gezielt gesetzt statt kopiert."""
+    cfg = _json_lesen(projekt_pfad)
+    ab = technik_abweichung(cfg, _json_lesen(repo_pfad))
+    if not ab:
+        return []
+    for k, _alt, neu in ab:
+        cfg[k] = neu
+    tmp = projekt_pfad + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2, sort_keys=True)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, projekt_pfad)
+    return ab
+
+
 def modell_fuer(cfg, rolle):
     """Modellname der Rolle. Leer oder unbekannt -> 'modell' (Rueckfallpfad)."""
     return (cfg.get(f"modell_{rolle}") or "").strip() or cfg.get(

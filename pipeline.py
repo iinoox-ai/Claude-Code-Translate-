@@ -15,6 +15,7 @@ setzt an der richtigen Stelle fort und loescht nur auf ausdruecklichen Befehl.
     python3 pipeline.py reset --ab NAME einen Schritt und alles danach oeffnen
     python3 pipeline.py neu             ALLES verwerfen (mit Rueckfrage)
     python3 pipeline.py schritte        Liste der Schritte
+    python3 pipeline.py technik         technische Einstellungen abgleichen
 
 Das einzige Kommando, das Ergebnisse loescht, ist 'neu'. 'reset' oeffnet nur
 Schritte wieder; die Dateien bleiben, bis der Schritt sie neu schreibt.
@@ -182,7 +183,7 @@ def cmd_status(cfg):
         if name in ("voll", "test", "testB", "lektorat", "test_lektorat"):
             zusatz = chunkstand(name)
         print(f" {sym} {name:16s} {beschreibung[:44]:46s}{pause}{zusatz}")
-    print(f"\nGeschaetzte Restzeit der GPU-Schritte: ca. {rest} min")
+    print(f"\nGeschaetzte Restzeit der Modellschritte: ca. {rest} min")
 
     naechster = naechster_schritt(cfg, m)
     if naechster is None:
@@ -348,6 +349,41 @@ def cmd_run(cfg, args):
     finally:
         if not G.ist_colab() and os.path.exists(PID):
             os.remove(PID)
+
+
+def cmd_technik(args):
+    """Gleicht die technischen Schluessel gegen das Repo ab.
+
+    Laeuft bewusst als eigener Prozess: in einem Notebook haelt der Kernel
+    einmal importierte Module fest, ein frisch geholtes Repo aendert daran
+    nichts. Ein Unterprozess sieht immer den Code auf der Platte."""
+    projekt = os.path.abspath(G.CONFIG)
+    repo = os.path.join(CODE, G.CONFIG)
+    G.kopf("TECHNIK-ABGLEICH")
+    print(f"Projekt: {projekt}")
+    print(f"Repo:    {repo}\n")
+    if os.path.abspath(projekt) == os.path.abspath(repo):
+        print("Arbeits- und Code-Verzeichnis sind dasselbe — nichts zu tun.")
+        return
+    if not os.path.exists(repo):
+        sys.exit(f"FEHLER: {repo} fehlt.")
+
+    ab = G.technik_vergleich(projekt, repo)
+    if not ab:
+        print("Keine Abweichung. Die technischen Einstellungen sind aktuell.")
+        return
+    for k, alt, neu in ab:
+        print(f"  {k}")
+        print(f"      Projekt: {alt!r}")
+        print(f"      Repo:    {neu!r}")
+    if not args.uebernehmen:
+        print(f"\n{len(ab)} Abweichung(en). Uebernehmen mit:")
+        print("  python3 pipeline.py technik --uebernehmen")
+        print("\nKalibrierte Pruefgrenzen und projekteigene Werte bleiben "
+              "dabei unberuehrt.")
+        return
+    G.technik_schreiben(projekt, repo)
+    print(f"\n{len(ab)} Einstellung(en) uebernommen.")
 
 
 def cmd_stop():
@@ -564,6 +600,9 @@ def main():
     p.add_argument("--nur-teile", action="store_true",
                    help="nur Chunk-Dateien und Zustaende")
     sub.add_parser("schritte")
+    p = sub.add_parser("technik")
+    p.add_argument("--uebernehmen", action="store_true",
+                   help="Abweichungen aus dem Repo uebertragen")
 
     args = ap.parse_args()
     if not args.kommando:
@@ -581,6 +620,8 @@ def main():
         cmd_stop(); return
     if args.kommando == "config":
         cmd_config(args); return
+    if args.kommando == "technik":
+        cmd_technik(args); return
 
     cfg = G.lade_config()
     {"run": lambda: cmd_run(cfg, args),
