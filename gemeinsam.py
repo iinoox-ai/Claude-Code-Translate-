@@ -387,12 +387,25 @@ def effort_fuer(cfg, rolle):
 # Entwicklungsumgebung ist ai.google.dev durch die Netzwerkpolicy
 # gesperrt). Beim Wechsel auf ein Modell ohne Tarif wird geschaetzt, nicht
 # geraten — die Kostenuebersicht weist das aus.
+#
+# Achtung Namen: die Preisseite fuehrt das Judge-Modell als
+# 'gemini-3.1-pro', die API kennt es nur als 'gemini-3.1-pro-preview'
+# (v1beta). Beide Schluessel stehen deshalb hier — der erste, weil die
+# Preisseite ihn nennt, der zweite, weil die Rolle ihn benutzt.
 TARIFE = {
-    "claude-opus-5":    {"ein":  5.00, "aus": 25.00, "geprueft": True},
-    "claude-fable-5":   {"ein": 10.00, "aus": 50.00, "geprueft": True},
-    "gemini-3.1-pro":   {"ein":  2.00, "aus": 12.00, "geprueft": True,
-                         "hinweis": "Tarif bis 200k-Prompt"},
-    "gemini-3.6-flash": {"ein":  1.50, "aus":  7.50, "geprueft": True},
+    "claude-opus-5":            {"ein":  5.00, "aus": 25.00,
+                                 "geprueft": True},
+    "claude-fable-5":           {"ein": 10.00, "aus": 50.00,
+                                 "geprueft": True},
+    "gemini-3.1-pro":           {"ein":  2.00, "aus": 12.00,
+                                 "geprueft": True,
+                                 "hinweis": "Tarif bis 200k-Prompt"},
+    "gemini-3.1-pro-preview":   {"ein":  2.00, "aus": 12.00,
+                                 "geprueft": True,
+                                 "hinweis": "Preisseite nennt das Modell "
+                                            "ohne '-preview'"},
+    "gemini-3.6-flash":         {"ein":  1.50, "aus":  7.50,
+                                 "geprueft": True},
 }
 
 # Wortzahl -> Token. Bewusst konservativ (hoch) angesetzt: der Tokenizer der

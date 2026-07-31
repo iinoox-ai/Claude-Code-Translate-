@@ -16,7 +16,7 @@
   "modell_stil": "claude-opus-5",
   "modell_korrektorat": "claude-opus-5",
   "modell_vorbereitung": "claude-opus-5",
-  "modell_judge": "gemini-3.1-pro",
+  "modell_judge": "gemini-3.1-pro-preview",
   "modell_annotation": "gemini-3.6-flash",
   "modell_vergleich": "claude-fable-5",
   "effort_uebersetzung": "hoch",
