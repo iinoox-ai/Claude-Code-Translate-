@@ -980,6 +980,14 @@ NICHT_DIMINUTIV = {
     "Kriechen", "Streichen", "Gleichen", "Reichen", "Weichen", "Speichen",
     "Leichen", "Deichen", "Teichen", "Eichen", "Bächen", "Dächern",
     "Allein", "Verzeichnen",
+    # Am Testauszug 1919 gefunden: vier der neun gemeldeten Treffer waren
+    # Falschmeldungen und blaehten die Kennzahl um rund 80 Prozent auf.
+    # Erst messen, dann anpassen — die Liste ist die richtige Stelle dafuer.
+    "Menschen", "Deutschen", "Rauschen", "Griechen", "Gesprächen",
+    "Bereichen", "Vergleichen", "Anzeichen", "Kennzeichen", "Zeichen",
+    "Rauchen", "Tauchen", "Fluchen", "Kochen", "Pochen", "Stechen",
+    "Sprechen", "Schleichen", "Erreichen", "Wichen", "Krachen",
+    "München", "Mönchen",
 }
 # Diminutive sind Substantive, also gross. Kleingeschriebene Treffer
 # (sprechen, zwischen, riechen) fallen damit von selbst heraus.

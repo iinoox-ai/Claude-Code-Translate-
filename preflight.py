@@ -65,14 +65,19 @@ def selbsttest(cfg, b):
         b.add("FEHLER", "Normalisierer wirft Ausnahme", repr(e))
 
     try:
+        # Die zweite Zeile stammt aus dem Testauszug 1919: dort waren vier
+        # der neun gemeldeten Treffer Falschmeldungen auf -chen.
         n, treffer = G.diminutive_zaehlen(
             "Sie wollte sprechen, aber zwischen ihnen lag ein Zeichen. "
-            "Ein Häuschen, ein Mädchen, ein Fräulein.")
+            "Ein Häuschen, ein Mädchen, ein Fräulein. "
+            "Die Menschen der Deutschen hörten das Rauschen und das "
+            "Krachen, drüben bei den Griechen in München.")
         if n != 3:
             b.add("FEHLER", f"Diminutivzaehler liefert {n} statt 3",
                   f"Treffer: {treffer}")
         else:
-            b.add("OK", "Diminutivzaehler korrekt (3 von 3)")
+            b.add("OK", "Diminutivzaehler korrekt (3 von 3, sieben "
+                        "Falschmeldungen auf -chen abgewiesen)")
     except Exception as e:
         b.add("FEHLER", "Diminutivzaehler wirft Ausnahme", repr(e))
 
