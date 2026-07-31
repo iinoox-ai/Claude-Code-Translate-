@@ -34,6 +34,12 @@ import gemeinsam as G
 LOG  = "pipeline.log"
 PID  = "pipeline.pid"
 
+# Code und Daten liegen im Colab-Betrieb getrennt: der Code kommt per
+# git in die VM, gearbeitet wird im Drive-Projektordner. Schrittskripte
+# muessen deshalb ueber ihr Verzeichnis aufgerufen werden, Datenpfade
+# bleiben relativ zum Arbeitsverzeichnis.
+CODE = os.path.dirname(os.path.abspath(__file__))
+
 # name, Beschreibung, Kommando (None = Pause), Dauerschaetzung in Minuten
 SCHRITTE = [
     ("selbsttest",   "Selbsttest der Normalisierer und Prompts",
@@ -142,7 +148,10 @@ def uebersprungen(cfg, name):
 
 # ==================================================================
 def laeuft():
-    if not os.path.exists(PID):
+    # In Colab gibt es keinen Hintergrundlauf und damit auch keine
+    # PID-Datei; eine liegengebliebene aus dem VPS-Betrieb wuerde hier
+    # nur einen Lauf blockieren, den es nicht gibt.
+    if G.ist_colab() or not os.path.exists(PID):
         return None
     try:
         pid = int(open(PID).read().strip())
@@ -219,6 +228,17 @@ def cmd_run(cfg, args):
         sys.exit(f"Es laeuft bereits ein Lauf (PID {laeuft()}). "
                  f"'pipeline.py status' oder 'pipeline.py stop'.")
 
+    if args.hg and G.ist_colab():
+        sys.exit(
+            "FEHLER: '--hg' ist in Colab gesperrt.\n\n"
+            "Ein abgekoppelter Prozess ueberlebt die Laufzeit nicht und\n"
+            "haelt die Sitzung auch nicht wach. In Colab gehoert der Lauf\n"
+            "in den Vordergrund der Zelle: die Chunk-Fortschrittsausgabe\n"
+            "verhindert nebenbei die Idle-Einstufung.\n\n"
+            "  python3 pipeline.py run\n\n"
+            "Ein Abbruch kostet nichts — jeder fertige Chunk liegt in\n"
+            "teile/ auf Drive, der Resume zaehlt Dateien.")
+
     if args.hg:
         # V2: sich selbst abkoppeln
         if os.path.exists(LOG) and os.path.getsize(LOG) > 5_000_000:
@@ -235,7 +255,8 @@ def cmd_run(cfg, args):
         print("  python3 pipeline.py log -f")
         return
 
-    open(PID, "w").write(str(os.getpid()))
+    if not G.ist_colab():
+        open(PID, "w").write(str(os.getpid()))
     m = manifest_lesen()
     fingerprint = G.config_hash(cfg)
     try:
@@ -276,7 +297,14 @@ def cmd_run(cfg, args):
             print("=" * 62, flush=True)
             setze(m, name, "laufend", fingerprint=fingerprint)
             t0 = time.time()
-            rc = subprocess.call([sys.executable] + cmd, cwd=os.getcwd())
+            # cmd[0] ist ein Skriptname im Code-Verzeichnis, nicht im
+            # Arbeitsverzeichnis. Das Kindprozess-sys.path[0] wird damit
+            # automatisch das Code-Verzeichnis — 'import gemeinsam' traegt.
+            # '-u' haelt die Fortschrittsausgabe der Kindprozesse
+            # ungepuffert — in Colab haengt daran die Idle-Erkennung.
+            rc = subprocess.call(
+                [sys.executable, "-u", os.path.join(CODE, cmd[0])] + cmd[1:],
+                cwd=os.getcwd())
             dauer = (time.time() - t0) / 60
 
             if rc == 0:
@@ -292,7 +320,7 @@ def cmd_run(cfg, args):
                 print("!" * 62)
                 break
     finally:
-        if os.path.exists(PID):
+        if not G.ist_colab() and os.path.exists(PID):
             os.remove(PID)
 
 
