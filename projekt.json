@@ -1,0 +1,44 @@
+{
+  "sprachpaar": "nl-de",
+  "varietaet": "bundesdeutsch",
+  "quotes": "guillemets",
+  "dash": "halbgeviert",
+  "eszett": true,
+
+  "backend": "ollama",
+  "modell": "mistral-medium-3.5:128b-q8_0",
+  "ollama_host": "http://localhost:21434",
+  "num_ctx": 16384,
+
+  "chunk_words": 800,
+  "chunk_words_variante": 1200,
+  "context_words": 250,
+  "temperature_uebersetzung": 0.35,
+  "temperature_revision": 0.25,
+  "temperature_stil": 0.25,
+  "temperature_korrektorat": 0.10,
+  "revision_pass": true,
+
+  "lektorat_passes": ["det", "stil", "korrektorat", "det"],
+
+  "glossar_quelle": "extern",
+  "export_glossar": true,
+  "export_bewertung": true,
+
+  "test_words_erzaehlung": 1500,
+  "test_words_dialog": 1500,
+
+  "ratio_min": 0.90,
+  "ratio_max": 1.20,
+  "ratio_kalibriert": false,
+  "lektorat_ratio_min": 0.92,
+  "lektorat_ratio_max": 1.10,
+
+  "diminutive": "aufloesen",
+  "tempus": "quellnah",
+  "anrede_vorgabe": "u=Sie, jij/je=du",
+
+  "timeout_connect": 10,
+  "timeout_read": 900,
+  "max_retries": 3
+}
