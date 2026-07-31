@@ -14,6 +14,7 @@ testB/
 manifest.json
 *.log
 *state.json
+pipeline.pid
 
 # Kandidatendateien der Konkordanz, wenn die Referenz schon existiert
 # (konkordanz.py schreibt dann <name>.json.neu)

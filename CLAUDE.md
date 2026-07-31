@@ -70,9 +70,18 @@ gearbeitet wird im Drive-Projektordner (`os.chdir`), jeder Chunk ist damit
 sofort dauerhaft. Ein VM-Abbruch ist ein Nicht-Ereignis — der Resume zählt
 Dateien in `teile/`.
 
+- Einstieg ist `colab_runner.ipynb`; die Logik der Zellen steht in
+  `colab_start.py`, damit sie testbar und diffbar bleibt. Zellen selbst
+  bleiben kurz.
+- **Code- und Datenverzeichnis sind getrennt.** `pipeline.py` ruft
+  Schrittskripte über `CODE` auf, nie relativ zum Arbeitsverzeichnis —
+  sonst findet der Lauf seine eigenen Skripte nicht. Datenpfade bleiben
+  relativ (Drive), Vorlagenpfade laufen über `__file__`.
 - `pipeline.py run --hg` ist in Colab gesperrt; der Lauf gehört in den
   Vordergrund der Zelle. Die Chunk-Fortschrittsausgabe verhindert nebenbei
-  die Idle-Einstufung — nicht „aufräumen".
+  die Idle-Einstufung — nicht „aufräumen". PID-Datei nur außerhalb Colab.
+- Eine vorhandene `projekt.json` im Projektordner wird nie überschrieben;
+  beim Erstlauf kopiert der Runner die aus dem Repo und sagt es.
 - Colab-Erkennung zentral in `gemeinsam.py`, nirgendwo sonst.
 - Secrets: `ANTHROPIC_API_KEY` und `GoogleKI` (intern `GEMINI_API_KEY`)
   über `google.colab.userdata`; außerhalb Colab normale
