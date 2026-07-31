@@ -274,21 +274,47 @@ def cmd_run(cfg, args):
                 print("\n" + "=" * 62)
                 print(f"PAUSE — {beschreibung}")
                 print("=" * 62)
-                if name == "PAUSE_glossar":
-                    print("1. Instanz STOPPEN (nicht zerstoeren)")
-                    print("2. analysepaket.md und briefing_glossar.md "
-                          "herunterladen")
-                    print("3. Die sechs Rueckgabedateien nach /workspace legen")
-                    print("4. Instanz starten, dann:")
+                # In Colab gibt es keine Instanz zum Stoppen und kein
+                # /workspace: der Projektordner liegt in Drive und ist
+                # waehrend der Pause direkt bearbeitbar.
+                ordner = os.getcwd()
+                if G.ist_colab():
+                    if name == "PAUSE_glossar":
+                        print(f"1. Im Drive-Ordner {ordner}:")
+                        print("   analysepaket.md und briefing_glossar.md "
+                              "herunterladen")
+                        print("2. Die sechs Rueckgabedateien in denselben "
+                              "Ordner legen")
+                        print("3. Dann in einer Zelle:")
+                    else:
+                        print(f"1. Im Drive-Ordner {ordner}:")
+                        print("   Berichte pruefen")
+                        print("2. projekt.json und anweisungen.md dort "
+                              "anpassen (die Dateien liegen in Drive,")
+                        print("   ein Download ist nicht noetig)")
+                        print("3. Dann in einer Zelle:")
+                    print(f"     !python3 $CODE/pipeline.py reset "
+                          f"--ab {name} --fertig")
+                    print("   und Zelle 1 erneut ausfuehren.")
                 else:
-                    print("1. Instanz STOPPEN")
-                    print("2. Berichte herunterladen und pruefen")
-                    print("3. Angepasste projekt.json und anweisungen.md "
-                          "hochladen, dann:")
-                    print("     python3 pipeline.py config projekt_neu.json")
-                    print("4. Danach:")
-                print(f"     python3 pipeline.py reset --ab {name} --fertig")
-                print("     python3 pipeline.py run")
+                    if name == "PAUSE_glossar":
+                        print("1. Instanz STOPPEN (nicht zerstoeren)")
+                        print("2. analysepaket.md und briefing_glossar.md "
+                              "herunterladen")
+                        print("3. Die sechs Rueckgabedateien nach "
+                              "/workspace legen")
+                        print("4. Instanz starten, dann:")
+                    else:
+                        print("1. Instanz STOPPEN")
+                        print("2. Berichte herunterladen und pruefen")
+                        print("3. Angepasste projekt.json und anweisungen.md "
+                              "hochladen, dann:")
+                        print("     python3 pipeline.py config "
+                              "projekt_neu.json")
+                        print("4. Danach:")
+                    print(f"     python3 pipeline.py reset --ab {name} "
+                          f"--fertig")
+                    print("     python3 pipeline.py run")
                 setze(m, name, "wartet")
                 break
 

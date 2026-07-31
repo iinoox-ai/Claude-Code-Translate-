@@ -116,8 +116,28 @@ def _anbieter_rollen(cfg):
     return treffer
 
 
+def kandidaten(anbieter, modell):
+    """Bei 404: was der Anbieter wirklich anbietet.
+
+    Der Preisname und der API-Name eines Modells sind nicht dasselbe.
+    Statt zu raten wird die Modellliste geholt und gefiltert."""
+    try:
+        alle = G.BACKENDS[anbieter].verfuegbare_modelle({})
+    except Exception as ex:
+        return f"Modellliste nicht abrufbar: {type(ex).__name__}: {ex}"
+    if not alle:
+        return "Modellliste leer oder nicht unterstuetzt."
+    stamm = re.split(r"[-.]", modell)[0]
+    nah = [m for m in alle if m.startswith(stamm)]
+    return ("Verfuegbar (Auswahl):\n  " + "\n  ".join(nah or alle[:25])
+            + f"\n\nPassenden Namen in projekt.json als modell_<rolle> "
+              f"eintragen.")
+
+
 def pruefe_ping(e, cfg, anbieter_rollen):
+    """Gibt die Anbieter zurueck, die erreichbar sind."""
     print("\n--- 2 · Ein-Token-Ping " + "-" * 38)
+    tragen = set()
     for anbieter, (rolle, modell) in sorted(anbieter_rollen.items()):
         probe = dict(cfg)
         probe["max_tokens_api"] = 1
@@ -126,19 +146,32 @@ def pruefe_ping(e, cfg, anbieter_rollen):
             G.BACKENDS[anbieter].chat(probe, "Antworte mit OK.", "OK", 0.0,
                                       rolle="verifikation", modell=modell)
             e.ok(f"{modell} antwortet ({time.time()-t0:.1f}s)")
+            tragen.add(anbieter)
         except SystemExit as ex:
             e.fehl(f"{anbieter}: {ex}")
         except Exception as ex:
-            e.warn(f"{modell}: keine verwertbare Antwort auf den Ping",
-                   f"{type(ex).__name__}: {ex}")
+            # Ein nicht existierendes Modell ist kein Ping-Problem, das man
+            # spaeter nochmal versuchen koennte — es scheitert jedes Mal.
+            if "HTTP 404" in str(ex):
+                e.fehl(f"{modell} existiert unter diesem Namen nicht",
+                       kandidaten(anbieter, modell))
+            else:
+                e.warn(f"{modell}: keine verwertbare Antwort auf den Ping",
+                       f"{type(ex).__name__}: {ex}")
+                tragen.add(anbieter)     # koennte voruebergehend sein
+    return tragen
 
 
-def pruefe_echtlauf(e, cfg, anbieter_rollen):
+def pruefe_echtlauf(e, cfg, anbieter_rollen, tragen):
     """Mini-Echtlauf: ein Kurz-Chunk je Anbieter, mit Usage-Ausweis."""
     print("\n--- 3 · Mini-Echtlauf " + "-" * 39)
     e.info("Probetext (selbst geschrieben, kein Buchtext)",
            PROBE_NL[:80] + " …")
     for anbieter, (rolle, modell) in sorted(anbieter_rollen.items()):
+        if anbieter not in tragen:
+            e.info(f"{modell}: uebersprungen",
+                   "Der Ping ist bereits gescheitert — siehe oben.")
+            continue
         vorher = _usage_stand()
         t0 = time.time()
         try:
@@ -177,13 +210,15 @@ def _usage_stand():
 
 
 # ==================================================================
-def pruefe_sampling(e, cfg, anbieter_rollen):
+def pruefe_sampling(e, cfg, anbieter_rollen, tragen):
     """Schickt das echte Payload plus 'temperature' und meldet, was kommt.
 
     Das ist der Beleg fuer die Entscheidung aus ENTSCHEIDUNGEN.md — und
     zugleich der Hinweis, falls ein Anbieter seine Haltung aendert."""
     print("\n--- 4 · Sampling-Doktrin am lebenden Objekt " + "-" * 17)
     for anbieter, (rolle, modell) in sorted(anbieter_rollen.items()):
+        if anbieter not in tragen:
+            continue
         b = G.BACKENDS[anbieter]
         p = b.payload(cfg, PROBE_SYSTEM, PROBE_NL, "verifikation", modell)
         p = dict(p)
@@ -277,9 +312,9 @@ def main():
             e.info("Keine API-Rolle aktiv",
                    "Die Konfiguration laeuft ganz ueber Ollama.")
         else:
-            pruefe_ping(e, cfg, anbieter_rollen)
-            pruefe_echtlauf(e, cfg, anbieter_rollen)
-            pruefe_sampling(e, cfg, anbieter_rollen)
+            tragen = pruefe_ping(e, cfg, anbieter_rollen)
+            pruefe_echtlauf(e, cfg, anbieter_rollen, tragen)
+            pruefe_sampling(e, cfg, anbieter_rollen, tragen)
         pruefe_tarife(e)
 
     print("\n" + "=" * 62)

@@ -357,10 +357,18 @@ def pruefe_api(cfg, b, backends, ping):
         except SystemExit:
             raise
         except Exception as e:
-            # Ein am Limit abgeschnittener Ein-Token-Ping ist kein Fehler.
-            b.add("WARN", f"Ping an {modell} ohne verwertbare Antwort",
-                  f"{e}\n           Der Schluessel ist da; die Anfrage "
-                  f"selbst wird im Lauf erneut versucht.")
+            if "HTTP 404" in str(e):
+                # Ein Modellname, den der Anbieter nicht kennt, scheitert
+                # jedes Mal — das darf keinen Volllauf starten lassen.
+                b.add("FEHLER", f"Modell '{modell}' existiert nicht",
+                      f"Rolle '{rolle}'. Verfuegbare Namen zeigt\n"
+                      f"           python3 verifikation.py")
+                ok = False
+            else:
+                # Ein am Limit abgeschnittener Ein-Token-Ping ist kein Fehler.
+                b.add("WARN", f"Ping an {modell} ohne verwertbare Antwort",
+                      f"{e}\n           Der Schluessel ist da; die Anfrage "
+                      f"selbst wird im Lauf erneut versucht.")
     return ok
 
 

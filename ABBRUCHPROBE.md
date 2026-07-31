@@ -41,9 +41,26 @@ nachgeprüft wird — und was dabei herauskam.
 
 ## Ergebnis
 
-**Noch nicht nachvollzogen.**
+### 31.07.2026 — teilweise nachvollzogen (Ian, Colab)
 
-Ian fährt die Probe in Colab und meldet die Ausgabe zurück; Datum,
-Chunkstand vor und nach dem Abbruch sowie das Ergebnis werden hier
-eingetragen. Bis dahin gilt die Abnahme von Paket 2 als offen — ein Haken
-ohne durchgeführte Probe wäre wertlos.
+Laufzeit gelöscht, neue VM, Zelle 1 erneut. Was dabei belegt ist:
+
+| | |
+|---|---|
+| Drive-Mount und Code-Klon | neu gemountet, `main — 2ba0ef4`, `Already up to date` |
+| Arbeitsverzeichnis | `/content/drive/MyDrive/uebersetzung/1919` |
+| `projekt.json` | „im Projektordner vorhanden — unverändert übernommen" — der Überschreibschutz greift |
+| Quelltext | `input.txt`: 109.192 Wörter, gefunden |
+| Schreibsemantik | `fsync` + `os.replace` + Zurücklesen auf dem Drive-Mount fehlerfrei |
+| Resume auf Schrittebene | `selbsttest`, `preflight` und `konkordanz` wurden **nicht** wiederholt; der Lauf setzte am nächsten offenen Schritt an |
+
+**Was noch aussteht:** Der Lauf stand bei `PAUSE_glossar`, also **vor** dem
+ersten Übersetzungsschritt. Damit ist der Resume auf *Schrittebene* belegt,
+der auf *Chunkebene* — das Zählen der Dateien in `teile/` — aber noch nicht.
+Genau das ist die tragende Zusage des Entwurfs.
+
+Die Probe ist deshalb zu wiederholen, sobald `test` oder `voll` läuft:
+mindestens drei Chunks abwarten, Stand notieren, Laufzeit löschen, Zelle 1
+erneut — und prüfen, dass der Zähler bei `n+1` weitermacht statt bei 1.
+
+**Die Abnahme von Paket 2 bleibt bis dahin offen.**
