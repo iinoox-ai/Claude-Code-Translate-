@@ -355,6 +355,30 @@ EFFORT = {"niedrig": "low", "mittel": "medium", "hoch": "high",
           "sehr_hoch": "xhigh", "maximal": "max"}
 
 
+# Schluessel, die technische Entscheidungen tragen und deshalb mit dem
+# Code wandern muessen, nicht mit dem Projekt. Modellnamen aendern sich,
+# wenn ein Anbieter umbenennt — die kalibrierten Pruefgrenzen eines
+# laufenden Buchs duerfen davon nicht beruehrt werden.
+#
+# Der Ueberschreibschutz der projekt.json bleibt: erkannt wird die
+# Abweichung, uebernommen wird sie nur auf ausdrueckliche Ansage.
+TECHNIK = ({"backend_standard", "max_tokens_api", "timeout_read_api"}
+           | {f"modell_{r}" for r in ROLLEN}
+           | {f"effort_{r}" for r in ROLLEN})
+
+
+def technik_abweichung(projekt_cfg, repo_cfg):
+    """(Schluessel, Projektwert, Repowert) fuer jede technische Abweichung."""
+    raus = []
+    for k in sorted(TECHNIK):
+        if k not in repo_cfg:
+            continue
+        alt, neu = projekt_cfg.get(k), repo_cfg[k]
+        if alt != neu:
+            raus.append((k, alt, neu))
+    return raus
+
+
 def modell_fuer(cfg, rolle):
     """Modellname der Rolle. Leer oder unbekannt -> 'modell' (Rueckfallpfad)."""
     return (cfg.get(f"modell_{rolle}") or "").strip() or cfg.get(
