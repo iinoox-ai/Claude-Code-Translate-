@@ -112,8 +112,13 @@ def namen_finden(text, min_count=MIN_COUNT):
     return zusammen
 
 
-def belege(text, name, partikel=None, k=BELEGE):
-    saetze = re.split(r'(?<=[.!?"”»])\s+', text)
+def belege(saetze, name, partikel=None, k=BELEGE):
+    """Belegstellen zu einem Kandidaten.
+
+    Bekommt die Saetze fertig getrennt: G.saetze_nl kennt die
+    niederlaendischen Abkuerzungen und alle Anfuehrungszeichen, der
+    frühere Einzeiler hier kannte beides nicht — und lief ausserdem je
+    Kandidat einmal ueber den ganzen Text."""
     such = (rf"\b{re.escape(partikel)}\s+{re.escape(name)}\b|\b{re.escape(name)}(\'?s)?\b"
             if partikel else rf"\b{re.escape(name)}(\'?s)?\b")
     pat = re.compile(such)
@@ -124,14 +129,23 @@ def belege(text, name, partikel=None, k=BELEGE):
     return [s[:340] for s in tr[:k]]
 
 
-def anredebelege(text, k=40):
-    saetze = re.split(r'(?<=[.!?"”»])\s+', text)
+def anredebelege(saetze, k=40):
+    """Saetze mit Siez-Formen, Rede zuerst.
+
+    Frueher wurden nur Saetze MIT Anfuehrungszeichen genommen, und die
+    Zeichenklasse kannte ‘…’ nicht — bei einer Quelle in einfachen
+    Anfuehrungszeichen blieb der Abschnitt deshalb komplett leer, obwohl
+    der Text 82 Siez-Formen enthielt. Jetzt wird sortiert statt gefiltert:
+    Rede steht oben, aber kein Beleg geht verloren."""
     u = re.compile(r"\b(u|uw|Uw)\b")
-    return [re.sub(r"\s+", " ", s).strip()[:300] for s in saetze
-            if u.search(s) and re.search(r'["„“«»]', s)][:k]
+    rede = re.compile(f"[{re.escape(G.ANFUEHRUNG)}]")
+    treffer = [re.sub(r"\s+", " ", s).strip()[:300]
+               for s in saetze if u.search(s)]
+    treffer.sort(key=lambda s: (0 if rede.search(s) else 1))
+    return treffer[:k]
 
 
-def wendungen(text, k=25):
+def wendungen(text, k=40):
     w = re.findall(r"[a-zäöüéèï']+", text.lower())
     out = []
     for n in (6, 5, 4):
@@ -161,6 +175,7 @@ FELDER = {
 
 def schreibe_export(cfg, text, kand, args):
     paras = G.absaetze(text)
+    saetze = G.saetze_nl(text)      # einmal trennen, nicht je Kandidat
     laengen = sorted(len(p.split()) for p in paras)
     dialog = sum(1 for p in paras if p.lstrip()[:1] in "„“«»'\"‘—–")
     low = text.lower()
@@ -206,12 +221,12 @@ def schreibe_export(cfg, text, kand, args):
     for basis, d in sorted(kand.items(), key=lambda kv: -kv[1]["n"])[:args.max_terms]:
         titel = f"{d['partikel']} {basis}" if d["partikel"] else basis
         A(f"### {titel} ({d['n']}×)\n")
-        for s in belege(text, basis, d["partikel"]):
+        for s in belege(saetze, basis, d["partikel"]):
             A(f"- {s}")
         A("")
 
     A("## Anredebelege (Siezen mit `u`)\n")
-    for s in anredebelege(text):
+    for s in anredebelege(saetze):
         A(f"- {s}")
     A("")
     A("## Wiederkehrende Wendungen\n")
@@ -243,6 +258,7 @@ def schreibe_export(cfg, text, kand, args):
 
 
 def lokal_glossar(cfg, text, kand, args):
+    saetze = G.saetze_nl(text)      # einmal trennen, nicht je Kandidat
     namen = [b for b, _ in sorted(kand.items(), key=lambda kv: -kv[1]["n"])][:args.max_terms]
     SYS = ("You are a literary translator preparing reference material for a "
            "Dutch novel being translated into German. You answer with valid "
@@ -257,7 +273,7 @@ def lokal_glossar(cfg, text, kand, args):
             t = f"{d['partikel']} {b}" if d["partikel"] else b
             teil.append(f"### {t} ({d['n']}x, Titel {d['tm']}m/{d['tf']}f, "
                         f"m={d['mask']} f={d['fem']})")
-            for s in belege(text, b, d["partikel"], k=6):
+            for s in belege(saetze, b, d["partikel"], k=6):
                 teil.append(f"- {s}")
         user = ("For each candidate below, decide from the evidence:\n"
                 "  typ:      person | place | institution | title | thing | not_a_name\n"

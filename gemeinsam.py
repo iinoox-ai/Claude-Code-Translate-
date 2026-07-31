@@ -877,6 +877,11 @@ ABK_NL = [
     "jan", "feb", "mrt", "apr", "jun", "jul", "aug", "sep", "okt", "nov", "dec",
 ]
 
+# Alle Anfuehrungszeichen, die in niederlaendischen Quellen vorkommen.
+# Einfache Zeichen \u2018\u2026\u2019 sind dort die Regel, nicht die Ausnahme \u2014 wer sie
+# in einer Zeichenklasse vergisst, verliert den halben Dialog.
+ANFUEHRUNG = "\"\u201c\u201d\u201e\u2018\u2019\u00ab\u00bb\u2039\u203a"
+
 SCHLIESSER = r'["\u201c\u201d\u2018\u2019\u00ab\u00bb\')\]]*'
 GRENZE_NL = (r'(?<=[.!?])' + SCHLIESSER + r'\s+'
              r'(?=[\u201c\u201e\u00ab"\u2018\'(\[\u2014\u2013]?'
