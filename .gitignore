@@ -1,0 +1,16 @@
+input.txt
+glossar.json
+personen.json
+figurenblatt.json
+anrede.json
+leitmotive.json
+zitate.json
+stilprofil.json
+kapitel.json
+*.env
+teile/
+test/
+testB/
+manifest.json
+*.log
+*state.json
