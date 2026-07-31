@@ -274,7 +274,8 @@ def lokal_glossar(cfg, text, kand, args):
                 '"pronoun": …, "deutsch": …, "hinweis": …}, …}. No fences.')
         for versuch in (1, 2):
             try:
-                d = G.json_aus_antwort(G.chat(cfg, SYS, user, 0.2))
+                d = G.json_aus_antwort(
+                    G.chat(cfg, SYS, user, 0.2, rolle="vorbereitung"))
                 if not d:
                     raise RuntimeError("kein JSON")
                 eintraege.update(d)

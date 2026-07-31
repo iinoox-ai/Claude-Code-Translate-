@@ -377,6 +377,27 @@ die andere — genau die Fehlerklasse, die beim Lesen nicht auffällt. Die
 Mechanik existierte bereits als Fugen-Reset der Testauszüge und wird nur
 verallgemeinert.
 
+## Keine Sampling-Parameter, auch nicht bei Anthropic
+
+**Entschieden (31.07.2026):** Beide API-Backends senden weder `temperature`
+noch `top_p` oder `top_k`. Ein Selbsttestfall prüft beide Payloads. Die
+verstellbaren Parameter der API-Ära sind `chunk_words`, `context_words` und
+`effort_<rolle>`.
+
+Der Arbeitsauftrag ging davon aus, dass die Sampling-Parameter „nur auf
+Anthropic-Seite" wirken. Das gilt seit `claude-opus-5` nicht mehr: Das Modell
+hat `temperature`, `top_p` und `top_k` entfernt und antwortet darauf mit
+HTTP 400 — dieselbe Eigenschaft, die für Gemini schon dokumentiert war. Damit
+schrumpfen die vier verstellbaren Parameter im API-Betrieb auf zwei, und die
+Steuerung der Denktiefe wandert vollständig zu `effort`.
+
+Die Temperatur-Schlüssel bleiben trotzdem in der Konfiguration. Sie sind kein
+toter Code, sondern der Ollama-Rückfallpfad, und wer sie entfernt, nimmt dem
+VPS-Betrieb seine einzige Stellschraube für die Streuung.
+
+Der Widerspruch wurde gemeldet und vor der Umsetzung entschieden, nicht still
+aufgelöst.
+
 ## Kalibrierungen gelten je Modell-Ära
 
 **Entschieden:** `revision_pass`, `lektorat_passes` und `chunk_words`

@@ -105,6 +105,31 @@ def setze(m, name, status, **extra):
     manifest_schreiben(m)
 
 
+def kostenuebersicht(m):
+    """Was der Lauf an Token und Geld gekostet hat, je Rolle.
+
+    Ein Schritt, der Modelle ruft und hier nicht auftaucht, erfasst seine
+    Usage nicht — das gilt als unfertig, nicht als kostenlos."""
+    zeilen, summe, unsicher = G.kosten_je_rolle(m)
+    if not zeilen:
+        return
+    print("\nKosten je Rolle")
+    print("-" * 62)
+    for rolle, e, dollar, t in zeilen:
+        token = f"{e['ein']:>9,} ein / {e['aus']:>8,} aus"
+        cache = (f", Cache {e['cache_lesen']:,} gelesen"
+                 if e["cache_lesen"] else "")
+        preis = f"{dollar:6.2f} $" if dollar is not None else "  kein Tarif"
+        print(f"  {rolle:<14} {e['modell']:<18} {token}{cache}")
+        print(f"  {'':<14} {e['aufrufe']:>4} Aufrufe {'':<12} {preis}")
+    print("-" * 62)
+    print(f"  Summe: rund {summe:.2f} $")
+    if unsicher:
+        print("  Hinweis: nicht alle Tarife sind gegen die Anbieterdoku "
+              "verifiziert\n           (Google-Tarife: Stand 31.07.2026, "
+              "Verifikation in Paket 2).")
+
+
 def uebersprungen(cfg, name):
     """Schritte, die die Konfiguration nicht braucht."""
     if name == "PAUSE_glossar" and cfg["glossar_quelle"] == "lokal":
@@ -220,6 +245,7 @@ def cmd_run(cfg, args):
                 print("\n" + "=" * 62)
                 print("Alle Schritte erledigt.")
                 print("=" * 62)
+                kostenuebersicht(manifest_lesen())
                 break
             name, beschreibung, cmd, _ = eintrag
 

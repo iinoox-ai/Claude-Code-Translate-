@@ -17,9 +17,11 @@ wichtigsten:
   Verlagsreihenfolge ab und ist Absicht.
 - **`gross` wird zu `groß` korrigiert, `Gross` nicht.** Schreibungsabhängig,
   weil großgeschrieben ein Nachname sein kann.
-- **Nur vier Parameter sind verstellbar**: `chunk_words`, `context_words`,
-  `temperature_uebersetzung`, `temperature_revision`. `repeat_penalty` über 1,0
-  wäre bei diesem Text sogar schädlich.
+- **Verstellbar sind `chunk_words`, `context_words` und `effort_<rolle>`.** Die
+  Temperatur-Schlüssel wirken seit der API-Umstellung nur noch auf dem
+  Ollama-Rückfallpfad — `claude-opus-5` hat `temperature`/`top_p`/`top_k`
+  entfernt und antwortet darauf mit HTTP 400. `repeat_penalty` über 1,0 wäre
+  bei diesem Text ohnehin schädlich.
 - **Die lokale Blindbewertung bleibt trotz methodischer Schwäche.** Sie ist das
   dritte Signal, nicht die Entscheidungsgrundlage.
 - **Der Anredecheck ist ein Näherungsmaß** und produziert Falschmeldungen. Das
@@ -47,10 +49,12 @@ Modellnamen. Bitte keine Modellnamen hartkodieren.
 
 Zwei Eigenheiten, die nicht „repariert" werden dürfen:
 
-- **Gemini bekommt keine Sampling-Parameter.** Die API ignoriert
-  `temperature`/`top_p`/`top_k` bei 3.6 Flash; künftige Generationen
-  antworten mit HTTP 400. Der Selbsttest prüft, dass das Payload sauber ist.
-  Die vier verstellbaren Pipeline-Parameter wirken nur auf Anthropic-Seite.
+- **Keine der beiden APIs bekommt Sampling-Parameter.** Gemini ignoriert
+  `temperature`/`top_p`/`top_k` bei 3.6 Flash und wird künftig mit HTTP 400
+  antworten; `claude-opus-5` hat sie bereits entfernt und antwortet mit
+  HTTP 400. Der Selbsttest prüft beide Payloads darauf. Die Tiefe steuert
+  `effort_<rolle>` (deutsch in `projekt.json`, Abbildung auf `low`…`max` in
+  `gemeinsam.EFFORT`).
 - **Der System-Prompt trägt einen Cache-Marker** (Anthropic
   `cache_control`). Wer Prompt-Bausteine umsortiert, zerstört unbemerkt die
   Cache-Trefferquote — identische Präfixe sind Geld.
