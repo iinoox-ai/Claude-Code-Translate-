@@ -271,6 +271,35 @@ def selbsttest_backends(b):
     except Exception as e:
         b.add("FEHLER", "Antwortauswertung wirft Ausnahme", repr(e))
 
+    # --- Anzeige darf nicht den Rueckfallschluessel nennen ---------------
+    # uebersetzung.py meldete im Kopf 'cfg["modell"]' — den Ollama-Namen —
+    # obwohl ueber die Rolle laengst Opus 5 lief. Der Lauf war richtig, die
+    # Anzeige log. Payloadtests finden so etwas nicht, ein Blick in die
+    # Quelle schon.
+    try:
+        hier = os.path.dirname(os.path.abspath(__file__))
+        schuldig = []
+        for datei in ("uebersetzung.py", "lektorat.py", "konkordanz.py",
+                      "bewertung.py", "qa.py"):
+            pfad = os.path.join(hier, datei)
+            if not os.path.exists(pfad):
+                continue
+            for nr, zeile in enumerate(open(pfad, encoding="utf-8"), 1):
+                if "print(" not in zeile:
+                    continue
+                if "cfg['modell']" in zeile or 'cfg["modell"]' in zeile:
+                    schuldig.append(f"{datei}:{nr}")
+        if schuldig:
+            b.add("FEHLER", "Anzeige nennt den Ollama-Rueckfallschluessel",
+                  f"{', '.join(schuldig)}\n"
+                  f"           Im API-Betrieb stimmt cfg['modell'] nie. "
+                  f"G.modell_fuer(cfg, rolle) benutzen.")
+        else:
+            b.add("OK", "Kein Skript zeigt cfg['modell'] statt des "
+                        "Rollenmodells an")
+    except Exception as e:
+        b.add("WARN", "Anzeigepruefung nicht durchfuehrbar", repr(e))
+
     # --- Retry und Backoff ----------------------------------------------
     try:
         pausen, versuche = [], []

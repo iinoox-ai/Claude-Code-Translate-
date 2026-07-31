@@ -466,7 +466,15 @@ def main():
     p_ueb, p_rev = prompts(cfg)
     fingerprint = G.config_hash(cfg)
 
-    print(f"Modell:     {cfg['modell']}")
+    # Nicht cfg['modell'] anzeigen — das ist der Ollama-Rueckfallschluessel
+    # und stimmt im API-Betrieb nie. Was zaehlt, ist das Modell der Rolle.
+    m_ueb = G.modell_fuer(cfg, "uebersetzung")
+    print(f"Modell:     {m_ueb} ({G.backend_name(m_ueb)}, "
+          f"Effort {G.effort_fuer(cfg, 'uebersetzung')})")
+    m_rev = G.modell_fuer(cfg, "revision")
+    if revision and m_rev != m_ueb:
+        print(f"  Revision: {m_rev} ({G.backend_name(m_rev)}, "
+              f"Effort {G.effort_fuer(cfg, 'revision')})")
     print(f"Zielform:   {cfg['varietaet']}, "
           f"{'»…«' if cfg['quotes']=='guillemets' else '„…“'}, "
           f"{'mit ß' if cfg['eszett'] else 'ohne ß'}")

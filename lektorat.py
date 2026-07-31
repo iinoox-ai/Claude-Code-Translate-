@@ -356,7 +356,12 @@ def main():
                             "Korrektorat")}
 
     text = open(quelle, encoding="utf-8").read()
-    print(f"Quelle: {quelle}\nFolge:  {' -> '.join(folge)}\n")
+    print(f"Quelle: {quelle}\nFolge:  {' -> '.join(folge)}")
+    for stufe in [s for s in folge if s in PASS]:
+        m = G.modell_fuer(cfg, stufe)
+        print(f"  {PASS[stufe][2]:<14} {m} ({G.backend_name(m)}, "
+              f"Effort {G.effort_fuer(cfg, stufe)})")
+    print()
 
     while folge and folge[0] == "det":
         folge.pop(0)
