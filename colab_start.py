@@ -152,6 +152,23 @@ def projektordner_richten(projekt, code=CODE):
     else:
         meldungen.append(f"WARNUNG: weder {ziel} noch {quelle} vorhanden — "
                          f"'python3 pipeline.py init' anlegen")
+
+    # anweisungen.md gehoert zum Buch, nicht zum Code: sie wird ueber einen
+    # relativen Pfad aus dem Arbeitsverzeichnis gelesen. Ohne Kopie laeuft
+    # ein neues Projekt still mit leeren Anweisungsabschnitten.
+    a_ziel = os.path.join(projekt, G.ANWEISUNGEN)
+    a_quelle = os.path.join(code, G.ANWEISUNGEN)
+    if os.path.exists(a_ziel):
+        gefuellt = [n for n in ("Übersetzung", "Stillektorat", "Korrektorat")
+                    if G.lade_anweisungen(n, a_ziel)]
+        meldungen.append(
+            f"{G.ANWEISUNGEN} vorhanden — Abschnitte mit Inhalt: "
+            f"{', '.join(gefuellt) or 'keine (Standardvorgaben)'}")
+    elif os.path.exists(a_quelle):
+        shutil.copy2(a_quelle, a_ziel)
+        meldungen.append(f"{G.ANWEISUNGEN} als Vorlage kopiert — die drei "
+                         f"Abschnitte sind leer und werden nach dem "
+                         f"Testlauf gefuellt.")
     return meldungen
 
 
