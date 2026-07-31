@@ -14,3 +14,40 @@ testB/
 manifest.json
 *.log
 *state.json
+
+# Kandidatendateien der Konkordanz, wenn die Referenz schon existiert
+# (konkordanz.py schreibt dann <name>.json.neu)
+*.json.neu
+
+# Ausgabe- und Zwischentexte (gemeinsam.F) — vollstaendiger Buchtext
+uebersetzung_entwurf.txt
+uebersetzung_deutsch.txt
+normalisiert.txt
+manuskript_lektoriert.txt
+
+# Analyse-, QA- und Bewertungsberichte — zitieren Buchtext in Belegstellen,
+# Diffs und Vorher/Nachher-Bloecken
+analysepaket.md
+bewertung_*.md
+preflight_report.txt
+qa_uebersetzung.txt
+qa_lektorat.txt
+qa_konsistenz.txt
+leitmotiv_varianten.txt
+normalisierung_report.txt
+lektorat_diff.txt
+zitate_verdacht.txt
+bericht.html
+
+# Exportpaket aus paket.py
+ergebnis.tar.gz
+ergebnis/
+
+# Generierte Briefings — Kopien der getrackten *_vorlage.md, ohne Buchtext,
+# aber Laufartefakte
+briefing_glossar.md
+briefing_bewertung.md
+briefing_lektorat.md
+
+# Python-Bytecode
+__pycache__/
