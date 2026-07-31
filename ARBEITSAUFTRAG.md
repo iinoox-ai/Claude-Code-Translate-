@@ -206,12 +206,22 @@ Meldung; leere `sheets_id` verhält sich exakt wie heute.
 3. Prompt-Einspeisung (additiv, Schutzklausel 1 beachten): Stilprofil als
    eigener Baustein im System-Prompt der Übersetzung; Kapitelzeile des
    aktuellen Chunks im User-Prompt.
-4. Aus `PAUSE_glossar` wird `PAUSE_review`: Mensch prüft und editiert in
-   Sheets, dann weiter.
+4. **`anweisungen.md` gehört zu den Lieferungen — mit Überschreibschutz:**
+   Die Vorbereitung erzeugt einen Erstentwurf der drei Abschnitte. Existiert
+   die Datei bereits mit gefüllten Abschnitten (aktuelles Buch!), wird sie
+   **nicht angetastet**; die Vorschläge landen dann in
+   `anweisungen_vorschlag.md` zum manuellen Übernehmen — analog zur
+   `.neu`-Konvention von `konkordanz.py`. Nach dem Testlauf liefert die
+   Bewertung (Paket 8) wie bisher eine nachgeschärfte Fassung, ebenfalls nur
+   als Vorschlagsdatei; eingespielt wird ausschließlich vom Menschen im
+   Prüffenster.
+5. Aus `PAUSE_glossar` wird `PAUSE_review`: Mensch prüft und editiert in
+   Sheets bzw. `anweisungen.md`, dann weiter.
 
-**Abnahme:** Ein Lauf am Testbuch erzeugt alle acht Dateien; Preflight
+**Abnahme:** Ein Lauf am Testbuch erzeugt alle Lieferdateien; Preflight
 validiert sie im Quick-Modus; Stilprofil erscheint nachweislich im gebauten
-Prompt (Selbsttestfall).
+Prompt (Selbsttestfall); eine vorhandene gefüllte `anweisungen.md` bleibt
+byte-identisch erhalten (Testfall), Vorschläge erscheinen separat.
 
 ### Paket 5 — Rahmenwechsel-Chunking und Variantenvergleich
 1. **`#`-Regel:** An jeder Zeile, die dem `rahmen_marker` entspricht, wird
