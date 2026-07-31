@@ -116,6 +116,21 @@ def _anbieter_rollen(cfg):
     return treffer
 
 
+def _alle_modelle(cfg):
+    """Jedes konfigurierte API-Modell einmal, mit den Rollen die es nutzen.
+
+    Bewusst ueber ALLE Rollen, nicht nur die aktiven: 'annotation' und
+    'vergleich' rufen erst in spaeteren Paketen ein Modell. Ein falscher
+    Name dort faellt sonst erst auf, wenn der Schritt gebaut wird — und
+    genau so ist der Judge-Name durchgerutscht."""
+    treffer = {}
+    for rolle in G.ROLLEN:
+        modell = G.modell_fuer(cfg, rolle)
+        if G.backend_name(modell) in ("anthropic", "google"):
+            treffer.setdefault(modell, []).append(rolle)
+    return treffer
+
+
 def kandidaten(anbieter, modell):
     """Bei 404: was der Anbieter wirklich anbietet.
 
@@ -134,19 +149,27 @@ def kandidaten(anbieter, modell):
               f"eintragen.")
 
 
-def pruefe_ping(e, cfg, anbieter_rollen):
-    """Gibt die Anbieter zurueck, die erreichbar sind."""
+def pruefe_ping(e, cfg):
+    """Pingt JEDES konfigurierte Modell, auch das spaeterer Pakete.
+
+    Gibt die Anbieter zurueck, deren Modell der aktiven Rollen traegt."""
     print("\n--- 2 · Ein-Token-Ping " + "-" * 38)
+    aktiv = {m for r, m in ((r, G.modell_fuer(cfg, r))
+                            for r in G.aktive_rollen(cfg))}
     tragen = set()
-    for anbieter, (rolle, modell) in sorted(anbieter_rollen.items()):
+    for modell, rollen in sorted(_alle_modelle(cfg).items()):
+        anbieter = G.backend_name(modell)
+        wann = "" if modell in aktiv else "  (erst in spaeteren Paketen)"
         probe = dict(cfg)
         probe["max_tokens_api"] = 1
         t0 = time.time()
         try:
             G.BACKENDS[anbieter].chat(probe, "Antworte mit OK.", "OK", 0.0,
                                       rolle="verifikation", modell=modell)
-            e.ok(f"{modell} antwortet ({time.time()-t0:.1f}s)")
-            tragen.add(anbieter)
+            e.ok(f"{modell} antwortet ({time.time()-t0:.1f}s)",
+                 f"Rollen: {', '.join(rollen)}{wann}")
+            if modell in aktiv:
+                tragen.add(anbieter)
         except SystemExit as ex:
             e.fehl(f"{anbieter}: {ex}")
         except Exception as ex:
@@ -154,11 +177,13 @@ def pruefe_ping(e, cfg, anbieter_rollen):
             # spaeter nochmal versuchen koennte — es scheitert jedes Mal.
             if "HTTP 404" in str(ex):
                 e.fehl(f"{modell} existiert unter diesem Namen nicht",
-                       kandidaten(anbieter, modell))
+                       f"Rollen: {', '.join(rollen)}{wann}\n"
+                       + kandidaten(anbieter, modell))
             else:
                 e.warn(f"{modell}: keine verwertbare Antwort auf den Ping",
                        f"{type(ex).__name__}: {ex}")
-                tragen.add(anbieter)     # koennte voruebergehend sein
+                if modell in aktiv:
+                    tragen.add(anbieter)   # koennte voruebergehend sein
     return tragen
 
 
@@ -312,7 +337,7 @@ def main():
             e.info("Keine API-Rolle aktiv",
                    "Die Konfiguration laeuft ganz ueber Ollama.")
         else:
-            tragen = pruefe_ping(e, cfg, anbieter_rollen)
+            tragen = pruefe_ping(e, cfg)
             pruefe_echtlauf(e, cfg, anbieter_rollen, tragen)
             pruefe_sampling(e, cfg, anbieter_rollen, tragen)
         pruefe_tarife(e)

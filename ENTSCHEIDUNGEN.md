@@ -404,6 +404,34 @@ mit HTTP 400 — die Entscheidung steht damit nicht auf einer Dokumentationszeil
 sondern auf einer Messung. Der Testfall bleibt im Skript und meldet es, falls
 ein Anbieter seine Haltung ändert.
 
+## Der Judge heißt `gemini-3.1-pro-preview`, nicht `gemini-3.1-pro`
+
+**Entschieden (31.07.2026):** `modell_judge` trägt den API-Namen
+`gemini-3.1-pro-preview`. Die Rolle und die Begründung dahinter ändern sich
+nicht — es ist dasselbe Modell, das der Arbeitsauftrag benennt.
+
+Der Preisname und der API-Name fallen bei Google auseinander: Die Preisseite
+führt das Modell als `gemini-3.1-pro`, `ListModels` kennt unter `v1beta` nur
+`gemini-3.1-pro-preview`. Ein Aufruf unter dem Preisnamen antwortet mit
+HTTP 404. Aufgefallen ist das im Colab-Lauf der Verifikation, nicht beim
+Lesen — die Payloadtests gegen Attrappen können einen Namen nicht prüfen,
+den nur der Anbieter kennt.
+
+Zwei Folgen, die bewusst so stehen:
+
+- **Das Modell ist ein Preview.** Preview-Namen können verschwinden oder in
+  die allgemeine Verfügbarkeit umziehen (dann vermutlich ohne Suffix). Der
+  Preflight wertet ein 404 deshalb als Fehler und nicht als Warnung: Der
+  Lauf soll an der Stelle stehenbleiben, an der der Name falsch wird, und
+  nicht Stunden später bei der Bewertung.
+- **Auf die Pro-Klasse wird nicht verzichtet.** Naheliegend wäre gewesen,
+  auf ein allgemein verfügbares Flash-Modell auszuweichen. Das würde die
+  Pro/Flash-Aufteilung aushebeln, deren ganzer Punkt ist, dass die wenigen
+  folgenreichen Urteile die stärkere Klasse bekommen.
+
+`TARIFE` trägt beide Schlüssel, damit der Preisbeleg und der benutzte Name
+nebeneinander stehen.
+
 ## Kalibrierungen gelten je Modell-Ära
 
 **Entschieden:** `revision_pass`, `lektorat_passes` und `chunk_words`
