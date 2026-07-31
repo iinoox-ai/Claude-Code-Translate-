@@ -398,6 +398,12 @@ VPS-Betrieb seine einzige Stellschraube für die Streuung.
 Der Widerspruch wurde gemeldet und vor der Umsetzung entschieden, nicht still
 aufgelöst.
 
+**Am lebenden Objekt bestätigt (31.07.2026):** `verifikation.py` schickt das
+echte Payload einmal mit `temperature` an die API. `claude-opus-5` antwortet
+mit HTTP 400 — die Entscheidung steht damit nicht auf einer Dokumentationszeile,
+sondern auf einer Messung. Der Testfall bleibt im Skript und meldet es, falls
+ein Anbieter seine Haltung ändert.
+
 ## Kalibrierungen gelten je Modell-Ära
 
 **Entschieden:** `revision_pass`, `lektorat_passes` und `chunk_words`

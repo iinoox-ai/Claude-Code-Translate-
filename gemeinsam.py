@@ -381,17 +381,18 @@ def effort_fuer(cfg, rolle):
 # ==================================================================
 # Dollar je 1 Mio Token, Stand 31.07.2026.
 #
-# Die Anthropic-Werte sind gegen die Anbieterdokumentation geprueft. Die
-# Google-Werte sind vorgemerkt und in Paket 2 zu verifizieren —
-# ai.google.dev ist aus der Entwicklungsumgebung gesperrt (Netzwerkpolicy),
-# deshalb steht 'geprueft' dort auf False und die Kostenuebersicht sagt das
-# auch. Beim Wechsel auf ein Modell ohne Tarif wird geschaetzt, nicht geraten.
+# Alle vier Werte sind gegen die Anbieterdokumentation geprueft: die
+# Anthropic-Tarife beim Bau des Adapters, die Google-Tarife am 31.07.2026
+# im Colab-Lauf von 'verifikation.py' gegen die Preisseite (aus der
+# Entwicklungsumgebung ist ai.google.dev durch die Netzwerkpolicy
+# gesperrt). Beim Wechsel auf ein Modell ohne Tarif wird geschaetzt, nicht
+# geraten — die Kostenuebersicht weist das aus.
 TARIFE = {
     "claude-opus-5":    {"ein":  5.00, "aus": 25.00, "geprueft": True},
     "claude-fable-5":   {"ein": 10.00, "aus": 50.00, "geprueft": True},
-    "gemini-3.1-pro":   {"ein":  2.00, "aus": 12.00, "geprueft": False,
+    "gemini-3.1-pro":   {"ein":  2.00, "aus": 12.00, "geprueft": True,
                          "hinweis": "Tarif bis 200k-Prompt"},
-    "gemini-3.6-flash": {"ein":  1.50, "aus":  7.50, "geprueft": False},
+    "gemini-3.6-flash": {"ein":  1.50, "aus":  7.50, "geprueft": True},
 }
 
 # Wortzahl -> Token. Bewusst konservativ (hoch) angesetzt: der Tokenizer der
@@ -668,6 +669,30 @@ class GeminiBackend(Backend):
                  "cache_lesen": u.get("cachedContentTokenCount", 0),
                  "cache_schreiben": 0}
         return saeubern(text), usage
+
+    def verfuegbare_modelle(self, cfg):
+        """Modellnamen, die generateContent unterstuetzen.
+
+        Der Preisname eines Modells und sein API-Name sind nicht dasselbe —
+        wer 404 bekommt, sieht hier, was der Anbieter wirklich anbietet."""
+        schluessel = api_schluessel("google")
+        if not schluessel:
+            return []
+        namen = []
+        seite = f"{self.BASIS}?pageSize=200"
+        while seite:
+            r = requests.get(seite, headers={"x-goog-api-key": schluessel},
+                             timeout=(10, 60))
+            r.raise_for_status()
+            d = r.json()
+            for m in d.get("models", []):
+                if "generateContent" in (m.get("supportedGenerationMethods")
+                                         or []):
+                    namen.append(m.get("name", "").replace("models/", ""))
+            weiter = d.get("nextPageToken")
+            seite = (f"{self.BASIS}?pageSize=200&pageToken={weiter}"
+                     if weiter else None)
+        return sorted(namen)
 
     def chat(self, cfg, system, user, temperature, num_ctx=None,
              rolle="annotation", modell=""):
