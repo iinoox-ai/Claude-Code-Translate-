@@ -270,9 +270,19 @@ gelangt ohne Freigabe in den Zieltext (Testfall).
    (`--begruendung`).
 3. Der Lektoratspass selbst bleibt unangetastet — Begründung ist ein
    nachgelagerter Schritt, keine Doppelaufgabe des Editiermodells.
+4. **Volltext-Bericht (entschieden 31.07., Ian):** Zusätzlich ein
+   Screening über das *ganze Buch*: Gemini 3.6 Flash liest Quell-/
+   Zielchunk-Paare und meldet Verdachtsstellen (übersehene falsche Freunde,
+   Auslassungen, Registerbrüche) mit Chunk-Nummer und Ein-Zeilen-Befund in
+   eine Review-Liste (`screening_review.md` bzw. Sheet-Tab). Der Schritt
+   ist rein **berichtend** — er verändert nie den Text; das unterscheidet
+   ihn bewusst von einem weiteren Editierpass. Läuft nach dem Lektorat,
+   vor `konsistenz`.
 
 **Abnahme:** HTML-Bericht zeigt Begründungen nur bei substanziellen
-Änderungen; Kosten des Schritts erscheinen in der Kostenübersicht.
+Änderungen; der Volltext-Bericht listet Verdachtsstellen mit Chunk-Bezug
+und hat nachweislich keinen Schreibzugriff auf Textdateien (Testfall);
+Kosten beider Teile erscheinen in der Kostenübersicht.
 
 ### Paket 8 — Judge-Routing in `bewertung.py`
 Blindbewertung von „lokales Modell" auf `modell_judge` umstellen
