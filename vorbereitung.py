@@ -43,8 +43,34 @@ SYSTEM = (
     "'## Korrektorat'. Sie wird woertlich an die System-Prompts angehaengt: "
     "nur Anweisungen, keine Erlaeuterungen, keine HTML-Kommentare.\n\n"
     "Nutze die Konkordanzbefunde fuer Figurensprache, zu schuetzende "
-    "Wiederholungen und falsche Freunde. Schlage ausserdem Eintraege fuer "
-    "anrede.json und leitmotive.json vor, jeweils als eigenen Codeblock.")
+    "Wiederholungen und falsche Freunde.\n\n"
+    "Schlage ausserdem anrede.json und leitmotive.json vor, jeweils als "
+    "eigenen Codeblock. Halte dich genau an diese Formen — die Pipeline "
+    "liest sie so und ueberspringt stillschweigend alles, was anders "
+    "aufgebaut ist:\n\n"
+    "anrede.json — flache Abbildung Beziehungsname -> Objekt. 'figuren' "
+    "nennt die Namen so, wie sie im Text und in personen.json stehen; nur "
+    "wenn eine davon im Chunk vorkommt, wird der Eintrag eingeblendet:\n"
+    '{\n'
+    '  "Scott zu Vorgesetzten": {\n'
+    '    "figuren": ["Scott", "Dunn"],\n'
+    '    "niederlaendisch": "u",\n'
+    '    "deutsch": "Sie",\n'
+    '    "hinweis": "bleibt auch nach Jahren beim Sie"\n'
+    '  }\n'
+    '}\n\n'
+    "leitmotive.json — flache Abbildung NIEDERLAENDISCHE Wendung -> "
+    "Objekt. Der Schluessel wird woertlich im Quellchunk gesucht, muss "
+    "also genau so im Original stehen:\n"
+    '{\n'
+    '  "deze hele rotzooi": {\n'
+    '    "vorschlag": "dieser ganze Schlamassel",\n'
+    '    "haeufigkeit": 7,\n'
+    '    "absicht": "wiederkehrende Formel des Erzaehlers"\n'
+    '  }\n'
+    '}\n\n'
+    "Keine Listen auf oberster Ebene, keine Sammelschluessel wie "
+    "'paare' oder 'leitmotive'.")
 
 # (Datei, Verzeichnis, Ueberschrift im Prompt, Pflicht)
 QUELLEN = [

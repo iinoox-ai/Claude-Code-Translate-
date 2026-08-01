@@ -294,6 +294,27 @@ def selbsttest_backends(b):
     except Exception as e:
         b.add("FEHLER", "Antwortauswertung wirft Ausnahme", repr(e))
 
+    # --- Vorbereitungsprompt und Leser muessen dieselbe Form meinen -----
+    # Der erste Lauf lieferte {"paare": [...]} und {"leitmotive": [...]}.
+    # block_anrede und block_leitmotive lesen flache Abbildungen und
+    # ueberspringen alles andere stillschweigend — die Vorschlaege waeren
+    # wirkungslos gewesen, ohne dass irgendwo etwas gemeldet haette.
+    try:
+        import vorbereitung as V
+        fehlt = [f for f in ("figuren", "niederlaendisch", "deutsch",
+                             "vorschlag")
+                 if f not in V.SYSTEM]
+        if fehlt:
+            b.add("FEHLER", "Vorbereitungsprompt nennt Pflichtfelder nicht",
+                  f"fehlt: {', '.join(fehlt)}\n"
+                  f"           block_anrede/block_leitmotive lesen genau "
+                  f"diese Namen.")
+        else:
+            b.add("OK", "Vorbereitungsprompt beschreibt die Form, die "
+                        "uebersetzung.py wirklich liest")
+    except Exception as e:
+        b.add("WARN", "Vorbereitungsprompt nicht pruefbar", repr(e))
+
     # --- saeubern darf Codebloecke nicht zerlegen -----------------------
     # vorbereitung.py laesst eine Antwort schreiben, die selbst Codebloecke
     # enthaelt. saeubern() schneidet den aeusseren Zaun ab — richtig fuer
