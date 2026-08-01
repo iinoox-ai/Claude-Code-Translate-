@@ -1,7 +1,12 @@
 # Briefing: Testübersetzung bewerten — Niederländisch → Deutsch
 
 Du bekommst eine Testübersetzung in zwei Fassungen (Entwurf und Revision),
-dazu die Diff-Statistik und die blinde Selbstbewertung des lokalen Modells.
+dazu die Diff-Statistik und ein blindes Urteil.
+
+Zum Urteil: Es stammt von einem **Fremdmodell** (Gemini 3.1 Pro), nicht von
+dem Modell, das übersetzt hat. Die Selbstpräferenz, vor der ältere Fassungen
+dieses Briefings warnten, entfällt damit — das Signal ist stärker, als es
+dort stand. Belastbarer bleibt trotzdem die Diff-Statistik.
 
 **Der Testauszug besteht aus zwei Teilen**, getrennt ausgewiesen: eine
 Erzählpassage und eine dialoglastige Passage. Bewerte beide getrennt. Bei
@@ -43,7 +48,15 @@ auf Marker der Figurenstimme, die das Korrektorat nicht anfassen darf.
 
 ## Vierte Aufgabe: Parameter
 
-Empfiehl `chunk_words`, `context_words`, `temperature_uebersetzung`,
-`temperature_revision`. Begründe jede Abweichung. Andere Parameter nicht
-anfassen. Liefere die geänderte `projekt.json` als Codeblock; `ratio_min`,
-`ratio_max`, `ratio_kalibriert` und `sprachpaar` unverändert lassen.
+Empfiehl `chunk_words`, `context_words` und die `effort_<rolle>`-Stufen
+(`niedrig`, `mittel`, `hoch`, `sehr_hoch`, `maximal`). Begründe jede
+Abweichung. Andere Parameter nicht anfassen.
+
+**Keine Temperaturempfehlung.** Die `temperature_*`-Schlüssel wirken im
+API-Betrieb nicht: `claude-opus-5` hat den Parameter entfernt und lehnt ihn
+mit HTTP 400 ab, Gemini nimmt ihn an und ignoriert ihn. Sie stehen nur noch
+für den Ollama-Rückfallpfad in der Konfiguration. Wer die Streuung
+beeinflussen will, tut das über `effort` oder über die Anweisungen.
+
+Liefere die geänderte `projekt.json` als Codeblock; `ratio_min`, `ratio_max`,
+`ratio_kalibriert` und `sprachpaar` unverändert lassen.

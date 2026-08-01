@@ -117,6 +117,24 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Fallenblock wirft Ausnahme", repr(e))
 
+    # Am echten Text gefunden: die Quelle setzt Rede in ‘…’, die
+    # Zeichenklasse des Anredefilters kannte nur "…" und »…«. Der Abschnitt
+    # blieb leer, obwohl der Text 82 Siez-Formen enthaelt.
+    try:
+        import konkordanz as K
+        saetze = G.saetze_nl(
+            "‘Zoekt u de weg, meneer?’ vroeg zij. Hij liep verder. "
+            "«Hebt u even?» zei de man. „Uw jas, mevrouw.“")
+        n = len(K.anredebelege(saetze))
+        if n < 3:
+            b.add("FEHLER", f"Anredebelege findet {n} statt 3",
+                  "Anfuehrungszeichen der Quelle nicht erkannt — "
+                  "G.ANFUEHRUNG pruefen.")
+        else:
+            b.add("OK", "Anredebelege erkennt ‘…’, «…» und „…“")
+    except Exception as e:
+        b.add("FEHLER", "Anredebelege wirft Ausnahme", repr(e))
+
     selbsttest_backends(b)
 
 
