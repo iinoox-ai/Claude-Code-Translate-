@@ -1,0 +1,4 @@
+!ls -lt /content/drive/MyDrive/uebersetzung/1919/teile | head
+--> ob wirklich runtime weg war
+colab_start.lauf("pipeline.py", "status", code=CODE)
+--> aktueller Status
