@@ -147,7 +147,7 @@ def main():
                   f"angetastet — der Vorschlag geht nach {args.ausgabe}.")
 
     print(f"\n{modell} arbeitet ...", flush=True)
-    antwort = G.chat(cfg, SYSTEM, user, 0.0, rolle="vorbereitung")
+    antwort = G.chat(cfg, SYSTEM, user, 0.0, rolle="vorbereitung", roh=True)
     if not antwort.strip():
         sys.exit("FEHLER: leere Antwort.")
 

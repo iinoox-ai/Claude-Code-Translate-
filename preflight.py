@@ -294,6 +294,31 @@ def selbsttest_backends(b):
     except Exception as e:
         b.add("FEHLER", "Antwortauswertung wirft Ausnahme", repr(e))
 
+    # --- saeubern darf Codebloecke nicht zerlegen -----------------------
+    # vorbereitung.py laesst eine Antwort schreiben, die selbst Codebloecke
+    # enthaelt. saeubern() schneidet den aeusseren Zaun ab — richtig fuer
+    # uebersetzte Prosa, zerstoerend hier: die inneren Zaeune bleiben
+    # unpaarig zurueck und die Datei ist nicht mehr auswertbar.
+    try:
+        antwort = {"stop_reason": "end_turn", "usage": {},
+                   "content": [{"type": "text", "text":
+                                "```markdown\n## Übersetzung\n\nRegel.\n```\n"
+                                "\n```json\n{\"a\": 1}\n```"}]}
+        gesaeubert, _ = G.AnthropicBackend().antwort_lesen(dict(antwort))
+        roh, _ = G.AnthropicBackend().antwort_lesen(dict(antwort), roh=True)
+        fehler = []
+        if len(re.findall(r"(?m)^```", roh)) != 4:
+            fehler.append("roh=True veraendert die Zaeune")
+        if len(re.findall(r"(?m)^```", gesaeubert)) != 2:
+            fehler.append("saeubern schneidet nicht mehr wie bisher")
+        if fehler:
+            b.add("FEHLER", "Rohausgabe fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "roh=True laesst Codebloecke unangetastet, "
+                        "saeubern bleibt fuer Prosa unveraendert")
+    except Exception as e:
+        b.add("FEHLER", "Rohausgabe wirft Ausnahme", repr(e))
+
     # --- Anzeige darf nicht den Rueckfallschluessel nennen ---------------
     # uebersetzung.py meldete im Kopf 'cfg["modell"]' — den Ollama-Namen —
     # obwohl ueber die Rolle laengst Opus 5 lief. Der Lauf war richtig, die

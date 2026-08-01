@@ -547,7 +547,7 @@ class Backend:
     """Basisklasse. Ein weiterer Anbieter heisst: eine Unterklasse."""
 
     def chat(self, cfg, system, user, temperature, num_ctx=None,
-             rolle="uebersetzung", modell=""):
+             rolle="uebersetzung", modell="", roh=False):
         raise NotImplementedError
 
     def verfuegbare_modelle(self, cfg):
@@ -606,7 +606,7 @@ class OllamaBackend(Backend):
     _think = True
 
     def chat(self, cfg, system, user, temperature, num_ctx=None,
-             rolle="uebersetzung", modell=""):
+             rolle="uebersetzung", modell="", roh=False):
         host = cfg["ollama_host"]
         timeout = (cfg["timeout_connect"], cfg["timeout_read"])
 
@@ -633,7 +633,8 @@ class OllamaBackend(Backend):
         d = r.json()
         if d.get("done_reason") == "length":
             print("    WARNUNG: Ausgabe am Limit abgeschnitten.")
-        return saeubern(d.get("message", {}).get("content", ""))
+        inhalt = d.get("message", {}).get("content", "")
+        return inhalt if roh else saeubern(inhalt)
 
     def verfuegbare_modelle(self, cfg):
         r = requests.get(f"{cfg['ollama_host']}/api/tags", timeout=10)
@@ -666,7 +667,7 @@ class AnthropicBackend(Backend):
             "output_config": {"effort": effort_fuer(cfg, rolle)},
         }
 
-    def antwort_lesen(self, d):
+    def antwort_lesen(self, d, roh=False):
         """(Text, Usage). Wirft bei Ablehnung, statt Leeres zurueckzugeben."""
         if d.get("stop_reason") == "refusal":
             grund = (d.get("stop_details") or {}).get("category") or "ohne Angabe"
@@ -682,10 +683,10 @@ class AnthropicBackend(Backend):
                  "cache_schreiben": u.get("cache_creation_input_tokens", 0)}
         if d.get("stop_reason") == "max_tokens":
             print("    WARNUNG: Ausgabe am max_tokens-Limit abgeschnitten.")
-        return saeubern(text), usage
+        return (text if roh else saeubern(text)), usage
 
     def chat(self, cfg, system, user, temperature, num_ctx=None,
-             rolle="uebersetzung", modell=""):
+             rolle="uebersetzung", modell="", roh=False):
         schluessel = api_schluessel("anthropic")
         if not schluessel:
             sys.exit("FEHLER: ANTHROPIC_API_KEY fehlt.\n"
@@ -699,7 +700,7 @@ class AnthropicBackend(Backend):
         r = sende(lambda: requests.post(self.URL, json=p, headers=kopfzeilen,
                                         timeout=timeout),
                   cfg["max_retries"])
-        text, usage = self.antwort_lesen(r.json())
+        text, usage = self.antwort_lesen(r.json(), roh)
         usage_buchen(rolle, modell, usage)
         return text
 
@@ -720,7 +721,7 @@ class GeminiBackend(Backend):
             "contents": [{"role": "user", "parts": [{"text": user}]}],
         }
 
-    def antwort_lesen(self, d):
+    def antwort_lesen(self, d, roh=False):
         kandidaten = d.get("candidates") or []
         if not kandidaten:
             grund = (d.get("promptFeedback") or {}).get("blockReason")
@@ -780,7 +781,7 @@ class GeminiBackend(Backend):
         r = sende(lambda: requests.post(url, json=p, headers=kopfzeilen,
                                         timeout=timeout),
                   cfg["max_retries"])
-        text, usage = self.antwort_lesen(r.json())
+        text, usage = self.antwort_lesen(r.json(), roh)
         usage_buchen(rolle, modell, usage)
         return text
 
@@ -799,15 +800,22 @@ def backend(cfg, modell=None):
     return b
 
 
-def chat(cfg, system, user, temperature, num_ctx=None, rolle="uebersetzung"):
+def chat(cfg, system, user, temperature, num_ctx=None, rolle="uebersetzung",
+         roh=False):
     """Der einzige Modellaufruf des Projekts.
 
     Die Rolle loest Modell, Backend und Effort auf. Fehlt 'modell_<rolle>',
-    greift der Ollama-Rueckfallpfad — unveraendertes Altverhalten."""
+    greift der Ollama-Rueckfallpfad — unveraendertes Altverhalten.
+
+    'roh=True' schaltet saeubern() ab. Noetig, wenn die Antwort selbst
+    Codebloecke enthaelt: saeubern schneidet den aeusseren Zaun ab und
+    laesst die inneren unpaarig zurueck. Fuer uebersetzten Fliesstext
+    bleibt saeubern richtig — es entfernt genau die Vorreden und Zaeune,
+    die ein Modell unaufgefordert um Prosa legt."""
     modell = modell_fuer(cfg, rolle)
     return backend(cfg, modell).chat(cfg, system, user, temperature,
                                      num_ctx=num_ctx, rolle=rolle,
-                                     modell=modell)
+                                     modell=modell, roh=roh)
 
 
 def modelle_vorhanden(cfg):
