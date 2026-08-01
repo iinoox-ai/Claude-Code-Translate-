@@ -70,6 +70,33 @@ deshalb ist die Korrektur nötig, und deshalb muss sie genau sein.
 Die Liste in `HOMOGRAPHEN` ist die Stelle, an der bei einem neuen Text
 nachgebessert wird.
 
+## Spatium vor Auslassungspunkten bleibt stehen
+
+**Entschieden:** `…` fällt aus der Zeichenklasse der Regel „kein Leerzeichen
+vor Satzzeichen". Komma, Punkt, Semikolon, Doppelpunkt, Frage- und
+Ausrufezeichen behalten sie.
+
+Im Deutschen hängt das Spatium davon ab, was ausgelassen wird: Steht `…` für
+ein ganzes Wort, gehört eines davor (`Meine Eltern sind … nicht`); ist ein
+Wort abgebrochen, entfällt es (`Verd…`). Welcher Fall vorliegt, entscheidet
+der Satz und kein Muster — also bleibt stehen, was das Korrektorat gesetzt
+hat.
+
+**Gemessen** am Testlektorat vom 31.07.2026: sechs getilgte Spatien, darunter
+`sind … nicht` → `sind… nicht` und `für das Vaterland …` → `Vaterland…`. Die
+`anweisungen.md` des Projekts verbot das ausdrücklich („Vorhandene Spatien vor
+… nicht entfernen"), konnte sich aber nicht durchsetzen: Der deterministische
+Durchgang läuft zuletzt und liest keine Anweisungen.
+
+Das ist der allgemeine Fall, der hier interessiert: **Eine deterministische
+Regel schlägt jede Anweisung, weil sie danach kommt.** Wo beide dasselbe
+Feld beanspruchen, muss die Regel nachgeben oder die Anweisung
+verschwinden — eine Anweisung ohne Wirkung ist schlimmer als keine, weil
+niemand merkt, dass sie nicht gilt.
+
+Der Selbsttest prüft seither beide Richtungen: Spatium vor `…` erhalten,
+Spatium vor Komma und Semikolon getilgt.
+
 ## Bewusste Wiederholung ist geschützt
 
 **Entschieden:** Der Stimmschutz weist beide LLM-Durchgänge an, wiederkehrende

@@ -47,7 +47,8 @@ def selbsttest(cfg, b):
 
     probe = ('Hij zei -- eigenlijk fluisterde hij -- dat het "goed" was... '
              'Die Masse der Menschen. Die Busse fuhren nicht. Ein Ass im '
-             'Ärmel. Strasse, gross, draussen. Ein Test\u2014mit Strich.')
+             'Ärmel. Strasse, gross, draussen. Ein Test\u2014mit Strich. '
+             'Meine Eltern sind ... nicht die Sorte , sagte er ; leise.')
     try:
         neu, zaehler = L.normalisieren(probe, cfg)
         for falsch, soll in (("Maße der Menschen", "Masse der Menschen"),
@@ -59,6 +60,19 @@ def selbsttest(cfg, b):
         for soll in ("Straße", "groß", "draußen", " – ", "»goed«", "…"):
             if soll not in neu:
                 b.add("FEHLER", f"Normalisierer setzt '{soll}' nicht")
+        # Das Spatium vor … traegt Bedeutung (ausgelassenes Wort gegen
+        # abgebrochenes) und darf nicht wegnormalisiert werden; vor Komma
+        # und Semikolon muss es weiterhin fallen.
+        if "sind … nicht" not in neu:
+            b.add("FEHLER", "Spatium vor … wird getilgt",
+                  "Auslassungspunkte fuer ein ganzes Wort behalten es. "
+                  "Diese Regel hat im Testlektorat eine Anweisung "
+                  "ueberstimmt.")
+        elif "Sorte, sagte er; leise" not in neu:
+            b.add("FEHLER", "Spatium vor Komma oder Semikolon bleibt stehen")
+        else:
+            b.add("OK", "Spatien: vor … erhalten, vor Komma und "
+                        "Semikolon getilgt")
         b.add("OK", f"Normalisierer laeuft ({sum(zaehler.values())} "
                     f"Aenderungen auf der Probe)")
     except Exception as e:

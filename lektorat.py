@@ -159,7 +159,14 @@ def normalisieren(text, cfg):
 
     text, n = re.subn(r"[ \t]{2,}", " ", text)
     zaehl("mehrfache Leerzeichen", n)
-    text, n = re.subn(r"\s+([,.;:!?\u2026])", r"\1", text)
+    # \u2026 gehoert NICHT in diese Klasse. Auslassungspunkte, die fuer ein
+    # ausgelassenes Wort stehen, tragen im Deutschen ein Spatium davor
+    # ("Meine Eltern sind \u2026 nicht"); nur beim abgebrochenen Wort ("Verd\u2026")
+    # entfaellt es. Was davon gilt, entscheidet der Satz, nicht ein Muster \u2014
+    # also bleibt hier stehen, was das Korrektorat gesetzt hat. Vorher hat
+    # diese Zeile im Testlektorat sechs Spatien getilgt und damit eine
+    # Anweisung ueberstimmt, die genau das verbot.
+    text, n = re.subn(r"\s+([,.;:!?])", r"\1", text)
     zaehl("Leerzeichen vor Satzzeichen", n)
     text, n = re.subn(r"([\u00bb\u201e\u203a])\s+", r"\1", text)
     zaehl("Leerzeichen nach öffnendem Zeichen", n)
