@@ -31,7 +31,11 @@ REPORT_L = "qa_lektorat.txt"
 REPORT_K = "qa_konsistenz.txt"
 
 REGISTER = {
-    "verkürzte Formen (hab, is, nix)": r"\b(hab|is|nix|nich|grad|halt)\b",
+    # Der Name muss ALLE Alternativen nennen. Stand hier frueher nur
+    # "(hab, is, nix)", suchte man die gemeldeten Treffer im Diff
+    # vergeblich — sie steckten in "halt" und "grad".
+    "verkürzte Formen (hab, is, nix, nich, grad, halt)":
+        r"\b(hab|is|nix|nich|grad|halt)\b",
     "kriegen":                r"\bkrieg(e|st|t|en|te|ten)\b",
     "bekommen":               r"\bbekomm(e|st|t|en)\b",
     "wegen + Dativ":          r"\bwegen (dem|der|den)\b",
