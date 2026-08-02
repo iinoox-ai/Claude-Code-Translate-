@@ -33,6 +33,7 @@ import gemeinsam as G
 
 DIFF    = "lektorat_diff.txt"
 WARN    = "lektorat_warnungen.log"
+BERICHT = "bericht.html"
 NORMBER = "normalisierung_report.txt"
 
 
@@ -537,7 +538,7 @@ def bericht_bauen(praefix):
     diff = praefix + DIFF
     if not os.path.exists(diff):
         return None
-    ziel = praefix + "bericht.html"
+    ziel = praefix + BERICHT
     code = os.path.dirname(os.path.abspath(__file__))
     try:
         r = subprocess.run(

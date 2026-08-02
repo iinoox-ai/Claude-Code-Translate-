@@ -95,6 +95,22 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Diminutivzaehler wirft Ausnahme", repr(e))
 
+    # Was ein Schritt als Ergebnis ausweist, muss auch im Paket landen.
+    # bericht.html wurde erzeugt, gemeldet — und vom Paket vergessen;
+    # gemerkt hat es niemand, weil beide Stellen fuer sich stimmten.
+    try:
+        import paket as P
+        fehlt = [d for d in (L.DIFF, L.BERICHT, G.F["lektoriert"],
+                             G.F["uebersetzung"])
+                 if d not in P.MITNEHMEN]
+        if fehlt:
+            b.add("FEHLER", "Ergebnisdateien fehlen im Paket",
+                  ", ".join(fehlt))
+        else:
+            b.add("OK", "Paket enthaelt alle ausgewiesenen Ergebnisdateien")
+    except Exception as e:
+        b.add("FEHLER", "Paketliste nicht pruefbar", repr(e))
+
     # Nennt ein Metrikname eine Wortliste, muss sie zur Regex passen.
     # Sonst schickt der Bericht den Leser hinter Woertern her, die gar
     # nicht gezaehlt werden.

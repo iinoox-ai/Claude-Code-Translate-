@@ -17,7 +17,9 @@ MITNEHMEN = [
     G.F["entwurf"], G.F["uebersetzung"], G.F["normalisiert"], G.F["lektoriert"],
     "preflight_report.txt", "qa_uebersetzung.txt", "qa_lektorat.txt",
     "qa_konsistenz.txt", "leitmotiv_varianten.txt",
-    "normalisierung_report.txt", "lektorat_diff.txt",
+    # bericht.html gehoert dazu: Es ist die Fassung des Diffs, die ein
+    # Mensch tatsaechlich liest. Sie fehlte bis zum ersten Volllauf.
+    "normalisierung_report.txt", "lektorat_diff.txt", "bericht.html",
     "pipeline.log", "uebersetzung_warnungen.log", "lektorat_warnungen.log",
     "zitate_verdacht.txt", "analysepaket.md",
     "bewertung_uebersetzung.md", "bewertung_lektorat.md",
