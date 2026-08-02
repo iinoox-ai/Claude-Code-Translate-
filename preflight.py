@@ -95,6 +95,29 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Diminutivzaehler wirft Ausnahme", repr(e))
 
+    # Nennt ein Metrikname eine Wortliste, muss sie zur Regex passen.
+    # Sonst schickt der Bericht den Leser hinter Woertern her, die gar
+    # nicht gezaehlt werden.
+    try:
+        fehler = []
+        for name, pat in Q.REGISTER.items():
+            m = re.search(r"\(([^)]*)\)\s*$", name)
+            if not m:
+                continue
+            genannt = {w.strip() for w in m.group(1).split(",")}
+            g = re.search(r"\(([^)]*)\)", pat)
+            gemessen = set(g.group(1).split("|")) if g else set()
+            if genannt != gemessen:
+                fehler.append(f"{name}: Name nennt {sorted(genannt)}, "
+                              f"Regex zaehlt {sorted(gemessen)}")
+        if fehler:
+            b.add("FEHLER", "Metrikname und Muster weichen ab",
+                  "; ".join(fehler))
+        else:
+            b.add("OK", "Registermetriken: Name und Muster decken sich")
+    except Exception as e:
+        b.add("FEHLER", "Registermetrik nicht pruefbar", repr(e))
+
     try:
         q, mit, ges = G.perfekt_quote(
             "Er ging nach Hause. Sie sagte, dass er es gesagt hat. "
