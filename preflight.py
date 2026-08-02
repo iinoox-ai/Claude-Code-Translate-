@@ -95,6 +95,25 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Diminutivzaehler wirft Ausnahme", repr(e))
 
+    # Ein gekuerzter Durchgang bekommt Versuche wie ein Netzfehler.
+    try:
+        c = dict(cfg)
+        c["max_retries"] = 3
+        faelle = [(1.00, 1, "ok"), (1.00, 3, "ok"),
+                  (0.29, 1, "wiederholen"), (1.14, 2, "wiederholen"),
+                  (0.29, 3, "verwerfen"), (0.11, 3, "verwerfen")]
+        fehler = [f"r={r} Versuch {v}: {L.pass_urteil(r, c, v)} statt {soll}"
+                  for r, v, soll in faelle
+                  if L.pass_urteil(r, c, v) != soll]
+        if fehler:
+            b.add("FEHLER", "Urteil ueber Lektoratsdurchgaenge falsch",
+                  "; ".join(fehler))
+        else:
+            b.add("OK", "Gekuerzter Durchgang wird wiederholt, erst der "
+                        "letzte Versuch verwirft")
+    except Exception as e:
+        b.add("FEHLER", "pass_urteil nicht pruefbar", repr(e))
+
     # Was ein Schritt als Ergebnis ausweist, muss auch im Paket landen.
     # bericht.html wurde erzeugt, gemeldet — und vom Paket vergessen;
     # gemerkt hat es niemand, weil beide Stellen fuer sich stimmten.
