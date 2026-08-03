@@ -95,6 +95,74 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Diminutivzaehler wirft Ausnahme", repr(e))
 
+    # --- Sheets-Anbindung: Validierung, Abbildung, Rueckfallpfad -------
+    # Alles ohne Netz pruefbar, weil die Pruefung auf gelesenen Zeilen
+    # arbeitet und nicht auf gspread.
+    try:
+        import referenz_sync as RS
+        fehler = []
+
+        if RS.aktiv({"sheets_id": ""}) or RS.aktiv({}):
+            fehler.append("leere sheets_id gilt faelschlich als aktiv")
+        if not RS.aktiv({"sheets_id": "1AbC"}):
+            fehler.append("gesetzte sheets_id gilt nicht als aktiv")
+        if RS.sicherstellen({"sheets_id": ""}, still=True) is not False:
+            fehler.append("sicherstellen() ist ohne sheets_id kein No-op")
+
+        for tab, spalten, ziel, _, pflicht in RS.TABS:
+            if ziel not in G.F:
+                fehler.append(f"{tab}: Ziel '{ziel}' steht nicht in G.F")
+            for s in pflicht:
+                if s not in spalten:
+                    fehler.append(f"{tab}: Pflichtspalte '{s}' fehlt "
+                                  f"in der Spaltenliste")
+
+        # Zeile 2 gut, Zeile 3 ohne Pronomen, Zeile 4 doppelt.
+        zeilen = [(2, {"name": "Bennett", "pronomen": "er/ihn"}),
+                  (3, {"name": "Babette", "pronomen": ""}),
+                  (4, {"name": "Bennett", "pronomen": "er/ihn"})]
+        daten, f = RS._pruefen_und_bauen(
+            "Personen", zeilen, lambda z: (z["name"], z["pronomen"]),
+            ["name", "pronomen"])
+        if len(daten) != 1:
+            fehler.append(f"Personen: {len(daten)} statt 1 gueltige Zeile")
+        if not any("Zeile 3" in m and "pronomen" in m for m in f):
+            fehler.append(f"fehlende Pflichtspalte nicht zeilengenau: {f}")
+        if not any("Zeile 4" in m and "Zeile 3" not in m and
+                   "schon in Zeile 2" in m for m in f):
+            fehler.append(f"Doppeleintrag nennt nicht beide Zeilen: {f}")
+
+        # Die Spalte heisst deutsch_ziel, das Feld heisst deutsch — und
+        # block_anrede liest 'deutsch'. Beide Seiten aneinandergehalten.
+        tab = [t for t in RS.TABS if t[0] == "Anrede"][0]
+        anrede, f = RS._pruefen_und_bauen(
+            "Anrede",
+            [(2, {"beziehung": "Bennett zu Scott", "figuren": "Bennett, Scott",
+                  "niederlaendisch": "u", "deutsch_ziel": "Sie",
+                  "hinweis": ""})],
+            tab[3], tab[4])
+        if f:
+            fehler.append(f"gueltige Anredezeile abgelehnt: {f}")
+        else:
+            # Nicht nur 'Block nicht leer' pruefen: block_anrede baut die
+            # Zeile auch dann, wenn das Zielfeld fehlt — dann steht dort
+            # 'deutsch ' und nichts dahinter. Der Wert muss ankommen.
+            block = U.block_anrede("Bennett sah Scott an.",
+                                   {"Bennett": "er/ihn", "Scott": "er/ihn"},
+                                   anrede)
+            if "Sie" not in block:
+                fehler.append("aus dem Sheet gebaute anrede.json traegt "
+                              "die Zielanrede nicht in den Prompt — "
+                              f"Feldnamen weichen ab: {block!r}")
+
+        if fehler:
+            b.add("FEHLER", "Sheets-Anbindung fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Sheets: Validierung zeilengenau, Spaltenabbildung "
+                        "passt zum Leser, leere sheets_id bleibt No-op")
+    except Exception as e:
+        b.add("FEHLER", "Sheets-Anbindung nicht pruefbar", repr(e))
+
     # Ein gekuerzter Durchgang bekommt Versuche wie ein Netzfehler.
     try:
         c = dict(cfg)

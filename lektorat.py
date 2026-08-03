@@ -30,6 +30,7 @@ import sys
 import time
 
 import gemeinsam as G
+import referenz_sync as R
 
 DIFF    = "lektorat_diff.txt"
 WARN    = "lektorat_warnungen.log"
@@ -370,6 +371,7 @@ def main():
 
     G.kopf("LEKTORAT" + (" (Test)" if args.test else ""))
     cfg = G.lade_config()
+    R.sicherstellen(cfg)          # No-op ohne sheets_id
     praefix = "test/" if args.test else ""
     quelle = praefix + G.F["uebersetzung"]
     ziel_datei = praefix + G.F["lektoriert"]

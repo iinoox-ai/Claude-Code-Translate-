@@ -95,6 +95,12 @@ STANDARD = {
 
     "lektorat_passes":           ["det", "stil", "korrektorat", "det"],
 
+    # Leer = altes Verhalten: die Referenz-JSONs werden direkt gelesen.
+    # Gesetzt = das Spreadsheet ist die Quelle, referenz_sync erzeugt die
+    # JSONs daraus. Kein Bestandteil des Konfigurationsfingerabdrucks —
+    # der Ablageort der Referenzdaten aendert den Text nicht.
+    "sheets_id":                 "",
+
     "glossar_quelle":            "extern",
     "export_glossar":            True,
     "export_bewertung":          True,
@@ -132,7 +138,7 @@ AENDERBAR = {
     "num_ctx", "modell", "backend", "ollama_host",
     "test_words_erzaehlung", "test_words_dialog",
     "lektorat_ratio_min", "lektorat_ratio_max",
-    "export_glossar", "export_bewertung", "glossar_quelle",
+    "export_glossar", "export_bewertung", "glossar_quelle", "sheets_id",
     "timeout_connect", "timeout_read", "max_retries",
     "backend_standard", "max_tokens_api", "timeout_read_api",
 } | {f"modell_{r}" for r in (

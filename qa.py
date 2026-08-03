@@ -25,6 +25,7 @@ import sys
 from collections import Counter
 
 import gemeinsam as G
+import referenz_sync as R
 
 REPORT_U = "qa_uebersetzung.txt"
 REPORT_L = "qa_lektorat.txt"
@@ -449,6 +450,7 @@ def main():
 
     G.kopf("QUALITAETSPRUEFUNG")
     cfg = G.lade_config()
+    R.sicherstellen(cfg)          # No-op ohne sheets_id
     praefix = "test/" if args.test else ""
 
     if args.uebersetzung:
