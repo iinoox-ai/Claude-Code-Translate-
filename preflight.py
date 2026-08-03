@@ -1006,6 +1006,13 @@ def main():
         b.schreiben(REPORT)
         sys.exit(1)
 
+    # Erst nach dem Selbsttest, nie waehrend --selbsttest: der laeuft ohne
+    # Netz. Ohne diesen Aufruf pruefte der Preflight im Sheets-Betrieb die
+    # JSONs des letzten Laufs und meldete Ordnung, waehrend im Sheet ein
+    # Fehler stand — also genau dort, wo er ihn finden soll.
+    import referenz_sync as R
+    R.sicherstellen(cfg)
+
     # Die Pruefungen richten sich nach den tatsaechlich benutzten Anbietern:
     # ohne Ollama-Rolle gibt es weder GPU- noch VRAM-Frage.
     backends = G.benutzte_backends(cfg)
