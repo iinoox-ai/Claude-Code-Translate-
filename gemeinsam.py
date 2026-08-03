@@ -72,6 +72,7 @@ STANDARD = {
     "modell_stil":               "",
     "modell_korrektorat":        "",
     "modell_vorbereitung":       "",
+    "modell_zitat":              "",
     "modell_judge":              "",
     "modell_annotation":         "",
     "modell_vergleich":          "",
@@ -80,6 +81,7 @@ STANDARD = {
     "effort_stil":               "hoch",
     "effort_korrektorat":        "hoch",
     "effort_vorbereitung":       "hoch",
+    "effort_zitat":              "hoch",
     "effort_judge":              "hoch",
     "effort_annotation":         "niedrig",
     "effort_vergleich":          "hoch",
@@ -158,10 +160,10 @@ AENDERBAR = {
     "backend_standard", "max_tokens_api", "timeout_read_api",
 } | {f"modell_{r}" for r in (
     "uebersetzung", "revision", "stil", "korrektorat",
-    "vorbereitung", "judge", "annotation", "vergleich")
+    "vorbereitung", "zitat", "judge", "annotation", "vergleich")
 } | {f"effort_{r}" for r in (
     "uebersetzung", "revision", "stil", "korrektorat",
-    "vorbereitung", "judge", "annotation", "vergleich")}
+    "vorbereitung", "zitat", "judge", "annotation", "vergleich")}
 
 
 def lade_config(pfad=CONFIG, pflicht=True):
@@ -366,7 +368,7 @@ def api_schluessel(anbieter, still=True):
 # ==================================================================
 # Rollen, Modelle, Backends
 # ==================================================================
-ROLLEN = ("uebersetzung", "revision", "stil", "korrektorat",
+ROLLEN = ("uebersetzung", "revision", "stil", "korrektorat", "zitat",
           "vorbereitung", "judge", "annotation", "vergleich")
 
 # Das Backend ergibt sich aus dem Modellnamen, nicht aus der Konfiguration.
@@ -710,8 +712,8 @@ class AnthropicBackend(Backend):
     URL     = "https://api.anthropic.com/v1/messages"
     VERSION = "2023-06-01"
 
-    def payload(self, cfg, system, user, rolle, modell):
-        return {
+    def payload(self, cfg, system, user, rolle, modell, werkzeuge=None):
+        p = {
             "model": modell,
             "max_tokens": int(cfg.get("max_tokens_api", 32000)),
             # Liste statt String: nur ein Block kann den Cache-Marker tragen.
@@ -720,6 +722,9 @@ class AnthropicBackend(Backend):
             "messages": [{"role": "user", "content": user}],
             "output_config": {"effort": effort_fuer(cfg, rolle)},
         }
+        if werkzeuge:
+            p["tools"] = werkzeuge
+        return p
 
     def antwort_lesen(self, d, roh=False):
         """(Text, Usage). Wirft bei Ablehnung, statt Leeres zurueckzugeben."""
@@ -740,13 +745,13 @@ class AnthropicBackend(Backend):
         return (text if roh else saeubern(text)), usage
 
     def chat(self, cfg, system, user, temperature, num_ctx=None,
-             rolle="uebersetzung", modell="", roh=False):
+             rolle="uebersetzung", modell="", roh=False, werkzeuge=None):
         schluessel = api_schluessel("anthropic")
         if not schluessel:
             sys.exit("FEHLER: ANTHROPIC_API_KEY fehlt.\n"
                      "  Colab:  im Secrets-Reiter hinterlegen\n"
                      "  sonst:  export ANTHROPIC_API_KEY=...")
-        p = self.payload(cfg, system, user, rolle, modell)
+        p = self.payload(cfg, system, user, rolle, modell, werkzeuge)
         kopfzeilen = {"x-api-key": schluessel,
                       "anthropic-version": self.VERSION,
                       "content-type": "application/json"}
@@ -855,7 +860,7 @@ def backend(cfg, modell=None):
 
 
 def chat(cfg, system, user, temperature, num_ctx=None, rolle="uebersetzung",
-         roh=False):
+         roh=False, werkzeuge=None):
     """Der einzige Modellaufruf des Projekts.
 
     Die Rolle loest Modell, Backend und Effort auf. Fehlt 'modell_<rolle>',
@@ -867,9 +872,16 @@ def chat(cfg, system, user, temperature, num_ctx=None, rolle="uebersetzung",
     bleibt saeubern richtig — es entfernt genau die Vorreden und Zaeune,
     die ein Modell unaufgefordert um Prosa legt."""
     modell = modell_fuer(cfg, rolle)
-    return backend(cfg, modell).chat(cfg, system, user, temperature,
-                                     num_ctx=num_ctx, rolle=rolle,
-                                     modell=modell, roh=roh)
+    b = backend(cfg, modell)
+    if werkzeuge and not isinstance(b, AnthropicBackend):
+        # Serverseitige Werkzeuge gibt es nur auf dem Anthropic-Pfad. Lieber
+        # ohne laufen als mit einer Payload, die der Anbieter ablehnt.
+        print(f"    HINWEIS: {modell} kennt keine Werkzeuge — "
+              f"Aufruf ohne Websuche")
+        werkzeuge = None
+    zusatz = {"werkzeuge": werkzeuge} if werkzeuge else {}
+    return b.chat(cfg, system, user, temperature, num_ctx=num_ctx,
+                  rolle=rolle, modell=modell, roh=roh, **zusatz)
 
 
 def modelle_vorhanden(cfg):

@@ -134,8 +134,11 @@ hätte ein nachträglich ergänzter Tab jede bestehende Einrichtung lahmgelegt.
 ## Zitate: nichts ohne Freigabe
 
 `zitatrecherche` schlägt vor, der Mensch gibt frei
-(`freigegeben = ja` in der Review-Liste). Automatische Übernahme ist
-ausdrücklich verworfen — Abdruckrechte etablierter Übersetzungen und der
+(`freigegeben = ja` in `zitate_review.md` oder im Tab `ZitateReview`). Der
+Schritt füllt `vorschlag_de` und die Quellenangaben, **nie `original_deutsch`**
+— dieses eine Feld setzt nur `freigabe_einlesen()`, und nur nach Freigabe.
+Nicht-niederländische Zitate bleiben im Original (`original_belassen`) und
+brauchen keine Freigabe. Automatische Übernahme ist ausdrücklich verworfen — Abdruckrechte etablierter Übersetzungen und der
 Grundsatz „lieber markierte Lücke als erfundener Wortlaut". Eingesetzte
 Zitate bleiben vom Lektorat ausgenommen.
 

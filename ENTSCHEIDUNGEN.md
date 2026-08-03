@@ -70,6 +70,37 @@ deshalb ist die Korrektur nötig, und deshalb muss sie genau sein.
 Die Liste in `HOMOGRAPHEN` ist die Stelle, an der bei einem neuen Text
 nachgebessert wird.
 
+## Zitatrecherche schreibt `original_deutsch` nie selbst
+
+**Entschieden:** `zitatrecherche.py` füllt `vorschlag_de`, `uebersetzer`,
+`quelle` und `konfidenz` — aber **nicht** `original_deutsch`. Genau dieses eine
+Feld setzt `uebersetzung.py` in den Zieltext ein, und es wird ausschließlich
+von `freigabe_einlesen()` gefüllt, aus der Review-Liste bzw. dem Sheet-Tab.
+
+Die Trennung ist der ganze Punkt des Schritts. Ein Modell, das recherchiert und
+gleichzeitig einsetzt, hat die Freigabe strukturell umgangen — und niemand
+merkt es, weil das Ergebnis plausibel aussieht. Der Selbsttest prüft deshalb
+nicht, ob der Vorschlag gut ist, sondern ob er **ohne Freigabe im Text landet**.
+Die Gegenprobe, die `original_deutsch` in der Recherche setzt, meldet
+„FREIGABE UMGANGEN".
+
+**Nicht-niederländische Zitate sind der Sonderfall ohne Entscheidung.** Ein
+englisches Motto in einem niederländischen Roman steht auch in der deutschen
+Ausgabe englisch. Status `original_belassen`, `original_deutsch` = das Original,
+`freigegeben` = `entfaellt`. Hier gibt es nichts freizugeben, und eine Zeile in
+der Liste, die auf eine Entscheidung wartet, die niemand treffen kann, ist
+Ballast.
+
+**Die Websuche ist kein Beiwerk, sie ist der Zweck.** Ohne sie reimt sich das
+Modell einen Wortlaut zusammen — also genau der Fehler, den der Schritt
+verhindern soll. Serverseitige Werkzeuge gibt es nur auf dem Anthropic-Pfad;
+ist die Rolle auf ein anderes Backend gelegt, läuft der Aufruf mit Hinweis ohne
+Suche, statt mit einer Payload, die der Anbieter ablehnt.
+
+Die Konfidenzschwelle markiert, sie entscheidet nicht. Ein unsicherer Vorschlag
+wird gezeigt und als unsicher gekennzeichnet — der Mensch entscheidet, nicht
+die Zahl.
+
 ## Rahmenwechsel: Markerzeile bleibt im Text, Ebene kommt aus dem Stilprofil
 
 **Entschieden:** An jeder Zeile, die dem `rahmen_marker` entspricht, endet die
