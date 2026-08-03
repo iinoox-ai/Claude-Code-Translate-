@@ -30,6 +30,7 @@ import sys
 import time
 
 import gemeinsam as G
+import referenz_sync as R
 
 DIFF    = "lektorat_diff.txt"
 WARN    = "lektorat_warnungen.log"
@@ -318,6 +319,25 @@ Anmerkungen, kein Kommentar."""
 
 
 # ==================================================================
+class Verworfen(RuntimeError):
+    """Ein Durchgang kam gekuerzt zurueck und wird wiederholt."""
+
+
+def pass_urteil(r, cfg, versuch):
+    """Was mit dem Ergebnis eines LLM-Durchgangs geschieht.
+
+    Frueher galt: Verhaeltnis ausserhalb der Grenzen -> sofort verwerfen,
+    ohne zweiten Anlauf. Ein Netzfehler bekam drei Versuche, eine
+    abgeschnittene Antwort keinen — dabei ist sie genauso gut
+    wiederholbar. Gemessen am Volllauf 1919: Chunk 152 lieferte im
+    Stillektorat erst 0.37, beim naechsten Anlauf 1.01; Chunk 150 lief
+    beim zweiten Mal vollstaendig durch. Erst der letzte Versuch
+    verwirft."""
+    if cfg["lektorat_ratio_min"] <= r <= cfg["lektorat_ratio_max"]:
+        return "ok"
+    return "verwerfen" if versuch >= cfg["max_retries"] else "wiederholen"
+
+
 def diff_schreiben(fh, titel, vorher, nachher):
     a = [p.strip() for p in G.absaetze(vorher)]
     b = [p.strip() for p in G.absaetze(nachher)]
@@ -351,6 +371,7 @@ def main():
 
     G.kopf("LEKTORAT" + (" (Test)" if args.test else ""))
     cfg = G.lade_config()
+    R.sicherstellen(cfg)          # No-op ohne sheets_id
     praefix = "test/" if args.test else ""
     quelle = praefix + G.F["uebersetzung"]
     ziel_datei = praefix + G.F["lektoriert"]
@@ -460,6 +481,13 @@ def main():
             t0 = time.time()
 
             for versuch in range(1, cfg["max_retries"] + 1):
+                # Jeder Versuch beginnt beim unbearbeiteten Chunk, und der
+                # Diff wird erst nach dem ganzen Chunk geschrieben. Sonst
+                # liefe nach einem Fehler in der zweiten Stufe die erste
+                # ein zweites Mal auf ihrem eigenen Ergebnis, und der
+                # Bericht zeigte die verworfenen Anlaeufe mit an.
+                aktuell = chunks[i][0]
+                gepuffert = []
                 try:
                     for stufe in llm:
                         system, temp, label = PASS[stufe]
@@ -477,21 +505,29 @@ def main():
                             raise RuntimeError(f"leere Antwort ({stufe})")
 
                         r = G.verhaeltnis(aktuell, neu)
-                        if not (cfg["lektorat_ratio_min"] <= r
-                                <= cfg["lektorat_ratio_max"]):
+                        urteil = pass_urteil(r, cfg, versuch)
+                        if urteil == "wiederholen":
+                            print(f"    {label:14s} "
+                                  f"{time.time()-t1:5.0f}s  ({r:.2f}x)",
+                                  flush=True)
+                            raise Verworfen(f"{label} bei {r:.2f}x")
+                        if urteil == "verwerfen":
                             warnen(f"Chunk {i+1} [{stufe}]: Verhältnis "
-                                   f"{r:.2f} -> Durchgang verworfen")
+                                   f"{r:.2f} -> Durchgang verworfen "
+                                   f"(nach {versuch} Versuchen)")
                         else:
                             na, nb = (len(G.absaetze(aktuell)),
                                       len(G.absaetze(neu)))
                             if na != nb:
                                 warnen(f"Chunk {i+1} [{stufe}]: Absätze "
                                        f"{na} -> {nb}")
-                            diff_schreiben(fd, f"{i+1} - {label}", aktuell, neu)
+                            gepuffert.append((f"{i+1} - {label}", aktuell, neu))
                             aktuell = neu
                         print(f"    {label:14s} {time.time()-t1:5.0f}s  "
                               f"({r:.2f}x)", flush=True)
 
+                    for titel, vorher, nachher in gepuffert:
+                        diff_schreiben(fd, titel, vorher, nachher)
                     G.teil_schreiben("lektorat", i, aktuell, praefix)
                     letzte = G.schlusswoerter(aktuell, cfg["context_words"])
                     json.dump({"total": n, "fingerprint": fingerprint,
@@ -500,6 +536,11 @@ def main():
                     print("    " + G.fortschritt(zaehler, len(zu_tun), start,
                                                  "fertig") + "\n", flush=True)
                     break
+
+                except Verworfen as e:
+                    print(f"    Versuch {versuch}/{cfg['max_retries']}: "
+                          f"{e} -> Chunk neu")
+                    time.sleep(2)
 
                 except Exception as e:
                     print(f"    Versuch {versuch}/{cfg['max_retries']}: {e}")

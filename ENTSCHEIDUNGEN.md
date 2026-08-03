@@ -70,6 +70,32 @@ deshalb ist die Korrektur nötig, und deshalb muss sie genau sein.
 Die Liste in `HOMOGRAPHEN` ist die Stelle, an der bei einem neuen Text
 nachgebessert wird.
 
+## Sheets-Sync validiert vor dem ersten Modellaufruf
+
+**Entschieden:** `referenz_sync` liest, validiert und schreibt die JSONs am
+Anfang jedes Schritts, der Referenzdaten braucht — nicht beim Zugriff auf den
+einzelnen Wert.
+
+Ein Tippfehler in Zeile 14 des Glossars soll auffallen, bevor 135 Chunks
+gerechnet sind. Deshalb sammelt die Prüfung **alle** Fehler und meldet sie
+zeilengenau in einem Durchgang: Wer ein Sheet korrigiert, will die Liste, nicht
+einen Fehler pro Anlauf.
+
+Die Zeilennummern sind die des Spreadsheets — Kopfzeile 1, erster Datensatz 2.
+Alles andere zwingt den Menschen zum Umrechnen.
+
+**Fehlende Spalten sind ein Fehler, zusätzliche nicht.** Sonst bricht das Sheet,
+sobald jemand eine Notizspalte anhängt — und genau das tut man in einem
+Spreadsheet.
+
+Die Spaltennamen des Auftrags sind nicht überall die JSON-Feldnamen:
+`deutsch_ziel` im Tab wird zu `deutsch` im JSON, weil `block_anrede` diesen
+Namen liest. Ein Selbsttestfall hält beide Seiten aneinander und prüft, dass
+der **Wert** im Prompt ankommt — nicht bloß, dass ein Block entsteht. Die erste
+Fassung des Tests prüfte nur auf „nicht leer" und blieb grün, als ich die
+Abbildung zur Gegenprobe entfernte: `block_anrede` baut die Zeile auch mit
+leerem Zielfeld.
+
 ## Spatium vor Auslassungspunkten bleibt stehen
 
 **Entschieden:** `…` fällt aus der Zeichenklasse der Regel „kein Leerzeichen

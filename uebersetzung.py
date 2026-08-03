@@ -27,6 +27,7 @@ import sys
 import time
 
 import gemeinsam as G
+import referenz_sync as R
 
 WARN = "uebersetzung_warnungen.log"
 
@@ -422,6 +423,7 @@ def main():
 
     G.kopf("UEBERSETZUNG" + (f" (Test {args.variante})" if args.test else ""))
     cfg = G.lade_config()
+    R.sicherstellen(cfg)          # No-op ohne sheets_id
     revision = cfg["revision_pass"] and not args.no_revision
     chunk_words = (cfg["chunk_words_variante"] if args.variante == "B"
                    else cfg["chunk_words"])
