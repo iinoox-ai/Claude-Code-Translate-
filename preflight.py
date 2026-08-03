@@ -196,6 +196,55 @@ def selbsttest(cfg, b):
             fehler.append("Unterstrich-Schluessel gelten faelschlich als "
                           "Inhalt")
 
+        # Erstbefuellung gegen eine Attrappe: schreibt sie ueberhaupt,
+        # und laesst sie gefuellte Tabs in Ruhe? Der erste Echtversuch
+        # uebertrug nichts, und ohne diesen Fall bleibt offen, ob es an
+        # der Logik lag oder am Aufruf.
+        class _Blatt:
+            def __init__(s, t, werte=None):
+                s.title, s.werte = t, list(werte or [])
+
+            def get_all_values(s):
+                return s.werte
+
+            def update(s, a, b):
+                if not isinstance(a, list):
+                    raise TypeError("alte gspread-Reihenfolge")
+                s.werte = a
+
+        class _Buch:
+            def __init__(s, voll=()):
+                s.blaetter = {t: _Blatt(t, [["kopf"], ["schon", "da"]]
+                                        if t in voll else [])
+                              for t, *_ in RS.TABS}
+
+            def worksheet(s, n):
+                return s.blaetter[n]
+
+        echt, buch = RS._buch, _Buch()
+        try:
+            RS._buch = lambda cfg: buch
+            RS.G.lade_json = (lambda p, still=False:
+                              {"moestuin": "Gemüsegarten"}
+                              if p == G.F["glossar"] else {})
+            import io
+            import contextlib
+            with contextlib.redirect_stdout(io.StringIO()):
+                RS.erstbefuellung({"sheets_id": "x" * 30})
+            g = buch.blaetter["Glossar"].werte
+            if g != [["nl", "de", "hinweis"],
+                     ["moestuin", "Gemüsegarten", ""]]:
+                fehler.append(f"Erstbefuellung schreibt nicht: {g}")
+            voll = _Buch(voll={"Glossar"})
+            RS._buch = lambda cfg: voll
+            with contextlib.redirect_stdout(io.StringIO()):
+                RS.erstbefuellung({"sheets_id": "x" * 30})
+            if voll.blaetter["Glossar"].werte != [["kopf"], ["schon", "da"]]:
+                fehler.append("Erstbefuellung ueberschreibt gefuellte Tabs")
+        finally:
+            RS._buch = echt
+            RS.G.lade_json = G.lade_json
+
         tab = [t for t in RS.TABS if t[0] == "Anrede"][0]
         anrede, f = RS._pruefen_und_bauen(
             "Anrede",
