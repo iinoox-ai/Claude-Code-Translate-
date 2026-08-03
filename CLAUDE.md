@@ -117,11 +117,19 @@ zur nächsten Überschrift fort.
 ## Referenzdaten: Sheets sind die Quelle, JSONs sind Artefakte
 
 Bei gesetzter `sheets_id` werden Glossar, Personen, Figurenblatt, Anrede,
-Leitmotive und die Zitat-Review-Liste im Google-Spreadsheet gepflegt;
+Leitmotive, Kapitel und die Zitat-Review-Liste im Google-Spreadsheet gepflegt;
 `referenz_sync` erzeugt daraus die JSONs mit zeilengenauer Validierung,
 bevor Modellkosten entstehen. Die JSONs von Hand zu editieren ist im
 Sheets-Betrieb sinnlos — sie werden überschrieben. Ohne `sheets_id` gilt
 das alte JSON-Direktverhalten (Rückfallpfad, nicht entfernen).
+
+**Zwei Ausnahmen.** `stilprofil.json` hat kein Tab und bekommt keines: Es ist
+kein Datensatz, sondern ein halbes Dutzend benannter Felder plus die
+verschachtelte `perspektive`. In eine Tabelle gepresst wäre es unlesbar und
+fehleranfällig — es bleibt eine Datei und wird von Hand gepflegt. Und Tabs in
+`referenz_sync.OPTIONAL` dürfen in einem älteren Spreadsheet **fehlen**; dann
+bleibt die JSON-Datei die Quelle, statt dass jeder Schritt abbricht. Ohne das
+hätte ein nachträglich ergänzter Tab jede bestehende Einrichtung lahmgelegt.
 
 ## Zitate: nichts ohne Freigabe
 

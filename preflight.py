@@ -314,6 +314,7 @@ def selbsttest(cfg, b):
                                                             "Ahnung",
                                                "haeufigkeit": 12,
                                                "absicht": "Formel"}},
+            "kapitel":    {"23 augustus 1919": "Ankunft in Ypern"},
         }
         for tabname, spalten, ziel, bauer, pflicht, zerleger in RS.TABS:
             k, v = list(beispiel[ziel].items())[0]
@@ -342,6 +343,21 @@ def selbsttest(cfg, b):
                               lesen=lambda p: {"_hinweis": "nur Kommentar"}):
             fehler.append("Unterstrich-Schluessel gelten faelschlich als "
                           "Inhalt")
+
+        # Ein optionaler Tab, den es im Spreadsheet nicht gibt, darf den
+        # Schritt nicht abbrechen — sonst legt ein nachtraeglich
+        # ergaenzter Tab jede bestehende Einrichtung lahm.
+        class _OhneTab:
+            def worksheet(s, n):
+                raise KeyError(n)
+
+        if RS._tab_lesen(_OhneTab(), "Kapitel", ["ueberschrift"]) is not None:
+            fehler.append("fehlender optionaler Tab liefert keine Absage")
+        try:
+            RS._tab_lesen(_OhneTab(), "Glossar", ["nl"])
+            fehler.append("fehlender Pflicht-Tab wird nicht gemeldet")
+        except RS.SyncFehler:
+            pass
 
         # Erstbefuellung gegen eine Attrappe: schreibt sie ueberhaupt,
         # und laesst sie gefuellte Tabs in Ruhe? Der erste Echtversuch

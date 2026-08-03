@@ -47,6 +47,11 @@ def _zahl(wert):
 # (Tab, Spalten, Zielschluessel in G.F, Zeilenbauer, Pflichtspalten,
 #  Zerleger fuer die Gegenrichtung)
 #
+# Tabs in OPTIONAL duerfen in einem aelteren Spreadsheet fehlen: Dann
+# bleibt die JSON-Datei die Quelle, statt dass jeder Schritt abbricht.
+# Ohne das haette ein nachtraeglich ergaenzter Tab jede vorhandene
+# Einrichtung lahmgelegt.
+#
 # Die Spaltennamen sind die des Auftrags und nicht ueberall gleich den
 # JSON-Feldern: 'deutsch_ziel' im Sheet wird zu 'deutsch' im JSON, weil
 # uebersetzung.block_anrede genau diesen Namen liest. Der Selbsttest
@@ -79,6 +84,10 @@ TABS = [
                    v.get("niederlaendisch", ""), v.get("deutsch", ""),
                    v.get("hinweis", "")]),
 
+    ("Kapitel", ["ueberschrift", "zeile"], "kapitel",
+     lambda z: (z["ueberschrift"], z["zeile"]), ["ueberschrift", "zeile"],
+     lambda k, v: [k, str(v)]),
+
     ("Leitmotive", ["wendung", "vorschlag", "haeufigkeit", "absicht"],
      "leitmotive",
      lambda z: (z["wendung"], {"vorschlag": z["vorschlag"],
@@ -88,6 +97,10 @@ TABS = [
      lambda k, v: [k, v.get("vorschlag", ""),
                    str(v.get("haeufigkeit") or ""), v.get("absicht", "")]),
 ]
+
+# Kapitel kam mit Paket 4 dazu und fehlt in Spreadsheets, die vorher
+# eingerichtet wurden. --vorlage legt ihn nach.
+OPTIONAL = {"Kapitel"}
 
 # Paket 6 pflegt diesen Tab; hier steht er nur, damit --vorlage ihn
 # gleich mit anlegt und niemand ihn spaeter von Hand nachtraegt.
@@ -205,6 +218,8 @@ def _tab_lesen(buch, name, spalten):
     try:
         blatt = buch.worksheet(name)
     except Exception:
+        if name in OPTIONAL:
+            return None                  # Datei bleibt Quelle
         raise SyncFehler(f"Tab '{name}' fehlt im Spreadsheet.")
     werte = blatt.get_all_values()
     if not werte:
@@ -282,6 +297,9 @@ def sync(cfg, schreiben=True, still=False):
     fertig = {}
     for tabname, spalten, ziel, bauer, pflicht, _ in TABS:
         zeilen = _tab_lesen(buch, tabname, spalten)
+        if zeilen is None:
+            bericht.append(f"{tabname}: kein Tab, {G.F[ziel]} bleibt Quelle")
+            continue
         daten, f = _pruefen_und_bauen(tabname, zeilen, bauer, pflicht)
         fehler += f
         fertig[ziel] = daten
@@ -344,6 +362,10 @@ def erstbefuellung(cfg):
         try:
             blatt = buch.worksheet(tabname)
         except Exception:
+            if tabname in OPTIONAL:
+                print(f"  {tabname}: kein Tab — erst --vorlage, wenn er "
+                      f"im Spreadsheet gepflegt werden soll")
+                continue
             raise SyncFehler(f"Tab '{tabname}' fehlt — erst --vorlage.")
         vorhanden = [z for z in blatt.get_all_values()[1:] if any(z)]
         if vorhanden:
