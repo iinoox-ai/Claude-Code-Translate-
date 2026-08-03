@@ -364,6 +364,74 @@ def selbsttest(cfg, b):
                     fehler.append(
                         f"Tauschlogik: {namen}, besser={besser}, "
                         f"getauscht={getauscht} -> {ist} statt {soll}")
+        # Der Variantenvergleich muss Dialog UND Erzaehlung beurteilen.
+        # Bei NL->DE liegt die Schwaeche im Dialog; ein Vergleich ohne ihn
+        # beantwortet die Frage halb und sieht ganz aus.
+        #
+        # Geprueft wird das Verhalten, nicht der Quelltext: Ein Test auf
+        # das Wort 'Dialog' bleibt gruen, solange es irgendwo im Modul
+        # steht — auch wenn der Dialogteil nie beurteilt wird.
+        import contextlib
+        import io
+        import tempfile
+        etiketten = []
+
+        def _fake_chat(cfg_, system, user, temp, **kw):
+            etiketten.append(user[:0])       # Inhalt egal
+            return '{"besser": "A", "abstand": "gering", "begruendung": "x"}'
+
+        absatz = ("Hij liep naar het huis en keek naar de tuin achter de "
+                  "schuur waar de spade nog stond. " * 3)
+        rede = ("'Wil je drinken?' vroeg ze zacht aan hem terwijl de emmer "
+                "tussen hen in bleef hangen. " * 3)
+        with tempfile.TemporaryDirectory() as tmp:
+            alt_cwd, alt_chat = os.getcwd(), G.chat
+            try:
+                os.chdir(tmp)
+                os.makedirs("test")
+                os.makedirs("testB")
+                paras = [absatz] * 8 + [rede] * 8
+                open(G.F["quelle"], "w", encoding="utf-8").write(
+                    "\n\n".join(paras))
+                for d, wort in (("test", "Haus"), ("testB", "Gebäude")):
+                    open(f"{d}/{G.F['uebersetzung']}", "w",
+                         encoding="utf-8").write(
+                        "\n\n".join([f"Er ging zum {wort} und sah den "
+                                     f"Garten hinter dem Schuppen, wo der "
+                                     f"Spaten noch stand."] * 8
+                                    + [f"»Willst du trinken?«, fragte sie "
+                                       f"ihn leise im {wort}."] * 8))
+                json.dump({"erzaehlung": 8},
+                          open("test/teile.json", "w", encoding="utf-8"))
+                BW.G.chat = _fake_chat
+
+                gemerkt = []
+                echt_blind = BW.blindbewertung
+
+                def _merke(cfg_, quelle, a, bb, n=4, label="", **kw):
+                    gemerkt.append(label)
+                    return echt_blind(cfg_, quelle, a, bb, n, label, **kw)
+
+                BW.blindbewertung = _merke
+                probe_cfg = dict(cfg, export_bewertung=False,
+                                 varianten=[{"name": "B",
+                                             "chunk_words": 1600}])
+                with contextlib.redirect_stdout(io.StringIO()):
+                    BW.variantenvergleich(probe_cfg)
+                BW.blindbewertung = echt_blind
+                if not any("Erzaehlung" in x for x in gemerkt):
+                    fehler.append("Variantenvergleich beurteilt die "
+                                  "Erzaehlung nicht")
+                if not any("Dialog" in x for x in gemerkt):
+                    fehler.append("Variantenvergleich beurteilt den Dialog "
+                                  "nicht — die Schwaeche des Sprachpaars "
+                                  "bleibt ungeprueft")
+            except Exception as e:
+                fehler.append(f"Variantenvergleich wirft: {e!r}")
+            finally:
+                BW.G.chat = alt_chat
+                os.chdir(alt_cwd)
+
         if "namen" not in inspect.signature(BW.blindbewertung).parameters:
             fehler.append("blindbewertung kennt keine Fassungsnamen — "
                           "der Variantenvergleich kann nicht urteilen")

@@ -152,6 +152,34 @@ Die Reihenfolge in `perspektive` ist die des ersten Auftretens im Buch, nicht
 die alphabetische. Die erste Fassung sortierte und wies damit dem Textanfang
 die alphabetisch erste Ebene zu — im Testfall „Krieg" statt „Rahmen 1919".
 
+## Der Variantenvergleich bleibt dauerhaft, die Modellvariante nicht
+
+**Entschieden:** `varianten` steht in der Vorlage auf einer einzigen
+Chunkgrößen-Variante. Eine Modellvariante wird bewusst hinzugefügt, wenn es
+etwas zu prüfen gibt.
+
+Die Begründung liegt in der Art der Frage. **Die beste Chunkgröße hängt vom
+Text ab** — Dialoganteil, Absatzlänge, Satzbau unterscheiden sich von Buch zu
+Buch, und die Antwort für das eine gilt nicht fürs nächste. Deshalb läuft
+diese Variante bei jedem Buch mit; sie kostet unter einem Dollar auf dem
+Testauszug.
+
+**Ob ein anderes Modell besser übersetzt, hängt dagegen nicht vom Buch ab,
+sondern von der Modellgeneration.** Diese Frage stellt man, wenn ein neues
+Modell erscheint, nicht bei jedem Titel. Und sie ist die teure: Der
+Fable-5-Vergleich kostete 2,66 $ gegen 1,04 $ der Basis — aufs Buch
+hochgerechnet 97 $ gegen 38 $.
+
+Ein Test, dessen Ergebnis niemand liest, ist schlechter als kein Test: Er
+kostet Geld und erzeugt den Anschein von Sorgfalt. Die Sicherung dagegen ist
+`PAUSE_pruefung` — der Lauf hält an, und `bewertung_varianten.md` liegt dort,
+wo entschieden wird.
+
+**Der Vergleich beurteilt Erzählung und Dialog getrennt.** Die erste Fassung
+übergab dem Judge nur die Erzählpassage. Bei NL→DE liegt die Schwäche im
+Dialog, wo Anredeform, Modalpartikeln und Diminutive zusammentreffen — ein
+Vergleich ohne ihn beantwortet die Frage zur Hälfte und sieht vollständig aus.
+
 ## Varianten unterscheiden sich in Chunkgröße ODER Modell
 
 **Entschieden:** `testB`/`chunkvergleich` sind zu einem generischen
