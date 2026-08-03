@@ -135,11 +135,17 @@ ANWEISUNGS_AUFTRAG = (
     "Befunde zu Figurensprache, geschuetzten Wiederholungen und falschen "
     "Freunden.")
 
+# Die Bewertungen fehlen beim regulaeren Lauf, weil der Schritt vor dem
+# Testlauf kommt — sie sind deshalb freiwillig. Laeuft die Vorbereitung
+# spaeter noch einmal (nachgeschaerft, neues Sprachpaar), sind sie da und
+# das beste Material im Paket: Befunde an echtem uebersetztem Text.
 QUELLEN = [
     ("analysepaket.md",               None, "Konkordanzbefunde",      True),
     ("briefing_glossar_vorlage.md",   CODE, "Briefing Glossar",       False),
     ("briefing_bewertung_vorlage.md", CODE, "Briefing Uebersetzung",  False),
     ("bewertung_uebersetzung.md",     None, "Bewertung Uebersetzung", False),
+    ("briefing_lektorat_vorlage.md",  CODE, "Briefing Lektorat",      False),
+    ("bewertung_lektorat.md",         None, "Bewertung Lektorat",     False),
 ]
 
 

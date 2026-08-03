@@ -159,6 +159,67 @@ def selbsttest(cfg, b):
         if U.block_kapitel("", kapitel):
             fehler.append("Kapitelblock ohne Ueberschrift ist nicht leer")
 
+        # Paket 5: Marker-Zeilen erzwingen Chunkgrenzen genau dort.
+        paras = ["Vorspann.", "# Krieg", "Im Graben.", "Noch im Graben.",
+                 "#", "Wieder 1919."]
+        gruppen = G.rahmen_gruppen(paras, "#")
+        if [len(g) for g in gruppen] != [1, 3, 2]:
+            fehler.append(f"Rahmenmarker teilt falsch: "
+                          f"{[len(g) for g in gruppen]}")
+        if gruppen[1][0] != "# Krieg":
+            fehler.append("Markerzeile beginnt die neue Gruppe nicht")
+        if len(G.rahmen_gruppen(paras, "")) != 1:
+            fehler.append("leerer Marker teilt trotzdem")
+
+        perspektive = {"Rahmen 1919": "erste Person Präsens",
+                       "Krieg": "erste Person Präteritum"}
+        folge = G.ebenen_folge(gruppen, "#", perspektive)
+        if folge != ["Rahmen 1919", "Krieg", "Rahmen 1919"]:
+            fehler.append(f"Ebenenfolge falsch: {folge}")
+        nackt = G.ebenen_folge(G.rahmen_gruppen(["a", "#", "b", "#", "c"],
+                                                "#"), "#", perspektive)
+        if nackt != ["Rahmen 1919", "Krieg", "Rahmen 1919"]:
+            fehler.append(f"nackte Marker wechseln nicht: {nackt}")
+        if any(G.ebenen_folge(gruppen, "#", dict(perspektive, Dritte="x"))
+               [i] for i in (0, 2)):
+            fehler.append("bei drei Ebenen wird geraten statt geschwiegen")
+        if "erste Person Präteritum" not in U.block_ebene("Krieg",
+                                                          perspektive):
+            fehler.append("Erzählebene erscheint nicht im User-Prompt")
+        if U.block_ebene("", perspektive) or U.block_ebene("Krieg", {}):
+            fehler.append("Ebenenblock ohne Angabe ist nicht leer")
+
+        # Paket 5: Varianten aus der Konfiguration, Schritte daraus.
+        import pipeline as PL
+        probe = dict(cfg, chunk_words=800, varianten=[
+            {"name": "B", "chunk_words": 1600},
+            {"name": "C", "chunk_words": 800,
+             "modell_uebersetzung": "claude-fable-5"}])
+        namen = [v["name"] for v in G.varianten(probe)]
+        if namen != ["B", "C"]:
+            fehler.append(f"Varianten falsch gelesen: {namen}")
+        _, cw, besch = G.variante_anwenden(probe, probe["varianten"][0])
+        if cw != 1600 or "1600" not in besch:
+            fehler.append(f"Chunkgroesse der Variante greift nicht: {besch}")
+        c2, cw2, besch2 = G.variante_anwenden(probe, probe["varianten"][1])
+        if c2["modell_uebersetzung"] != "claude-fable-5" \
+           or c2["modell_revision"] != "claude-fable-5":
+            fehler.append("Modellwechsel der Variante greift nicht")
+        if "claude-fable-5" not in besch2:
+            fehler.append("Modell fehlt in der Variantenbeschreibung")
+        # Rueckfall auf die alte B-Variante, wenn 'varianten' leer ist.
+        alt = G.varianten(dict(probe, varianten=[], chunk_words_variante=1200))
+        if [v["name"] for v in alt] != ["B"] or alt[0]["chunk_words"] != 1200:
+            fehler.append(f"Rueckfall auf chunk_words_variante fehlt: {alt}")
+        if G.varianten(dict(probe, varianten=[], chunk_words_variante=800)):
+            fehler.append("identische Variante wird nicht verworfen")
+
+        schritte = [s[0] for s in PL.schritte_mit_varianten(
+            PL.SCHRITTE_ROH if hasattr(PL, "SCHRITTE_ROH") else
+            [("VARIANTEN", None, None, 0)], probe)]
+        if "testB" not in schritte or "testC" not in schritte:
+            fehler.append(f"Variantenschritte fehlen: {schritte}")
+
         # Jede Lieferung muss eine Formpruefung haben, die die Form des
         # Lesers meint — sonst schreibt die Vorbereitung Dateien, die
         # spaeter stillschweigend uebersprungen werden.
