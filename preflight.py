@@ -242,6 +242,35 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Paket 4 nicht pruefbar", repr(e))
 
+    # --- Alle Backends muessen dieselbe chat()-Signatur haben ----------
+    # Gemini fehlte 'roh'. Gemerkt hat es niemand, weil der Selbsttest die
+    # Payloads prueft und nicht den Aufruf — und weil die betroffene Rolle
+    # (annotation) erst am Ende der Kette ruft. 61 Aufrufe, jeder mit
+    # demselben TypeError, eine leere Ergebnisdatei und die Meldung
+    # 'fertig'.
+    try:
+        import inspect
+        fehler = []
+        soll = set(inspect.signature(G.Backend.chat).parameters)
+        for name, backend in sorted(G.BACKENDS.items()):
+            ist = set(inspect.signature(type(backend).chat).parameters)
+            fehlt = soll - ist
+            if fehlt:
+                fehler.append(f"{name}: {', '.join(sorted(fehlt))} fehlt")
+        # 'roh' und 'rolle' muessen ueberall ankommen — chat() reicht sie
+        # ungeprueft durch.
+        for pflicht in ("roh", "rolle", "modell"):
+            if pflicht not in soll:
+                fehler.append(f"Basisklasse kennt '{pflicht}' nicht")
+        if fehler:
+            b.add("FEHLER", "Backends haben verschiedene Signaturen",
+                  "; ".join(fehler))
+        else:
+            b.add("OK", f"Alle {len(G.BACKENDS)} Backends nehmen dieselben "
+                        f"Argumente entgegen")
+    except Exception as e:
+        b.add("FEHLER", "Backend-Signaturen nicht pruefbar", repr(e))
+
     # --- Paket 9: der Ablaufplan muss zur Schrittliste passen ----------
     # Ein Plan, der einen Schritt nicht kennt, schickt den Leser ins
     # Leere — und das faellt erst auf, wenn jemand danach arbeitet.

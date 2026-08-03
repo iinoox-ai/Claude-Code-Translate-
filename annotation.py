@@ -140,6 +140,13 @@ def json_lesen(text):
     raise ValueError("keine JSON-Struktur in der Antwort")
 
 
+class AlleFehlgeschlagen(RuntimeError):
+    """Der erste Aufruf ging schief — die anderen gehen genauso schief.
+
+    Ohne diesen Abbruch laeuft der Schritt 61-mal in denselben Fehler,
+    schreibt eine leere Datei und meldet 'fertig'."""
+
+
 def begruenden(cfg, aenderungen):
     fertig = {}
     for i in range(0, len(aenderungen), BUENDEL):
@@ -158,6 +165,8 @@ def begruenden(cfg, aenderungen):
                 fertig.update({k: str(v) for k, v in d.items()})
         except Exception as e:
             print(f"    uebersprungen: {e}")
+            if i == 0:
+                raise AlleFehlgeschlagen(str(e))
     return fertig
 
 
@@ -195,6 +204,8 @@ def screenen(cfg, quelle_chunks, paare):
                 befunde += [x for x in d if isinstance(x, dict)]
         except Exception as e:
             print(f"    uebersprungen: {e}")
+            if i == 0:
+                raise AlleFehlgeschlagen(str(e))
     return befunde
 
 
@@ -237,7 +248,22 @@ def main():
     print(f"Chunkpaare fuers Screening: {len(paare)} "
           f"({(len(paare) + CHUNKS_JE_AUFRUF - 1)//CHUNKS_JE_AUFRUF} "
           f"Aufrufe)")
-    print(f"Modell: {modell}\n")
+    print(f"Modell: {modell}")
+
+    # Kostenschaetzung wie in vorbereitung.py — 'Kosten sind Teil des
+    # Ergebnisses' gilt auch fuer den Schritt, der nur berichtet.
+    t = G.tarif(modell)
+    if t:
+        faktor = G.token_faktor()
+        wort_b = sum(len((a["alt"] + a["neu"] + a["kontext"]).split())
+                     for a in aenderungen)
+        wort_s = sum(len(z.split()) for _, z in paare) * 2
+        ein = (wort_b + wort_s) * faktor
+        aus = (len(aenderungen) * 15
+               + len(paare) // CHUNKS_JE_AUFRUF * 60) * faktor
+        print(f"Kosten: rund {(ein*t['ein'] + aus*t['aus'])/1e6:.2f} $ "
+              f"(geschaetzt {ein:,.0f} Token ein, {aus:,.0f} aus)")
+    print()
     if args.nur_anzeigen:
         print("Nur Anzeige — kein Modellaufruf.")
         return
@@ -247,7 +273,11 @@ def main():
         alt = G.lade_json(BEGRUENDUNGEN, still=True)
         offen = [a for a in aenderungen if a["id"] not in alt]
         print(f"  {len(alt)} liegen vor, {len(offen)} offen")
-        alt.update(begruenden(cfg, offen))
+        try:
+            alt.update(begruenden(cfg, offen))
+        except AlleFehlgeschlagen as e:
+            sys.exit(f"\nAbbruch: schon der erste Aufruf ist gescheitert "
+                     f"— {e}\n  Nichts wurde geschrieben.")
         schreiben(BEGRUENDUNGEN, json.dumps(alt, ensure_ascii=False,
                                             indent=2, sort_keys=True) + "\n")
         print(f"  {len(alt)} Begruendungen -> {BEGRUENDUNGEN}")
@@ -260,7 +290,11 @@ def main():
         for gruppe in gruppen:
             chunks += G.chunks_bauen(gruppe, cfg["chunk_words"])
         quelle_chunks = {i + 1: t for i, (t, _) in enumerate(chunks)}
-        befunde = screenen(cfg, quelle_chunks, paare)
+        try:
+            befunde = screenen(cfg, quelle_chunks, paare)
+        except AlleFehlgeschlagen as e:
+            sys.exit(f"\nAbbruch: schon der erste Aufruf ist gescheitert "
+                     f"— {e}\n  Nichts wurde geschrieben.")
         screening_schreiben(befunde)
         print(f"  {len(befunde)} Verdachtsstellen -> {SCREENING}")
 
