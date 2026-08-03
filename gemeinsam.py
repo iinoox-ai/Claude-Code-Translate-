@@ -33,6 +33,8 @@ F = {
     "anrede":        "anrede.json",
     "leitmotive":    "leitmotive.json",
     "zitate":        "zitate.json",
+    "stilprofil":    "stilprofil.json",
+    "kapitel":       "kapitel.json",
     "entwurf":       "uebersetzung_entwurf.txt",
     "uebersetzung":  "uebersetzung_deutsch.txt",
     "normalisiert":  "normalisiert.txt",

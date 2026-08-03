@@ -95,6 +95,92 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Diminutivzaehler wirft Ausnahme", repr(e))
 
+    # --- Paket 4: Stilprofil im Prompt, Kapitelzeile, Ueberschreibschutz
+    # Abnahmekriterien des Auftrags, alle ohne Modell pruefbar.
+    try:
+        import vorbereitung as V
+        fehler = []
+
+        stil = {"ton": "lakonisch, parataktisch",
+                "register": "Umgangssprache in der Rede",
+                "satzlaenge": "kurz, selten Hypotaxe",
+                "tempus": "quellnaher Wechsel",
+                "perspektive": {"Rahmen 1919": "erste Person Präsens",
+                                "Rückblende": "erste Person Präteritum"}}
+        block = U.block_stilprofil(stil)
+        for stueck in ("lakonisch", "kurz, selten Hypotaxe",
+                       "Rahmen 1919", "erste Person Präteritum"):
+            if stueck not in block:
+                fehler.append(f"Stilprofil: '{stueck}' fehlt im Baustein")
+        if U.block_stilprofil({}) or U.block_stilprofil({"ton": "  "}):
+            fehler.append("leeres Stilprofil erzeugt trotzdem einen Baustein")
+
+        # Der Baustein muss im gebauten System-Prompt landen, nicht nur
+        # als Funktion existieren.
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            alt = os.getcwd()
+            try:
+                os.chdir(tmp)
+                json.dump(stil, open(G.F["stilprofil"], "w"))
+                p_ueb, p_rev = U.prompts(cfg)
+                if "lakonisch, parataktisch" not in p_ueb:
+                    fehler.append("Stilprofil erscheint nicht im "
+                                  "System-Prompt der Uebersetzung")
+                if "lakonisch, parataktisch" not in p_rev:
+                    fehler.append("Stilprofil fehlt im Revisions-Prompt")
+
+                # Ueberschreibschutz: gefuellte Datei bleibt, Vorschlag
+                # geht auf .neu.
+                json.dump({"a": "b"}, open(G.F["glossar"], "w"))
+                ziel, ausweich = V.zieldatei(G.F["glossar"])
+                if not ausweich or not ziel.endswith(".neu"):
+                    fehler.append("gefuellte Datei wuerde ueberschrieben")
+                json.dump({}, open(G.F["kapitel"], "w"))
+                ziel, ausweich = V.zieldatei(G.F["kapitel"])
+                if ausweich:
+                    fehler.append("leere Datei wird unnoetig ausgewichen")
+            finally:
+                os.chdir(alt)
+
+        # Kapitelzuordnung: das laufende Kapitel wirkt fort.
+        kapitel = {"23 augustus 1919": "Ankunft in Ypern",
+                   "24 augustus 1919": "Besuch am Grab"}
+        chunks = [("Vorspann ohne Datum.", False),
+                  ("23 augustus 1919\n\nWir kamen an.", False),
+                  ("Der Tag ging weiter.", False),
+                  ("24 augustus 1919\n\nAm Grab.", False)]
+        zuordnung = U.kapitel_zuordnen(chunks, kapitel)
+        if zuordnung != ["", "23 augustus 1919", "23 augustus 1919",
+                         "24 augustus 1919"]:
+            fehler.append(f"Kapitelzuordnung falsch: {zuordnung}")
+        if "Ankunft in Ypern" not in U.block_kapitel(zuordnung[2], kapitel):
+            fehler.append("Kapitelzeile erscheint nicht im User-Prompt")
+        if U.block_kapitel("", kapitel):
+            fehler.append("Kapitelblock ohne Ueberschrift ist nicht leer")
+
+        # Jede Lieferung muss eine Formpruefung haben, die die Form des
+        # Lesers meint — sonst schreibt die Vorbereitung Dateien, die
+        # spaeter stillschweigend uebersprungen werden.
+        for name, datei, auftrag, pruef in V.LIEFERUNGEN:
+            if datei not in G.F.values():
+                fehler.append(f"{name}: Zieldatei {datei} unbekannt")
+            if pruef({}) and name in ("personen", "stilprofil"):
+                fehler.append(f"{name}: leere Lieferung gilt als gueltig")
+        if not V.LIEFERUNGEN[0][3]({"a": "b"}):
+            fehler.append("Glossarpruefung weist gueltige Form ab")
+        if V.LIEFERUNGEN[3][3]({"x": {"figuren": []}}):
+            fehler.append("Anredepruefung laesst fehlendes 'deutsch' durch")
+
+        if fehler:
+            b.add("FEHLER", "Vorbereitung/Prompt-Einspeisung fehlerhaft",
+                  "; ".join(fehler))
+        else:
+            b.add("OK", "Stilprofil steht im Prompt, Kapitelzeile wirkt "
+                        "fort, gefuellte Dateien bleiben unangetastet")
+    except Exception as e:
+        b.add("FEHLER", "Paket 4 nicht pruefbar", repr(e))
+
     # --- Sheets-Anbindung: Validierung, Abbildung, Rueckfallpfad -------
     # Alles ohne Netz pruefbar, weil die Pruefung auf gelesenen Zeilen
     # arbeitet und nicht auf gspread.
@@ -552,9 +638,10 @@ def selbsttest_backends(b):
     # wirkungslos gewesen, ohne dass irgendwo etwas gemeldet haette.
     try:
         import vorbereitung as V
+        alle = " ".join(a for _, _, a, _ in V.LIEFERUNGEN)
         fehlt = [f for f in ("figuren", "niederlaendisch", "deutsch",
-                             "vorschlag")
-                 if f not in V.SYSTEM]
+                             "vorschlag", "pronomen", "perspektive")
+                 if f not in alle]
         if fehlt:
             b.add("FEHLER", "Vorbereitungsprompt nennt Pflichtfelder nicht",
                   f"fehlt: {', '.join(fehlt)}\n"
@@ -1012,6 +1099,11 @@ SCHEMA = {
         isinstance(v, dict) for k, v in d.items() if not k.startswith("_"))),
     "leitmotive": ("je Eintrag ein Objekt", lambda d: all(
         isinstance(v, dict) for k, v in d.items() if not k.startswith("_"))),
+    "stilprofil": ("'ton' gefuellt, 'perspektive' als Objekt",
+                   lambda d: bool(str(d.get("ton", "")).strip())
+                   and isinstance(d.get("perspektive", {}), dict)),
+    "kapitel":    ("je Ueberschrift eine Zeile", lambda d: all(
+        isinstance(v, str) for k, v in d.items() if not k.startswith("_"))),
 }
 
 

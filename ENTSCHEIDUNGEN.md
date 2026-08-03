@@ -70,6 +70,29 @@ deshalb ist die Korrektur nötig, und deshalb muss sie genau sein.
 Die Liste in `HOMOGRAPHEN` ist die Stelle, an der bei einem neuen Text
 nachgebessert wird.
 
+## Vorbereitung: je Lieferung ein Aufruf, Befunde im System-Prompt
+
+**Entschieden:** `vorbereitung.py` macht acht kleine Modellaufrufe statt einen
+großen, und die Konkordanzbefunde stehen im System-Prompt statt im
+User-Prompt.
+
+Der System-Prompt trägt den Cache-Marker. Stehen die Befunde dort und ändert
+sich zwischen den Aufrufen nur der Auftrag, zahlt der erste Aufruf die Befunde
+und die sieben weiteren treffen den Cache. Eine einzige große Antwort wäre
+teurer, weil die Ausgabe die teure Seite ist und acht Dateien am Stück eine
+lange Ausgabe ergeben.
+
+Der zweite Grund wiegt schwerer: **Jede Lieferung ist einzeln prüfbar und
+einzeln nachziehbar.** Kommt das Stilprofil in falscher Form, wird genau diese
+Datei nicht geschrieben und `--nur stilprofil` holt sie nach — statt dass ein
+Formfehler in einem von acht Blöcken den ganzen Aufruf entwertet.
+
+Die Formprüfung je Lieferung ist dieselbe Frage, die der Leser im Prompt
+stellt. Das ist die Lehre aus dem ersten Vorbereitungslauf: Damals lieferte
+das Modell `{"paare": [...]}`, `block_anrede` las flache Abbildungen, und der
+Vorschlag wurde stillschweigend übersprungen. Jetzt wird er gar nicht erst
+geschrieben.
+
 ## Sheets-Sync validiert vor dem ersten Modellaufruf
 
 **Entschieden:** `referenz_sync` liest, validiert und schreibt die JSONs am

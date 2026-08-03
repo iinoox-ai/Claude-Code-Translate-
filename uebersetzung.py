@@ -286,6 +286,13 @@ Ist der Entwurf schon gut, gib ihn mit minimalen Änderungen zurück.
 Gib AUSSCHLIESSLICH den überarbeiteten deutschen Text aus. Keine Vorrede, \
 keine Anmerkungen, kein Kommentar."""
 
+    # Additiv, in dieser Reihenfolge: Erst das Stilprofil als Beschreibung
+    # des Werks, dann die Projektanweisungen, die Vorrang haben. Die
+    # bestehenden Formulierungen bleiben unangetastet (Schutzklausel 1).
+    stil = block_stilprofil(G.lade_json(G.F["stilprofil"], still=True))
+    if stil:
+        uebersetzen += stil
+        revidieren += stil
     if zusatz:
         block = ("\n\nPROJEKTANWEISUNGEN (diese haben Vorrang vor den "
                  f"allgemeinen Regeln)\n\n{zusatz}")
@@ -312,6 +319,60 @@ def block_personen(chunk, personen, figuren):
             z += f" [Sprechweise: {sprache[:140]}]"
         zeilen.append(z)
     return "=== PERSONEN ===\n" + "\n".join(zeilen) + "\n\n"
+
+
+STILFELDER = [("ton", "Ton"), ("register", "Register"),
+              ("satzlaenge", "Satzbau"), ("tempus", "Tempusfuehrung")]
+
+
+def block_stilprofil(stilprofil):
+    """Baustein fuer den System-Prompt der Uebersetzung (Paket 4).
+
+    Steht im System-Prompt und nicht im User-Prompt, weil er fuer das
+    ganze Buch gilt: Nur so bleibt das zwischengespeicherte Praefix ueber
+    alle Chunks identisch."""
+    if not isinstance(stilprofil, dict) or not stilprofil:
+        return ""
+    zeilen = []
+    for schluessel, titel in STILFELDER:
+        wert = str(stilprofil.get(schluessel, "")).strip()
+        if wert:
+            zeilen.append(f"  {titel}: {wert}")
+    perspektive = stilprofil.get("perspektive")
+    if isinstance(perspektive, dict):
+        for ebene, form in sorted(perspektive.items()):
+            if str(form).strip():
+                zeilen.append(f"  Erzählebene {ebene}: {form}")
+    if not zeilen:
+        return ""
+    return ("\n\nSTILPROFIL DIESES WERKS\n\n"
+            "Aus der Vorbereitung, gilt für das ganze Buch:\n"
+            + "\n".join(zeilen) + "\n")
+
+
+def kapitel_zuordnen(chunks, kapitel):
+    """Je Chunk die zuletzt begonnene Kapitelueberschrift.
+
+    Die Schluessel von kapitel.json sind Ueberschriften im Wortlaut der
+    Quelle. Beginnt in einem Chunk ein neues Kapitel, gilt ab dort das
+    neue; sonst wirkt das vorige fort. Ohne das Fortwirken bekaeme nur
+    der eine Chunk mit der Ueberschrift seine Zeile."""
+    aktuell, zuordnung = "", []
+    for text, _ in chunks:
+        treffer = [(text.rfind(k), k) for k in kapitel if k and k in text]
+        if treffer:
+            aktuell = max(treffer)[1]
+        zuordnung.append(aktuell)
+    return zuordnung
+
+
+def block_kapitel(ueberschrift, kapitel):
+    if not ueberschrift:
+        return ""
+    zeile = str(kapitel.get(ueberschrift, "")).strip()
+    if not zeile:
+        return ""
+    return f"=== KAPITEL ===\n  {ueberschrift}: {zeile}\n\n"
 
 
 def block_glossar(chunk, glossar):
@@ -465,6 +526,8 @@ def main():
     figuren = G.lade_json(G.F["figuren"])
     anrede = G.lade_json(G.F["anrede"])
     leitmotive = G.lade_json(G.F["leitmotive"])
+    kapitel = G.lade_json(G.F["kapitel"], still=True)
+    kapitel_je_chunk = kapitel_zuordnen(chunks, kapitel)
     p_ueb, p_rev = prompts(cfg)
     fingerprint = G.config_hash(cfg)
 
@@ -484,6 +547,9 @@ def main():
     print(f"Eingabe:    {sum(len(c) for c, _ in chunks)} Zeichen in {n} Chunks")
     print(f"Glossar {len(glossar)} | Personen {len(personen)} | "
           f"Anrede {len(anrede)} | Leitmotive {len(leitmotive)}")
+    stil = G.lade_json(G.F["stilprofil"], still=True)
+    print(f"Stilprofil: {'ja' if block_stilprofil(stil) else 'nein'}   "
+          f"Kapitel: {len(kapitel)}")
     print(f"Revision:   {'ja' if revision else 'nein'}")
     if marken:
         print(f"Zitate:     {len([k for k,v in marken.items() if v])} "
@@ -550,7 +616,8 @@ def main():
 
         for versuch in range(1, cfg["max_retries"] + 1):
             try:
-                kopf = (block_fallen(quelle, cfg)
+                kopf = (block_kapitel(kapitel_je_chunk[i], kapitel)
+                        + block_fallen(quelle, cfg)
                         + block_personen(quelle, personen, figuren)
                         + block_glossar(quelle, glossar)
                         + block_anrede(quelle, personen, anrede)
