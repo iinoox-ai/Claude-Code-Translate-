@@ -70,6 +70,52 @@ deshalb ist die Korrektur nötig, und deshalb muss sie genau sein.
 Die Liste in `HOMOGRAPHEN` ist die Stelle, an der bei einem neuen Text
 nachgebessert wird.
 
+## Rahmenwechsel: Markerzeile bleibt im Text, Ebene kommt aus dem Stilprofil
+
+**Entschieden:** An jeder Zeile, die dem `rahmen_marker` entspricht, endet die
+Chunkgruppe. Die Markerzeile **beginnt die neue Gruppe und bleibt stehen** —
+sie ist die Gliederung des Autors, nicht unsere.
+
+Der Schnitt setzt die Rückschau zurück, weil die Fuge zwischen zwei Gruppen
+schon vorher ein Kontext-Reset war. Ohne ihn bekäme der erste Chunk nach dem
+Wechsel die letzten Sätze der vorigen Ebene als Vorbild — und Tempus und
+Person bluten hinüber. Genau dafür ist die Regel da.
+
+Die **Benennung der Ebene** kommt aus `stilprofil.json`, nicht aus dem Code.
+Ein hartkodiertes „dritte Person Präsens" wäre beim nächsten Buch falsch, und
+niemand würde es hier suchen. Drei Fälle, in dieser Reihenfolge: Die
+Markerzeile nennt die Ebene (`# Krieg`) → die gilt. Nackter Marker und genau
+zwei Ebenen → die jeweils **andere als zuletzt**, nicht „gerade/ungerade";
+nach einer benannten Gruppe wäre das versetzt. Alles andere → keine Benennung.
+
+**Lieber schweigen als raten:** Eine falsch benannte Erzählebene im Prompt ist
+schädlicher als gar keine. Bei drei oder mehr Ebenen lässt sich die Zuordnung
+aus einem nackten `#` nicht ableiten, also unterbleibt sie.
+
+Die Reihenfolge in `perspektive` ist die des ersten Auftretens im Buch, nicht
+die alphabetische. Die erste Fassung sortierte und wies damit dem Textanfang
+die alphabetisch erste Ebene zu — im Testfall „Krieg" statt „Rahmen 1919".
+
+## Varianten unterscheiden sich in Chunkgröße ODER Modell
+
+**Entschieden:** `testB`/`chunkvergleich` sind zu einem generischen
+Variantenvergleich verallgemeinert. Eine Variante trägt einen Namen und, was
+abweicht: `chunk_words`, `modell_uebersetzung` oder beides.
+
+Beides stellt dieselbe Frage — wird der Text dadurch besser? — also gehört es
+in dieselbe Mechanik. Zwei getrennte Apparate für „Chunkgröße prüfen" und
+„Modell prüfen" wären derselbe Code zweimal, und der zweite würde beim ersten
+Umbau vergessen.
+
+Die Schrittnamen bleiben stabil (`testB`, `testC`), weil das Manifest sie als
+Schlüssel führt; die Schrittliste selbst entsteht aus `projekt.json`.
+
+**Kosten je Variante** kommen aus einer Differenz: Das Manifest bucht nach
+Rolle, nicht nach Variante. Vor und nach dem Lauf ein Schnappschuss, die
+Differenz landet als `kosten.json` neben dem Ergebnis. Ohne das ließe sich
+„Kosten je Variante" nur schätzen, und eine geschätzte Zahl in einem Bericht,
+der Entscheidungen trägt, ist schlimmer als keine.
+
 ## Vorbereitung: je Lieferung ein Aufruf, Befunde im System-Prompt
 
 **Entschieden:** `vorbereitung.py` macht acht kleine Modellaufrufe statt einen

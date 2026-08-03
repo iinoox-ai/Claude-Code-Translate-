@@ -87,7 +87,15 @@ STANDARD = {
     "timeout_read_api":          600,       # Auftrag Paket 1: hoechstens 10 min
 
     "chunk_words":               800,
-    "chunk_words_variante":      1200,      # fuer den Chunkgroessen-Vergleich
+    "chunk_words_variante":      1200,      # Rueckfall, wenn 'varianten' leer ist
+
+    # Vergleichsvarianten des Testlaufs. Je Eintrag ein Name und, was
+    # abweicht: chunk_words und/oder modell_uebersetzung (Paket 5).
+    "varianten": [
+        {"name": "B", "chunk_words": 1600},
+        {"name": "C", "chunk_words": 800,
+         "modell_uebersetzung": "claude-fable-5"},
+    ],
     "context_words":             250,
     "temperature_uebersetzung":  0.35,
     "temperature_revision":      0.25,
@@ -102,6 +110,10 @@ STANDARD = {
     # JSONs daraus. Kein Bestandteil des Konfigurationsfingerabdrucks —
     # der Ablageort der Referenzdaten aendert den Text nicht.
     "sheets_id":                 "",
+
+    # Zeile, an der eine Erzaehlebene wechselt. Harte Chunkgrenze plus
+    # Rueckschau-Reset (Paket 5). Leer = keine Rahmenwechsel im Text.
+    "rahmen_marker":             "#",
 
     "glossar_quelle":            "extern",
     "export_glossar":            True,
@@ -141,6 +153,7 @@ AENDERBAR = {
     "test_words_erzaehlung", "test_words_dialog",
     "lektorat_ratio_min", "lektorat_ratio_max",
     "export_glossar", "export_bewertung", "glossar_quelle", "sheets_id",
+    "rahmen_marker", "varianten",
     "timeout_connect", "timeout_read", "max_retries",
     "backend_standard", "max_tokens_api", "timeout_read_api",
 } | {f"modell_{r}" for r in (
@@ -522,6 +535,39 @@ def usage_buchen(rolle, modell, usage):
         json.dump(m, open(tmp, "w", encoding="utf-8"),
                   ensure_ascii=False, indent=2)
         os.replace(tmp, MANIFEST)
+    except Exception:
+        pass
+
+
+def kosten_schnappschuss():
+    """Stand der Token-Buchung, fuer Differenzen je Variante."""
+    if not os.path.exists(MANIFEST):
+        return {}
+    try:
+        return json.load(open(MANIFEST, encoding="utf-8")).get("kosten", {})
+    except Exception:
+        return {}
+
+
+def kosten_differenz_schreiben(vorher, pfad):
+    """Was dieser Lauf gekostet hat, als eigene Datei neben dem Ergebnis.
+
+    Das Manifest bucht nach Rolle, nicht nach Variante. Die Differenz
+    vor/nach dem Lauf ist die einzige ehrliche Zuordnung — ohne sie
+    liesse sich 'Kosten je Variante' nur schaetzen."""
+    try:
+        nachher = kosten_schnappschuss()
+        d = {}
+        for rolle, e in nachher.items():
+            alt = vorher.get(rolle, {})
+            diff = {f: int(e.get(f, 0)) - int(alt.get(f, 0))
+                    for f in ("aufrufe", "ein", "aus", "cache_lesen",
+                              "cache_schreiben")}
+            if diff["aufrufe"] > 0:
+                diff["modell"] = e.get("modell", "")
+                d[rolle] = diff
+        json.dump(d, open(pfad, "w", encoding="utf-8"),
+                  ensure_ascii=False, indent=2)
     except Exception:
         pass
 
@@ -928,6 +974,104 @@ def saetze_de(text):
 
 def absaetze(text):
     return [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+
+
+def varianten(cfg):
+    """Die Vergleichsvarianten des Testlaufs (Paket 5).
+
+    Eine Variante unterscheidet sich von der Basis in der Chunkgroesse
+    ODER im Modell — beides gehoert in dieselbe Mechanik, weil beides
+    dieselbe Frage stellt: Wird der Text dadurch besser?
+
+    Ist 'varianten' leer, wird die alte B-Variante aus
+    'chunk_words_variante' abgeleitet. Damit laeuft eine projekt.json
+    aus der Zeit davor unveraendert weiter."""
+    roh = cfg.get("varianten") or []
+    if not roh:
+        b = cfg.get("chunk_words_variante")
+        if b and b != cfg.get("chunk_words"):
+            roh = [{"name": "B", "chunk_words": b}]
+    sauber = []
+    for v in roh:
+        name = str(v.get("name", "")).strip()
+        if name and name != "A":
+            sauber.append(dict(v, name=name))
+    return sauber
+
+
+def variante_anwenden(cfg, v):
+    """Uebernimmt die Abweichungen der Variante in eine Kopie der Config.
+
+    Gibt (config, chunk_words, beschreibung) zurueck."""
+    cfg = dict(cfg)
+    chunk_words = int(v.get("chunk_words", cfg["chunk_words"]))
+    teile = [f"{chunk_words} Woerter/Chunk"]
+    modell = str(v.get("modell_uebersetzung", "")).strip()
+    if modell:
+        cfg["modell_uebersetzung"] = modell
+        cfg["modell_revision"] = str(
+            v.get("modell_revision", modell)).strip()
+        teile.append(modell)
+    return cfg, chunk_words, ", ".join(teile)
+
+
+def rahmen_gruppen(paras, marker="#"):
+    """Teilt die Absaetze an jeder Marker-Zeile (Paket 5).
+
+    Die Markerzeile beginnt die neue Gruppe und bleibt im Text — sie ist
+    die Gliederung des Autors, nicht unsere. Jede Gruppe wird getrennt
+    gechunkt; die Fuge dazwischen setzt die Rueckschau zurueck.
+
+    Grund: Tempus und Person der einen Erzaehlebene duerfen nicht in die
+    andere bluten. Ohne den Schnitt bekaeme der erste Chunk nach dem
+    Wechsel die letzten Saetze der vorigen Ebene als Vorbild."""
+    if not marker:
+        return [list(paras)]
+    gruppen, aktuell = [], []
+    for p in paras:
+        if p.strip() == marker or p.strip().startswith(marker + " "):
+            if aktuell:
+                gruppen.append(aktuell)
+            aktuell = [p]
+        else:
+            aktuell.append(p)
+    if aktuell:
+        gruppen.append(aktuell)
+    return gruppen or [[]]
+
+
+def ebenen_folge(gruppen, marker, perspektive):
+    """Je Gruppe der Name der Erzaehlebene aus dem Stilprofil.
+
+    Drei Faelle, in dieser Reihenfolge:
+      - Die Markerzeile nennt die Ebene ('# Krieg') und der Name kommt in
+        'perspektive' vor: die wird genommen.
+      - Nackter Marker und genau zwei Ebenen: die jeweils andere als
+        zuletzt. Nicht 'gerade/ungerade' — nach einer benannten Gruppe
+        waere das versetzt.
+      - Alles andere: keine Benennung. Lieber schweigen als raten — eine
+        falsch benannte Ebene ist schaedlicher als gar keine.
+
+    Die Reihenfolge in 'perspektive' ist die des ersten Auftretens im
+    Buch, nicht die alphabetische: Der Text beginnt auf der zuerst
+    genannten Ebene."""
+    namen = list(perspektive) if isinstance(perspektive, dict) else []
+    folge, letzte = [], None
+    for gruppe in gruppen:
+        kopf = gruppe[0].strip() if gruppe else ""
+        rest = kopf[len(marker):].strip() if kopf.startswith(marker) else ""
+        treffer = [n for n in namen if rest and n.lower() in rest.lower()]
+        if treffer:
+            name = treffer[0]
+        elif len(namen) == 2:
+            name = (namen[0] if letzte is None
+                    else namen[1] if letzte == namen[0] else namen[0])
+        else:
+            name = ""
+        folge.append(name)
+        if name:
+            letzte = name
+    return folge
 
 
 def chunks_bauen(paras, ziel, ausnahmen=None):

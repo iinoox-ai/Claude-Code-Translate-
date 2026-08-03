@@ -23,7 +23,7 @@ MITNEHMEN = [
     "pipeline.log", "uebersetzung_warnungen.log", "lektorat_warnungen.log",
     "zitate_verdacht.txt", "analysepaket.md",
     "bewertung_uebersetzung.md", "bewertung_lektorat.md",
-    "bewertung_chunkgroesse.md",
+    "bewertung_varianten.md",
 ]
 
 
@@ -40,7 +40,8 @@ def main():
     for f in MITNEHMEN:
         if os.path.exists(f):
             shutil.copy2(f, ORDNER); dabei.append(f)
-    for d in ("test", "testB"):
+    for d in ["test"] + [f"test{v['name']}"
+                         for v in G.varianten(G.lade_config(pflicht=False))]:
         if os.path.isdir(d):
             shutil.copytree(d, os.path.join(ORDNER, d),
                             ignore=shutil.ignore_patterns("teile"))

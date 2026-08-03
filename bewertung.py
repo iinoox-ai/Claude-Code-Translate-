@@ -10,7 +10,7 @@ Neu gegenueber der ersten Fassung:
 
     python3 bewertung.py
     python3 bewertung.py --lektorat
-    python3 bewertung.py --chunkvergleich
+    python3 bewertung.py --variantenvergleich
 """
 
 import argparse
@@ -165,60 +165,107 @@ def briefing(name):
 
 
 # ==================================================================
-def chunkvergleich(cfg):
-    a_p = TESTDIR + "/" + G.F["uebersetzung"]
-    b_p = "testB/" + G.F["uebersetzung"]
-    if not (os.path.exists(a_p) and os.path.exists(b_p)):
-        sys.exit("FEHLER: Beide Varianten fehlen. Erst:\n"
-                 "  python3 uebersetzung.py --test\n"
-                 "  python3 uebersetzung.py --test --variante B")
-    A = open(a_p, encoding="utf-8").read()
-    B = open(b_p, encoding="utf-8").read()
+def kosten_zeile(pfad):
+    """Kosten dieser Variante aus der Differenzdatei neben dem Ergebnis."""
+    if not os.path.exists(pfad):
+        return "Kosten nicht erfasst"
+    try:
+        d = json.load(open(pfad, encoding="utf-8"))
+    except Exception:
+        return "Kosten nicht lesbar"
+    summe, aufrufe, unsicher = 0.0, 0, False
+    for rolle, e in d.items():
+        t = G.tarif(e.get("modell", ""))
+        aufrufe += int(e.get("aufrufe", 0))
+        if not t:
+            unsicher = True
+            continue
+        summe += (e.get("ein", 0) * t["ein"] + e.get("aus", 0) * t["aus"]) / 1e6
+    return (f"{aufrufe} Aufrufe, {summe:.2f} $"
+            + (" (unvollstaendig, Tarif unbekannt)" if unsicher else ""))
 
-    print(f"\n=== Chunkgroessen-Vergleich ===")
-    print(f"  Variante A: {cfg['chunk_words']} Woerter/Chunk")
-    print(f"  Variante B: {cfg['chunk_words_variante']} Woerter/Chunk\n")
-    for name, t in (("A", A), ("B", B)):
+
+def variantenvergleich(cfg):
+    """Vergleicht alle vorhandenen Varianten gegen die Basis (Paket 5).
+
+    Varianten unterscheiden sich in Chunkgroesse ODER Modell — die Frage
+    ist dieselbe, also ist es dieselbe Mechanik."""
+    basis_p = TESTDIR + "/" + G.F["uebersetzung"]
+    if not os.path.exists(basis_p):
+        sys.exit("FEHLER: Die Basis fehlt. Erst:\n"
+                 "  python3 uebersetzung.py --test")
+    basis = open(basis_p, encoding="utf-8").read()
+
+    da, fehlt = [], []
+    for v in G.varianten(cfg):
+        pfad = f"test{v['name']}/" + G.F["uebersetzung"]
+        (da if os.path.exists(pfad) else fehlt).append((v, pfad))
+    if not da:
+        sys.exit("FEHLER: Keine Variante vorhanden. Erst:\n"
+                 + "\n".join(f"  python3 uebersetzung.py --test --variante "
+                             f"{v['name']}" for v, _ in fehlt))
+    for v, _ in fehlt:
+        print(f"Variante {v['name']}: nicht gerechnet, wird uebersprungen")
+
+    def steckbrief(name, t, kosten):
         d, _ = G.diminutive_zaehlen(t)
-        q, mit, ges = G.perfekt_quote(t)
+        q, _, _ = G.perfekt_quote(t)
         w = len(t.split())
-        print(f"  {name}: {w} Woerter, {len(G.absaetze(t))} Absaetze, "
-              f"{d} Diminutive ({d/max(1,w/1000):.1f}/1000), "
-              f"Perfekt {q:.1%}")
-    stat, bsp = diffstat(A, B)
-    ausgabe_stat(stat, "Unterschied A gegen B")
-    print("\nStichprobe der Unterschiede:")
-    random.seed(3)
-    for k, x, y in random.sample(bsp, min(12, len(bsp))):
-        print(f"  [{k[:8]:8s}] {x[:52]:54s} -> {y[:52]}")
+        return (f"  {name}: {w} Woerter, {len(G.absaetze(t))} Absaetze, "
+                f"{d} Diminutive ({d/max(1,w/1000):.1f}/1000), "
+                f"Perfekt {q:.1%}\n      {kosten}")
+
+    print("\n=== Variantenvergleich ===")
+    _, _, basis_b = G.variante_anwenden(cfg, {"name": "A"})
+    print(steckbrief(f"A ({basis_b})", basis,
+                     kosten_zeile(TESTDIR + "/kosten.json")))
+    texte = []
+    for v, pfad in da:
+        t = open(pfad, encoding="utf-8").read()
+        _, _, b = G.variante_anwenden(cfg, v)
+        print(steckbrief(f"{v['name']} ({b})", t,
+                         kosten_zeile(f"test{v['name']}/kosten.json")))
+        texte.append((v["name"], b, t))
+
+    for name, _, t in texte:
+        stat, bsp = diffstat(basis, t)
+        ausgabe_stat(stat, f"Unterschied A gegen {name}")
+        if bsp:
+            print(f"\nStichprobe A gegen {name}:")
+            random.seed(3)
+            for k, x, y in random.sample(bsp, min(8, len(bsp))):
+                print(f"  [{k[:8]:8s}] {x[:52]:54s} -> {y[:52]}")
 
     if cfg["export_bewertung"]:
-        L = ["# Chunkgroessen-Vergleich A gegen B\n",
-             f"- A: {cfg['chunk_words']} Woerter je Chunk",
-             f"- B: {cfg['chunk_words_variante']} Woerter je Chunk\n",
-             "Beide Fassungen stammen aus demselben Ausgangstext, nur die "
-             "Chunkgroesse unterscheidet sich. Sag mir, welche besser ist "
-             "und woran du es siehst — besonders an den Nahtstellen zwischen "
-             "den Chunks und im Tempus.\n",
-             "## Variante A\n```", A, "```\n## Variante B\n```", B, "```"]
-        open("bewertung_chunkgroesse.md", "w", encoding="utf-8").write(
+        L = ["# Variantenvergleich\n",
+             f"- A ({basis_b}) ist die Basis"]
+        L += [f"- {n} ({b})" for n, b, _ in texte]
+        L += ["\nAlle Fassungen stammen aus demselben Ausgangstext. Sag mir, "
+              "welche die beste ist und woran du es siehst — besonders an "
+              "den Nahtstellen zwischen den Chunks, im Tempus und in der "
+              "Figurenrede. Nenne die Variante beim Namen.\n",
+              "## Variante A\n```", basis, "```"]
+        for n, b, t in texte:
+            L += [f"## Variante {n} — {b}\n```", t, "```"]
+        open("bewertung_varianten.md", "w", encoding="utf-8").write(
             "\n".join(L))
-        print("\nExportpaket: bewertung_chunkgroesse.md")
+        print("\nExportpaket: bewertung_varianten.md")
 
 
 # ==================================================================
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--lektorat", action="store_true")
-    ap.add_argument("--chunkvergleich", action="store_true")
+    ap.add_argument("--variantenvergleich", "--chunkvergleich",
+                    dest="variantenvergleich", action="store_true")
     ap.add_argument("--kein-modell", action="store_true")
     args = ap.parse_args()
 
     G.kopf("BEWERTUNG")
     cfg = G.lade_config()
 
-    if args.chunkvergleich:
-        chunkvergleich(cfg)
+    if args.variantenvergleich:
+        variantenvergleich(cfg)
         return
 
     teile = G.lade_json(TESTDIR + "/teile.json", still=True)

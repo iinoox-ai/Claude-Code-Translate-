@@ -55,12 +55,13 @@ SCHRITTE = [
                      "freigeben", None, 0),
     ("test",         "Testuebersetzung, zwei Auszuege",
      ["uebersetzung.py", "--test"], 35),
-    ("testB",        "Testuebersetzung mit alternativer Chunkgroesse",
-     ["uebersetzung.py", "--test", "--variante", "B"], 30),
+    # Platzhalter — die Variantenschritte entstehen aus projekt.json,
+    # siehe schritte_mit_varianten().
+    ("VARIANTEN", None, None, 0),
     ("bewertung",    "Testuebersetzung bewerten",
      ["bewertung.py"], 8),
-    ("chunkvergleich", "Chunkgroessen A gegen B vergleichen",
-     ["bewertung.py", "--chunkvergleich"], 1),
+    ("variantenvergleich", "Varianten gegen die Basis vergleichen",
+     ["bewertung.py", "--variantenvergleich"], 1),
     ("test_lektorat", "Testlektorat",
      ["lektorat.py", "--test"], 30),
     ("qa_test_lekt", "Qualitaetspruefung des Testlektorats",
@@ -82,6 +83,30 @@ SCHRITTE = [
     ("paket",        "Ergebnis paketieren",
      ["paket.py"], 2),
 ]
+
+
+def schritte_mit_varianten(roh, cfg):
+    """Setzt fuer jede Variante aus projekt.json einen Testschritt ein.
+
+    Die Liste ist damit von der Konfiguration abhaengig; Schrittnamen
+    bleiben stabil ('testB', 'testC'), weil das Manifest sie als
+    Schluessel fuehrt."""
+    raus = []
+    for eintrag in roh:
+        if eintrag[0] != "VARIANTEN":
+            raus.append(eintrag)
+            continue
+        for v in G.varianten(cfg):
+            _, _, b = G.variante_anwenden(cfg, v)
+            raus.append((f"test{v['name']}",
+                         f"Testuebersetzung Variante {v['name']} ({b})",
+                         ["uebersetzung.py", "--test", "--variante",
+                          v["name"]], 30))
+    return raus
+
+
+SCHRITTE_ROH = SCHRITTE
+SCHRITTE = schritte_mit_varianten(SCHRITTE_ROH, G.lade_config(pflicht=False))
 NAMEN = [s[0] for s in SCHRITTE]
 
 
@@ -141,8 +166,13 @@ def kostenuebersicht(m):
 
 def uebersprungen(cfg, name):
     """Schritte, die die Konfiguration nicht braucht."""
-    if name in ("testB", "chunkvergleich") and \
-       cfg["chunk_words_variante"] == cfg["chunk_words"]:
+    if name.startswith("test") and name not in ("test", "test_lektorat"):
+        v = next((x for x in G.varianten(cfg)
+                  if "test" + x["name"] == name), None)
+        if v and not str(v.get("modell_uebersetzung", "")).strip() \
+           and int(v.get("chunk_words", 0)) == cfg["chunk_words"]:
+            return True          # unterscheidet sich in nichts
+    if name == "variantenvergleich" and not G.varianten(cfg):
         return True
     return False
 
@@ -180,7 +210,8 @@ def cmd_status(cfg):
         zusatz = ""
         if s == "laufend" or (s == "offen" and cmd):
             rest += dauer
-        if name in ("voll", "test", "testB", "lektorat", "test_lektorat"):
+        if name in ("voll", "test", "lektorat", "test_lektorat") \
+           or (name.startswith("test") and name not in ("test_lektorat",)):
             zusatz = chunkstand(name)
         print(f" {sym} {name:16s} {beschreibung[:44]:46s}{pause}{zusatz}")
     print(f"\nGeschaetzte Restzeit der Modellschritte: ca. {rest} min")
@@ -201,8 +232,8 @@ def cmd_status(cfg):
 
 
 def chunkstand(name):
-    praefix = {"test": "test/", "testB": "testB/",
-               "test_lektorat": "test/"}.get(name, "")
+    praefix = ("test/" if name in ("test", "test_lektorat")
+               else name + "/" if name.startswith("test") else "")
     art = "lektorat" if "lektorat" in name else "uebersetzung"
     st = G.lade_json(praefix + f"{'lektorat' if art=='lektorat' else 'uebersetzung'}_state.json",
                      still=True)
@@ -473,20 +504,27 @@ def cmd_reset(cfg, args):
     print("  python3 pipeline.py neu --nur-teile")
 
 
-WEG_TEILE = ["teile", "test/teile", "testB/teile",
-             "uebersetzung_state.json", "test/uebersetzung_state.json",
-             "testB/uebersetzung_state.json",
-             "lektorat_state.json", "test/lektorat_state.json"]
+# Variantenverzeichnisse kommen aus der Konfiguration dazu — sonst
+# bliebe testC beim Aufraeumen liegen und der naechste Vergleich
+# rechnete gegen einen alten Lauf.
+_VARIANTEN_DIRS = [f"test{v['name']}"
+                   for v in G.varianten(G.lade_config(pflicht=False))]
+
+WEG_TEILE = (["teile", "test/teile",
+              "uebersetzung_state.json", "test/uebersetzung_state.json",
+              "lektorat_state.json", "test/lektorat_state.json"]
+             + [f"{d}/teile" for d in _VARIANTEN_DIRS]
+             + [f"{d}/uebersetzung_state.json" for d in _VARIANTEN_DIRS])
 
 WEG_ALLES = WEG_TEILE + [
-    G.MANIFEST, LOG, PID, "test", "testB",
+    G.MANIFEST, LOG, PID, "test", *_VARIANTEN_DIRS,
     G.F["entwurf"], G.F["uebersetzung"], G.F["normalisiert"], G.F["lektoriert"],
     "lektorat_diff.txt", "normalisierung_report.txt",
     "uebersetzung_warnungen.log", "lektorat_warnungen.log",
     "qa_uebersetzung.txt", "qa_lektorat.txt", "qa_konsistenz.txt",
     "preflight_report.txt", "leitmotiv_varianten.txt",
     "analysepaket.md", "bewertung_uebersetzung.md", "bewertung_lektorat.md",
-    "bewertung_chunkgroesse.md", "bericht.html",
+    "bewertung_varianten.md", "bericht.html",
 ]
 
 

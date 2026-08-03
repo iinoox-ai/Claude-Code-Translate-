@@ -366,6 +366,20 @@ def kapitel_zuordnen(chunks, kapitel):
     return zuordnung
 
 
+def block_ebene(name, perspektive):
+    """Nennt die Erzaehlebene des Abschnitts im User-Prompt (Paket 5).
+
+    Formulierung kommt aus stilprofil.json, nicht aus dem Code — ein
+    hartkodiertes 'dritte Person Praesens' waere beim naechsten Buch
+    falsch und niemand suchte es hier."""
+    if not name:
+        return ""
+    form = str((perspektive or {}).get(name, "")).strip()
+    if not form:
+        return ""
+    return f"=== ERZÄHLEBENE ===\n  {name}: {form}\n\n"
+
+
 def block_kapitel(ueberschrift, kapitel):
     if not ueberschrift:
         return ""
@@ -475,8 +489,9 @@ def zitat_absaetze(zitate):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--test", action="store_true")
-    ap.add_argument("--variante", default="A", choices=["A", "B"],
-                    help="B nutzt chunk_words_variante, schreibt nach testB/")
+    ap.add_argument("--variante", default="A",
+                    help="Name aus 'varianten' in projekt.json; A ist die "
+                         "Basis und schreibt nach test/")
     ap.add_argument("--no-revision", action="store_true")
     ap.add_argument("--chunk", type=int, default=None,
                     help="nur diesen Chunk neu rechnen (1-basiert)")
@@ -486,8 +501,15 @@ def main():
     cfg = G.lade_config()
     R.sicherstellen(cfg)          # No-op ohne sheets_id
     revision = cfg["revision_pass"] and not args.no_revision
-    chunk_words = (cfg["chunk_words_variante"] if args.variante == "B"
-                   else cfg["chunk_words"])
+    chunk_words, beschreibung = cfg["chunk_words"], "Basis"
+    if args.variante != "A":
+        v = next((x for x in G.varianten(cfg)
+                  if x["name"] == args.variante), None)
+        if not v:
+            moeglich = ", ".join(["A"] + [x["name"] for x in G.varianten(cfg)])
+            sys.exit(f"FEHLER: Variante '{args.variante}' steht nicht in "
+                     f"projekt.json.\n  Moeglich: {moeglich}")
+        cfg, chunk_words, beschreibung = G.variante_anwenden(cfg, v)
 
     if not os.path.exists(G.F["quelle"]):
         sys.exit(f"FEHLER: {G.F['quelle']} nicht gefunden.")
@@ -495,7 +517,8 @@ def main():
     zitate = G.lade_json(G.F["zitate"], still=True).get("epigraphen", [])
 
     if args.test:
-        praefix = ("test" if args.variante == "A" else "testB") + "/"
+        praefix = ("test" if args.variante == "A"
+                   else "test" + args.variante) + "/"
         os.makedirs(praefix, exist_ok=True)
         t1, t2, dichte = testauszuege(paras_alle,
                                       cfg["test_words_erzaehlung"],
@@ -504,21 +527,29 @@ def main():
               f"{len(t1)} Absätze")
         print(f"Teil 2 (Dialog):    {sum(len(p.split()) for p in t2)} Wörter, "
               f"{len(t2)} Absätze, Redeanteil {dichte:.0%}")
-        print(f"Chunkgröße:         {chunk_words} Wörter\n")
+        print(f"Variante {args.variante}:         {beschreibung}\n")
         gruppen = [t1, t2]
         marken = {}
     else:
         praefix = ""
         marken = zitat_absaetze(zitate)
-        gruppen = [[p for i, p in enumerate(paras_alle) if i not in marken]]
+        rest = [p for i, p in enumerate(paras_alle) if i not in marken]
+        gruppen = G.rahmen_gruppen(rest, cfg["rahmen_marker"])
+        if len(gruppen) > 1:
+            print(f"Rahmenwechsel:      {len(gruppen)-1} an Marker "
+                  f"»{cfg['rahmen_marker']}«")
 
     # Chunks je Gruppe; Fugen merken (Kontext dort zuruecksetzen)
-    chunks, fugen = [], set()
-    for gruppe in gruppen:
+    perspektive = G.lade_json(G.F["stilprofil"], still=True).get("perspektive")
+    ebenen = (G.ebenen_folge(gruppen, cfg["rahmen_marker"], perspektive)
+              if not args.test else [""] * len(gruppen))
+    chunks, fugen, ebene_je_chunk = [], set(), []
+    for gruppe, ebene in zip(gruppen, ebenen):
         teil = G.chunks_bauen(gruppe, chunk_words)
         if chunks:
             fugen.add(len(chunks))
         chunks.extend(teil)
+        ebene_je_chunk.extend([ebene] * len(teil))
 
     n = len(chunks)
     glossar = G.lade_json(G.F["glossar"])
@@ -593,6 +624,7 @@ def main():
         if vorige and zu_tun[0] not in fugen:
             letzte = G.schlusswoerter(vorige, cfg["context_words"])
 
+    kosten_vorher = G.kosten_schnappschuss() if praefix else None
     start = time.time()
     messwerte = []
 
@@ -616,7 +648,8 @@ def main():
 
         for versuch in range(1, cfg["max_retries"] + 1):
             try:
-                kopf = (block_kapitel(kapitel_je_chunk[i], kapitel)
+                kopf = (block_ebene(ebene_je_chunk[i], perspektive)
+                        + block_kapitel(kapitel_je_chunk[i], kapitel)
                         + block_fallen(quelle, cfg)
                         + block_personen(quelle, personen, figuren)
                         + block_glossar(quelle, glossar)
@@ -729,6 +762,9 @@ def main():
         print(f"\nPrüfgrenzen NICHT kalibriert: nur {len(messwerte)} "
               f"verwertbare Chunks, mindestens 3 nötig.")
 
+    if kosten_vorher is not None:
+        G.kosten_differenz_schreiben(kosten_vorher,
+                                     praefix + "kosten.json")
     print(f"\nFertig nach {(time.time()-start)/60:.0f} min.")
     print(f"  Endfassung: {praefix + G.F['uebersetzung']}")
     print(f"  Entwurf:    {praefix + G.F['entwurf']}")
