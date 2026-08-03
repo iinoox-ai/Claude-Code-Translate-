@@ -145,7 +145,24 @@ def signal_kopf(cfg, rolle, was):
     return f"{was} — {modell} ({art})"
 
 
-def blindbewertung(cfg, quelle, a, b, n=4, label="", rolle="judge"):
+def zurueckrechnen(besser, getauscht, namen):
+    """Welche Fassung meint das Modell, wenn es 'A' oder 'B' sagt?
+
+    Eigene Funktion, damit sie pruefbar ist. Ein vertauschtes Etikett
+    dreht das Ergebnis um, ohne dass irgendwo etwas auffaellt — das ist
+    keine Stelle fuer eine Zeile mitten im Ablauf."""
+    if besser not in ("A", "B"):
+        return "gleichwertig"
+    return ({"A": namen[1], "B": namen[0]} if getauscht
+            else {"A": namen[0], "B": namen[1]})[besser]
+
+
+def blindbewertung(cfg, quelle, a, b, n=4, label="", rolle="judge",
+                   namen=("entwurf", "revision")):
+    """Blindes Paarurteil. 'namen' benennt die beiden Fassungen — fuer
+    Entwurf gegen Revision ebenso wie fuer Basis gegen Variante. Die
+    Tauschlogik bleibt dieselbe: Welche Fassung als A erscheint,
+    entscheidet der Zufall, sonst urteilt das Modell nach Position."""
     pq = G.absaetze(quelle)
     paare_ab = ausrichten(G.absaetze(a), G.absaetze(b))
     kandidaten = []
@@ -169,11 +186,7 @@ def blindbewertung(cfg, quelle, a, b, n=4, label="", rolle="judge"):
             if not d:
                 raise RuntimeError("kein JSON")
             besser = d.get("besser")
-            if besser in ("A", "B"):
-                echt = ({"A": "revision", "B": "entwurf"} if getauscht
-                        else {"A": "entwurf", "B": "revision"})[besser]
-            else:
-                echt = "gleichwertig"
+            echt = zurueckrechnen(besser, getauscht, namen)
             d["_echt"], d["_teil"] = echt, label
             ergebnisse.append(d)
             print(f"  {label} Paar {i}: {echt} ({d.get('abstand','?')})")
@@ -209,7 +222,7 @@ def kosten_zeile(pfad):
             + (" (unvollstaendig, Tarif unbekannt)" if unsicher else ""))
 
 
-def variantenvergleich(cfg):
+def variantenvergleich(cfg, kein_modell=False):
     """Vergleicht alle vorhandenen Varianten gegen die Basis (Paket 5).
 
     Varianten unterscheiden sich in Chunkgroesse ODER Modell — die Frage
@@ -260,10 +273,36 @@ def variantenvergleich(cfg):
             for k, x, y in random.sample(bsp, min(8, len(bsp))):
                 print(f"  [{k[:8]:8s}] {x[:52]:54s} -> {y[:52]}")
 
+    urteile = {}
+    if not kein_modell:
+        import uebersetzung as U
+        paras = G.absaetze(open(G.F["quelle"], encoding="utf-8").read())
+        t1, t2, _ = U.testauszuege(paras, cfg["test_words_erzaehlung"],
+                                   cfg["test_words_dialog"])
+        quelle = "\n\n".join(t1)
+        print(f"\n{signal_kopf(cfg, 'judge', 'Blindes Urteil je Variante')}")
+        for name, _, t in texte:
+            ergebnisse = blindbewertung(cfg, quelle, basis, t, 4,
+                                        f"A gegen {name}",
+                                        namen=("A", name))
+            urteile[name] = Counter(x["_echt"] for x in ergebnisse)
+            if urteile[name]:
+                print(f"  A gegen {name}: "
+                      + ", ".join(f"{k}: {v}"
+                                  for k, v in urteile[name].items()))
+
     if cfg["export_bewertung"]:
         L = ["# Variantenvergleich\n",
              f"- A ({basis_b}) ist die Basis"]
         L += [f"- {n} ({b})" for n, b, _ in texte]
+        if urteile:
+            L.append("\n## Blindes Urteil (Paarvergleich gegen die Basis)\n")
+            L.append("| Variante | Urteile |\n|---|---|")
+            for name, c in urteile.items():
+                L.append(f"| {name} | "
+                         + ", ".join(f"{k}: {v}" for k, v in c.items())
+                         + " |")
+            L.append("")
         L += ["\nAlle Fassungen stammen aus demselben Ausgangstext. Sag mir, "
               "welche die beste ist und woran du es siehst — besonders an "
               "den Nahtstellen zwischen den Chunks, im Tempus und in der "
@@ -289,7 +328,7 @@ def main():
     cfg = G.lade_config()
 
     if args.variantenvergleich:
-        variantenvergleich(cfg)
+        variantenvergleich(cfg, kein_modell=args.kein_modell)
         return
 
     teile = G.lade_json(TESTDIR + "/teile.json", still=True)
