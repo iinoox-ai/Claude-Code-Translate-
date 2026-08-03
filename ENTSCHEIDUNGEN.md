@@ -663,6 +663,91 @@ Dazu gehört der einmalige Fable-5-Vergleich: lieber einmal messen, ob die
 Mythos-Klasse bei diesem Text sichtbar besser übersetzt, als es dauerhaft
 zu vermuten.
 
+→ Gemessen im August 2026 am Buch 1919; die drei Ergebnisse stehen im
+nächsten Eintrag.
+
+## Gemessen unter Opus 5 (August 2026, Buch 1919)
+
+Die drei Werte, die die Migration offengelassen hatte. Alle Zahlen stammen
+aus Läufen an diesem Buch — sie gelten für diesen Text und diese
+Modellgeneration, nicht als Naturgesetz.
+
+### `revision_pass` bleibt an
+
+**95 Änderungen zwischen Entwurf und Revision, davon 94 substanziell (99 %),
+eine einzige Interpunktion.** Das Abschaltkriterium lautet „Änderungen
+überwiegend Typografie" — hier ist es das genaue Gegenteil. Das Fremdurteil
+ging 3:1 für die Revision.
+
+Was der Durchgang tatsächlich repariert hat: `nicht detonierte Granaten` →
+`Blindgänger`, `Grammofonspieler` → `Grammofon` (falscher Freund),
+`Toilettenhäuschen` → `Toilettenhaus` (Diminutivpolitik durchgesetzt), und
+`keine Ahnung` → `keine blasse Ahnung` — das Leitmotiv wiederhergestellt.
+
+**Unter Mistral erzeugte dieser Pass Tempusfehler; unter Opus 5 räumt er
+Terminologie und falsche Freunde auf. Das ist nicht derselbe Durchgang.**
+
+Preis: 18,22 $ gegen 17,71 $ der Übersetzung selbst — die Revision kostet
+mehr als das, was sie überarbeitet, weil sie denselben Text noch einmal
+vollständig ausgibt.
+
+### `lektorat_passes` bleibt `det → stil → korrektorat → det`
+
+**55 Änderungen im Testlektorat: 86 % Wort und Wendung, 11 % Interpunktion,
+4 % Teilsatz.** Der Mistral-Wert war 94 % Typografie. Auch hier hat sich die
+Lage umgedreht.
+
+Die Registerkontrolle blieb im Testlektorat stabil, im Volllauf jedoch nicht:
+**verkürzte Formen 45 → 29 (−36 %)**, verteilt auf `halt`, `grad` und `nich`.
+Das ist die eine Stelle, an der das Lektorat die Erzählstimme angehoben hat —
+kein Grund abzuschalten, aber der Grund, warum diese Messung im Bericht steht.
+
+### `chunk_words` bleibt bei 800 — für dieses Buch
+
+| | A (800) | B (1600) |
+|---|---:|---:|
+| Fremdurteil | **3** | 1 |
+| davon „deutlich" | 2 | 0 |
+| Wörter | 2958 | 2947 |
+| Absätze | 74 | 74 |
+| Kosten | 1,04 $ | 0,85 $ |
+
+B ist nicht kaputt: kein Textverlust, gleiche Absatzzahl, kein Raffen. **Die
+Befürchtung aus der Mistral-Ära bestätigt sich bei 1600 Wörtern nicht.** Aber
+B ist auch nirgends besser, und beide „deutlich"-Urteile fallen für A.
+
+Die Entscheidung ruht auf **„kein nachweisbarer Vorteil"**, nicht auf
+„nachweislich schlechter": Vier Paarurteile sind eine kleine Stichprobe, 3:1
+kein starkes Signal. Die Beweislast lag bei der Änderung, und sie ist nicht
+erbracht. Der Preisvorteil von 18 % — aufs Buch rund 7 $ — wiegt ein Urteil
+nicht auf, das in die andere Richtung zeigt.
+
+**Das gilt für 1919, nicht für das nächste Buch.** Die beste Chunkgröße hängt
+vom Text ab; deshalb bleibt die Variante in der Vorlage und wird jedes Mal neu
+gemessen.
+
+### Fable 5: verworfen
+
+| | A (Opus 5) | C (Fable 5) |
+|---|---:|---:|
+| Fremdurteil | **2** | 1 (+1 gleichwertig) |
+| Kosten | 1,04 $ | **2,66 $** |
+
+Kein Vorteil bei 2,6-fachem Preis — aufs Buch hochgerechnet 97 $ gegen 38 $.
+Nebenbei: höherer Perfektanteil (13,1 % gegen 12,4 %) und mehr Diminutive
+(2,0 gegen 1,7 je 1000), beides einen Tick weiter weg von der Projektpolitik.
+
+Damit ist der einmalige Vergleich, den der Arbeitsauftrag verlangt, erledigt.
+Er wird nicht dauerhaft mitgeführt: Ob ein anderes Modell besser übersetzt,
+hängt von der Modellgeneration ab, nicht vom Buch.
+
+### Was diese Messung nicht abdeckt
+
+Die Chunkgrößen- und Modellurteile stammen aus der **Erzählpassage**. Der
+Dialogvergleich ist seit August 2026 eingebaut, lief aber für diese Messung
+noch nicht mit. Bei NL→DE liegt die Schwäche im Dialog — wer 1600 Wörter
+ernsthaft erwägt, misst dort nach.
+
 ---
 
 ## Verworfen — und warum
