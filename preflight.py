@@ -571,6 +571,38 @@ def selbsttest(cfg, b):
             finally:
                 os.chdir(alt)
 
+        # Der Tab, aus dem die Freigabe gelesen wird, muss auch
+        # geschrieben werden. Sonst steht dort eine leere Tabelle, und
+        # die Meldung 'im Spreadsheet zu pflegen' ist unwahr.
+        class _Blatt:
+            def __init__(s):
+                s.werte = []
+
+            def clear(s):
+                s.werte = []
+
+            def update(s, a, bb):
+                if not isinstance(a, list):
+                    raise TypeError("alte gspread-Reihenfolge")
+                s.werte = a
+
+        blatt = _Blatt()
+        import referenz_sync as RS_
+        echt_buch = RS_._buch
+        try:
+            RS_._buch = lambda cfg_: type("B", (), {"worksheet": lambda s, n:
+                                                    blatt})()
+            nl["freigegeben"] = "ja"
+            Z.review_in_tab({"sheets_id": "x" * 30}, [eng, nl])
+        finally:
+            RS_._buch = echt_buch
+        if not blatt.werte or blatt.werte[0] != Z.SPALTEN:
+            fehler.append(f"Tab-Kopfzeile fehlt: {blatt.werte[:1]}")
+        elif len(blatt.werte) != 3:
+            fehler.append(f"{len(blatt.werte)-1} statt 2 Zeilen im Tab")
+        elif blatt.werte[2][-1] != "ja":
+            fehler.append("erteilte Freigabe geht beim Schreiben verloren")
+
         # Der Platzhalter bleibt, solange original_deutsch leer ist.
         marken = {2: {"index": 2, "text": "Alles van waarde…",
                       "attribution": "Lucebert", "original_deutsch": None}}

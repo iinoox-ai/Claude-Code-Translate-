@@ -134,7 +134,9 @@ hätte ein nachträglich ergänzter Tab jede bestehende Einrichtung lahmgelegt.
 ## Zitate: nichts ohne Freigabe
 
 `zitatrecherche` schlägt vor, der Mensch gibt frei
-(`freigegeben = ja` in `zitate_review.md` oder im Tab `ZitateReview`). Der
+(`freigegeben = ja` in `zitate_review.md` oder im Tab `ZitateReview`; bei
+gesetzter `sheets_id` schreibt der Schritt den Tab und liest ihn beim
+nächsten Aufruf zurück). Der
 Schritt füllt `vorschlag_de` und die Quellenangaben, **nie `original_deutsch`**
 — dieses eine Feld setzt nur `freigabe_einlesen()`, und nur nach Freigabe.
 Nicht-niederländische Zitate bleiben im Original (`original_belassen`) und
