@@ -351,7 +351,13 @@ def erstbefuellung(cfg):
                   f"unveraendert")
             continue
         if not daten:
-            print(f"  {tabname}: {G.F[ziel]} ist leer, nichts zu uebertragen")
+            # Zwischen 'Datei fehlt' und 'Datei ist leer' unterscheiden.
+            # Beides sieht im Sheet gleich aus, hat aber verschiedene
+            # Ursachen — falsches Arbeitsverzeichnis gegen nichts zu tun.
+            fehlt = not os.path.exists(G.F[ziel])
+            print(f"  {tabname}: {G.F[ziel]} "
+                  + ("nicht gefunden — falsches Arbeitsverzeichnis?"
+                     if fehlt else "ist leer, nichts zu uebertragen"))
             continue
         zeilen = [spalten] + [zerleger(k, daten[k]) for k in sorted(daten)]
         _blatt_schreiben(blatt, zeilen)
@@ -391,7 +397,8 @@ def main():
         print("Die Referenz-JSONs werden direkt gelesen, nichts zu tun.")
         return
 
-    print(f"Spreadsheet: {sheet_id(cfg['sheets_id'])[:12]}…\n")
+    print(f"Spreadsheet:        {sheet_id(cfg['sheets_id'])[:12]}…")
+    print(f"Arbeitsverzeichnis: {os.getcwd()}\n")
     try:
         if args.vorlage:
             vorlage(cfg)

@@ -287,15 +287,21 @@ def bericht(stand, git_hinweis=""):
     print()
 
 
-def lauf(skript="pipeline.py", *argumente, code=CODE):
+def lauf(skript="pipeline.py", *argumente, code=CODE, projekt=None):
     """Startet ein Skript im Vordergrund und reicht jede Zeile sofort durch.
 
     '-u' schaltet die Pufferung ab: die Chunk-Fortschrittsausgabe muss
     laufend sichtbar sein, sonst stuft Colab die Sitzung als untaetig ein.
-    Rueckgabe ist der Rueckgabewert des Skripts."""
+    Rueckgabe ist der Rueckgabewert des Skripts.
+
+    Das Arbeitsverzeichnis wird ausdruecklich gesetzt statt geerbt. Wer
+    nur die Nachlade-Zelle ausgefuehrt hat, steht sonst in /content, und
+    die Skripte finden weder projekt.json noch die Referenzdateien —
+    ohne dass jemand danach sucht."""
     befehl = [sys.executable, "-u", os.path.join(code, skript), *argumente]
     p = subprocess.Popen(befehl, stdout=subprocess.PIPE,
-                         stderr=subprocess.STDOUT, text=True, bufsize=1)
+                         stderr=subprocess.STDOUT, text=True, bufsize=1,
+                         cwd=projekt or os.getcwd())
     try:
         for zeile in p.stdout:
             print(zeile, end="", flush=True)
