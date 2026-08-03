@@ -582,10 +582,15 @@ def bericht_bauen(praefix):
     ziel = praefix + BERICHT
     code = os.path.dirname(os.path.abspath(__file__))
     try:
-        r = subprocess.run(
-            [sys.executable, os.path.join(code, "diffview.py"), diff,
-             "--html", ziel],
-            capture_output=True, text=True, timeout=300)
+        befehl = [sys.executable, os.path.join(code, "diffview.py"), diff,
+                  "--html", ziel]
+        # Liegen Begruendungen aus annotation.py vor, kommen sie mit in
+        # den Bericht. Fehlen sie, aendert sich nichts — der Bericht ist
+        # nicht von einem spaeteren Schritt abhaengig.
+        if os.path.exists(praefix + "begruendungen.json"):
+            befehl += ["--begruendungen", praefix + "begruendungen.json"]
+        r = subprocess.run(befehl, capture_output=True, text=True,
+                           timeout=300)
         if r.returncode != 0:
             print(f"  WARNUNG: Bericht nicht erzeugt — "
                   f"{(r.stderr or '').strip()[:200]}")

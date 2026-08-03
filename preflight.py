@@ -242,6 +242,66 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Paket 4 nicht pruefbar", repr(e))
 
+    # --- Paket 7: Annotation ist berichtend, nicht editierend ----------
+    try:
+        import annotation as A
+        import diffview as D
+        fehler = []
+
+        # Der Nachweis, dass der Schritt keinen Schreibzugriff auf Text
+        # hat: Keine Textdatei darf in der Freigabeliste stehen, und der
+        # Schreibweg muss alles andere abweisen.
+        geschuetzt = [G.F[k] for k in ("quelle", "uebersetzung", "entwurf",
+                                       "normalisiert", "lektoriert")]
+        drin = [p for p in geschuetzt if p in A.SCHREIBBAR]
+        if drin:
+            fehler.append(f"Textdateien in SCHREIBBAR: {drin}")
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            for ziel in geschuetzt + ["lektorat_diff.txt", "projekt.json"]:
+                try:
+                    A.schreiben(os.path.join(tmp, ziel), "x")
+                    fehler.append(f"annotation.py konnte {ziel} schreiben")
+                except A.SchreibSperre:
+                    pass
+            try:
+                A.schreiben(os.path.join(tmp, A.SCREENING), "# leer\n")
+            except Exception as e:
+                fehler.append(f"erlaubtes Ziel abgewiesen: {e!r}")
+
+        # Typografie und Interpunktion werden nicht annotiert.
+        for kat in ("Typografie", "Interpunktion"):
+            if kat in A.SUBSTANZIELL:
+                fehler.append(f"{kat} wird faelschlich annotiert")
+        for kat in ("Wort", "Wendung", "Teilsatz"):
+            if kat not in A.SUBSTANZIELL:
+                fehler.append(f"{kat} fehlt in den annotierten Kategorien")
+
+        # Die Kennung muss stabil sein — sonst sind alle Begruendungen
+        # nach dem zweiten Lauf verwaist.
+        k1 = A.kennung(7, "Wort", "lief", "ging")
+        if k1 != A.kennung(7, "Wort", "lief", "ging"):
+            fehler.append("Kennung ist nicht stabil")
+        if k1 == A.kennung(8, "Wort", "lief", "ging"):
+            fehler.append("Kennung unterscheidet Chunks nicht")
+
+        # Und der Bericht zeigt die Begruendung genau dann, wenn es eine
+        # gibt — dieselbe Kennung auf beiden Seiten.
+        html_mit = D.fmt_html("Wort", 7, "Stil", "er", "lief", "ging", "los",
+                              "falscher Freund behoben")
+        if "falscher Freund behoben" not in html_mit:
+            fehler.append("Begruendung erscheint nicht im HTML-Bericht")
+        if "grund" in D.fmt_html("Typografie", 1, "det", "a", "-", "–", "b"):
+            fehler.append("leere Begruendung erzeugt trotzdem eine Spalte")
+
+        if fehler:
+            b.add("FEHLER", "Annotation fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Annotation berichtet nur: kein Schreibzugriff auf "
+                        "Text, keine Typografie-Begruendungen")
+    except Exception as e:
+        b.add("FEHLER", "Annotation nicht pruefbar", repr(e))
+
     # --- Paket 6: Zitate. Der Kern ist, was NICHT passiert. ------------
     try:
         import zitatrecherche as Z

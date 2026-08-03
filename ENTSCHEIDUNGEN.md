@@ -70,6 +70,31 @@ deshalb ist die Korrektur nötig, und deshalb muss sie genau sein.
 Die Liste in `HOMOGRAPHEN` ist die Stelle, an der bei einem neuen Text
 nachgebessert wird.
 
+## Annotation berichtet — und kann gar nicht editieren
+
+**Entschieden:** `annotation.py` schreibt ausschließlich `begruendungen.json`
+und `screening_review.md`. Jeder Schreibzugriff geht durch `schreiben()`, und
+die Funktion wirft `SchreibSperre`, wenn das Ziel nicht in `SCHREIBBAR` steht.
+
+Die Sperre ist kein Misstrauen gegen den Code von heute, sondern gegen den von
+übermorgen. „Der Schritt ist rein berichtend" ist eine Absichtserklärung; sie
+hält genau so lange, bis jemand eine naheliegende Zeile ergänzt, die den
+gefundenen Fehler gleich behebt. Dann ist aus dem Bericht ein dritter
+Editierpass geworden — und der glättet, wie jeder Pass glättet.
+
+Der Selbsttest versucht deshalb, mit `schreiben()` auf `input.txt`,
+`uebersetzung_deutsch.txt`, `manuskript_lektoriert.txt`, `lektorat_diff.txt`
+und `projekt.json` zuzugreifen, und verlangt fünfmal eine Ausnahme. Die
+Gegenprobe mit ausgehängter Sperre meldet alle fünf.
+
+**Typografie und Interpunktion werden nicht annotiert.** Sie stammen aus dem
+deterministischen Durchgang, und ihre Begründung wäre „so ist die Regel" —
+eine Zeile, die niemand liest, in einer Liste, die dadurch unleserlich wird.
+
+Die Kennung je Änderung ist ein Hash aus Chunk, Kategorie und beiden
+Wortlauten. Sie muss stabil sein: Sonst sind nach dem zweiten Lauf alle
+Begründungen verwaist, und man bezahlt sie erneut.
+
 ## Zitatrecherche schreibt `original_deutsch` nie selbst
 
 **Entschieden:** `zitatrecherche.py` füllt `vorschlag_de`, `uebersetzer`,

@@ -80,6 +80,8 @@ SCHRITTE = [
      ["lektorat.py"], 100),
     ("qa_lektorat",  "Qualitaetspruefung des Lektorats",
      ["qa.py", "--lektorat"], 2),
+    ("annotation",   "Begruendungen und Volltext-Screening (berichtend)",
+     ["annotation.py"], 20),
     ("konsistenz",   "Globale Konsistenzpruefung ueber das ganze Buch",
      ["qa.py", "--konsistenz"], 2),
     ("paket",        "Ergebnis paketieren",
