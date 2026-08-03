@@ -11,6 +11,7 @@ nackten Server ohne Google-Zugang lauffaehig ist.
     python3 referenz_sync.py            holen und schreiben
     python3 referenz_sync.py --pruefen  nur pruefen, nichts schreiben
     python3 referenz_sync.py --vorlage  leere Tabs mit Kopfzeilen anlegen
+    python3 referenz_sync.py --erstbefuellung   JSONs ins Sheet uebertragen
 
 Die Validierung laeuft VOR dem Schreiben und meldet zeilengenau. Grund:
 Ein Schritt, der Referenzdaten braucht, ruft gleich darauf ein Modell —
@@ -43,7 +44,8 @@ def _zahl(wert):
     return int(s) if s.isdigit() else None
 
 
-# (Tab, Spalten, Zielschluessel in G.F, Zeilenbauer, Pflichtspalten)
+# (Tab, Spalten, Zielschluessel in G.F, Zeilenbauer, Pflichtspalten,
+#  Zerleger fuer die Gegenrichtung)
 #
 # Die Spaltennamen sind die des Auftrags und nicht ueberall gleich den
 # JSON-Feldern: 'deutsch_ziel' im Sheet wird zu 'deutsch' im JSON, weil
@@ -51,16 +53,20 @@ def _zahl(wert):
 # haelt beide Seiten aneinander.
 TABS = [
     ("Glossar", ["nl", "de", "hinweis"], "glossar",
-     lambda z: (z["nl"], z["de"]), ["nl", "de"]),
+     lambda z: (z["nl"], z["de"]), ["nl", "de"],
+     lambda k, v: [k, str(v), ""]),
 
     ("Personen", ["name", "pronomen"], "personen",
-     lambda z: (z["name"], z["pronomen"]), ["name", "pronomen"]),
+     lambda z: (z["name"], z["pronomen"]), ["name", "pronomen"],
+     lambda k, v: [k, str(v)]),
 
     ("Figurenblatt", ["name", "pronomen", "rolle", "sprache"], "figuren",
      lambda z: (z["name"], {"pronomen": z["pronomen"],
                             "rolle": z["rolle"],
                             "sprache": z["sprache"]}),
-     ["name", "pronomen"]),
+     ["name", "pronomen"],
+     lambda k, v: [k, v.get("pronomen", ""), v.get("rolle", ""),
+                   v.get("sprache", "")]),
 
     ("Anrede", ["beziehung", "figuren", "niederlaendisch", "deutsch_ziel",
                 "hinweis"], "anrede",
@@ -68,14 +74,19 @@ TABS = [
                                  "niederlaendisch": z["niederlaendisch"],
                                  "deutsch": z["deutsch_ziel"],
                                  "hinweis": z["hinweis"]}),
-     ["beziehung", "figuren", "deutsch_ziel"]),
+     ["beziehung", "figuren", "deutsch_ziel"],
+     lambda k, v: [k, ", ".join(v.get("figuren", [])),
+                   v.get("niederlaendisch", ""), v.get("deutsch", ""),
+                   v.get("hinweis", "")]),
 
     ("Leitmotive", ["wendung", "vorschlag", "haeufigkeit", "absicht"],
      "leitmotive",
      lambda z: (z["wendung"], {"vorschlag": z["vorschlag"],
                                "haeufigkeit": _zahl(z["haeufigkeit"]),
                                "absicht": z["absicht"]}),
-     ["wendung", "vorschlag"]),
+     ["wendung", "vorschlag"],
+     lambda k, v: [k, v.get("vorschlag", ""),
+                   str(v.get("haeufigkeit") or ""), v.get("absicht", "")]),
 ]
 
 # Paket 6 pflegt diesen Tab; hier steht er nur, damit --vorlage ihn
@@ -243,13 +254,33 @@ def _schreiben(pfad, daten):
     os.replace(tmp, pfad)
 
 
+def leerung_pruefen(fertig, lesen=None):
+    """Ein leerer Tab ueber einer gefuellten JSON ist fast immer ein
+    Versehen — frisch angelegte Tabs, aber die Daten stehen noch in den
+    Dateien. Ohne diese Sperre haette der naechste Schritt das Glossar
+    stillschweigend durch {} ersetzt und erst der Volllauf haette es
+    gezeigt."""
+    lesen = lesen or (lambda p: G.lade_json(p, still=True))
+    warnungen = []
+    for ziel, daten in fertig.items():
+        if daten:
+            continue
+        alt = lesen(G.F[ziel])
+        echte = {k: v for k, v in alt.items() if not k.startswith("_")}
+        if echte:
+            warnungen.append(
+                f"{G.F[ziel]} hat {len(echte)} Eintraege, der zugehoerige "
+                f"Tab ist leer")
+    return warnungen
+
+
 def sync(cfg, schreiben=True, still=False):
     """Holt alle Tabs, validiert, schreibt die JSONs. Gibt einen Bericht
     je Tab zurueck. Bei Fehlern: SyncFehler mit allen Meldungen."""
     buch = _buch(cfg)
     fehler, bericht = [], []
     fertig = {}
-    for tabname, spalten, ziel, bauer, pflicht in TABS:
+    for tabname, spalten, ziel, bauer, pflicht, _ in TABS:
         zeilen = _tab_lesen(buch, tabname, spalten)
         daten, f = _pruefen_und_bauen(tabname, zeilen, bauer, pflicht)
         fehler += f
@@ -257,6 +288,14 @@ def sync(cfg, schreiben=True, still=False):
         bericht.append(f"{tabname}: {len(daten)} Zeilen")
     if fehler:
         raise SyncFehler("\n  ".join(["Referenzdaten fehlerhaft:"] + fehler))
+    leer = leerung_pruefen(fertig)
+    if leer and schreiben:
+        raise SyncFehler(
+            "\n  ".join(["Das Spreadsheet wuerde vorhandene Daten "
+                         "loeschen:"] + leer)
+            + "\n\n  Die Dateien zuerst ins Spreadsheet uebertragen:\n"
+              "      python3 referenz_sync.py --erstbefuellung\n"
+              "  Oder sheets_id leeren, dann bleibt alles wie bisher.")
     if schreiben:
         for ziel, daten in fertig.items():
             _schreiben(G.F[ziel], daten)
@@ -282,24 +321,55 @@ def sicherstellen(cfg, still=False):
     return True
 
 
+def _blatt_schreiben(blatt, zeilen):
+    """gspread hat die Reihenfolge dieser beiden Argumente zwischen 5 und
+    6 vertauscht. Welche Fassung in Colab steckt, entscheidet Google —
+    also beide bedienen, statt eine zu raten."""
+    try:
+        blatt.update(zeilen, "A1")
+    except TypeError:
+        blatt.update("A1", zeilen)
+
+
+def erstbefuellung(cfg):
+    """Traegt die vorhandenen JSONs einmalig ins Spreadsheet ein.
+
+    Der Weg von Hand gepflegter Dateien in den Sheets-Betrieb. Tabs, die
+    schon Zeilen haben, bleiben unangetastet — diese Richtung ueberschreibt
+    nichts, sonst waere sie gefaehrlicher als das Problem, das sie loest."""
+    buch = _buch(cfg)
+    for tabname, spalten, ziel, _, _, zerleger in TABS:
+        daten = {k: v for k, v in G.lade_json(G.F[ziel], still=True).items()
+                 if not k.startswith("_")}
+        try:
+            blatt = buch.worksheet(tabname)
+        except Exception:
+            raise SyncFehler(f"Tab '{tabname}' fehlt — erst --vorlage.")
+        vorhanden = [z for z in blatt.get_all_values()[1:] if any(z)]
+        if vorhanden:
+            print(f"  {tabname}: {len(vorhanden)} Zeilen vorhanden, "
+                  f"unveraendert")
+            continue
+        if not daten:
+            print(f"  {tabname}: {G.F[ziel]} ist leer, nichts zu uebertragen")
+            continue
+        zeilen = [spalten] + [zerleger(k, daten[k]) for k in sorted(daten)]
+        _blatt_schreiben(blatt, zeilen)
+        print(f"  {tabname}: {len(daten)} Zeilen aus {G.F[ziel]} uebertragen")
+
+
 def vorlage(cfg):
     """Legt fehlende Tabs mit Kopfzeile an. Vorhandene bleiben unberuehrt."""
     buch = _buch(cfg)
     da = {b.title for b in buch.worksheets()}
-    alle = [(t, s) for t, s, _, _, _ in TABS] + [TAB_ZITATE]
+    alle = [(t, s) for t, s, _, _, _, _ in TABS] + [TAB_ZITATE]
     for name, spalten in alle:
         if name in da:
             print(f"  {name}: vorhanden, unveraendert")
             continue
         blatt = buch.add_worksheet(title=name, rows=200,
                                    cols=max(4, len(spalten)))
-        # gspread hat die Reihenfolge dieser beiden Argumente zwischen 5
-        # und 6 vertauscht. Welche Fassung in Colab steckt, entscheidet
-        # Google — also beide bedienen, statt eine zu raten.
-        try:
-            blatt.update([spalten], "A1")
-        except TypeError:
-            blatt.update("A1", [spalten])
+        _blatt_schreiben(blatt, [spalten])
         print(f"  {name}: angelegt ({', '.join(spalten)})")
 
 
@@ -309,6 +379,9 @@ def main():
                     help="validieren, aber keine JSONs schreiben")
     ap.add_argument("--vorlage", action="store_true",
                     help="fehlende Tabs mit Kopfzeile anlegen")
+    ap.add_argument("--erstbefuellung", action="store_true",
+                    help="vorhandene JSONs einmalig ins Spreadsheet "
+                         "uebertragen (ueberschreibt keine Zeilen)")
     args = ap.parse_args()
 
     G.kopf("REFERENZ-SYNC")
@@ -322,6 +395,9 @@ def main():
     try:
         if args.vorlage:
             vorlage(cfg)
+            return
+        if args.erstbefuellung:
+            erstbefuellung(cfg)
             return
         sync(cfg, schreiben=not args.pruefen)
         if args.pruefen:
