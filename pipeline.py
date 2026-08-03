@@ -47,6 +47,8 @@ SCHRITTE = [
      ["preflight.py", "--selbsttest"], 1),
     ("preflight",    "Systempruefung, Textpruefung, Zitaterkennung",
      ["preflight.py"], 5),
+    ("zitatrecherche", "Zitatnachweise suchen, Freigabeliste erzeugen",
+     ["zitatrecherche.py"], 4),
     ("konkordanz",   "Kandidatenanalyse, Analysepaket oder lokales Glossar",
      ["konkordanz.py"], 15),
     ("vorbereitung", "Referenzdateien und Anweisungsentwurf erzeugen",

@@ -242,6 +242,81 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Paket 4 nicht pruefbar", repr(e))
 
+    # --- Paket 6: Zitate. Der Kern ist, was NICHT passiert. ------------
+    try:
+        import zitatrecherche as Z
+        fehler = []
+
+        # Nicht-niederlaendisches Zitat: bleibt im Original, keine Freigabe.
+        eng = {"index": 3, "text": "Only connect.",
+               "attribution": "E. M. Forster"}
+        Z.uebernehmen(eng, {"sprache": "englisch",
+                            "status": "original_belassen",
+                            "konfidenz": 0.95})
+        if eng.get("original_deutsch") != "Only connect.":
+            fehler.append("fremdsprachiges Zitat wird nicht im Original "
+                          "uebernommen")
+        if eng.get("freigegeben") != "entfaellt":
+            fehler.append("Original-Zitat verlangt faelschlich eine Freigabe")
+
+        # Niederlaendisches Zitat: Vorschlag ja, Einsetzen nein.
+        nl = {"index": 5, "text": "Alles van waarde is weerloos.",
+              "attribution": "Lucebert"}
+        Z.uebernehmen(nl, {"sprache": "niederlaendisch", "status": "gefunden",
+                           "vorschlag_de": "Alles von Wert ist wehrlos.",
+                           "uebersetzer": "Musterfrau", "quelle": "Ausgabe X",
+                           "konfidenz": 0.9})
+        if nl.get("original_deutsch"):
+            fehler.append("FREIGABE UMGANGEN: Recherche setzt den Wortlaut "
+                          "direkt in den Zieltext")
+        if nl.get("freigegeben") != "nein" or not nl.get("quelle"):
+            fehler.append("Review-Eintrag unvollstaendig")
+
+        # Und in den Text kommt es erst mit Freigabe.
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            alt = os.getcwd()
+            try:
+                os.chdir(tmp)
+                Z.review_schreiben([eng, nl])
+                import io
+                import contextlib
+                with contextlib.redirect_stdout(io.StringIO()):
+                    g, o = Z.freigabe_einlesen({"sheets_id": ""}, [eng, nl])
+                if nl.get("original_deutsch") or o != 1:
+                    fehler.append("ohne Freigabe gelangt der Vorschlag in "
+                                  "den Text")
+                text = open(Z.REVIEW, encoding="utf-8").read()
+                if "Musterfrau" not in text or "Ausgabe X" not in text:
+                    fehler.append("Quelle fehlt in der Review-Liste")
+                # Freigabe erteilen und erneut einlesen.
+                open(Z.REVIEW, "w", encoding="utf-8").write(
+                    text.replace("| 0.9 | nein |", "| 0.9 | ja |"))
+                with contextlib.redirect_stdout(io.StringIO()):
+                    g, o = Z.freigabe_einlesen({"sheets_id": ""}, [eng, nl])
+                if nl.get("original_deutsch") != "Alles von Wert ist "\
+                                                 "wehrlos." or g != 1:
+                    fehler.append(f"Freigabe wird nicht wirksam "
+                                  f"({g} gesetzt, {o} offen)")
+            finally:
+                os.chdir(alt)
+
+        # Der Platzhalter bleibt, solange original_deutsch leer ist.
+        marken = {2: {"index": 2, "text": "Alles van waarde…",
+                      "attribution": "Lucebert", "original_deutsch": None}}
+        ganz, bericht = U.zitate_einsetzen("Erster Absatz.\n\nZweiter.",
+                                           marken, [])
+        if "[[ZITAT NICHT EINGESETZT" not in ganz:
+            fehler.append("ohne Wortlaut wird kein Platzhalter gesetzt")
+
+        if fehler:
+            b.add("FEHLER", "Zitatfreigabe fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Zitate: Fremdsprache bleibt Original, Vorschlag "
+                        "kommt nur mit Freigabe in den Text")
+    except Exception as e:
+        b.add("FEHLER", "Zitatrecherche nicht pruefbar", repr(e))
+
     # --- Sheets-Anbindung: Validierung, Abbildung, Rueckfallpfad -------
     # Alles ohne Netz pruefbar, weil die Pruefung auf gelesenen Zeilen
     # arbeitet und nicht auf gspread.

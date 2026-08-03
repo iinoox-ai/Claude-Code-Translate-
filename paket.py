@@ -21,7 +21,7 @@ MITNEHMEN = [
     # Mensch tatsaechlich liest. Sie fehlte bis zum ersten Volllauf.
     "normalisierung_report.txt", "lektorat_diff.txt", "bericht.html",
     "pipeline.log", "uebersetzung_warnungen.log", "lektorat_warnungen.log",
-    "zitate_verdacht.txt", "analysepaket.md",
+    "zitate_verdacht.txt", "zitate_review.md", "analysepaket.md",
     "bewertung_uebersetzung.md", "bewertung_lektorat.md",
     "bewertung_varianten.md",
 ]
