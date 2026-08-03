@@ -251,7 +251,11 @@ Vorbereitung rund 1 $. Die Werte hängen am Modell und an der Chunkgröße —
 | `unrecognized arguments: --…` | Code in der VM ist alt | Zelle 0, auf „aktuell mit origin/main" achten |
 | `module … has no attribute …` | Kernel hält alte Importe | Zelle 0 leert sie und importiert neu |
 
-Ergebnisse löscht **nur** `pipeline.py neu`, und es fragt vorher.
+Ergebnisse löscht **nur** `pipeline.py neu`, und es fragt vorher. Drei
+Abstufungen: `--nur-test` räumt die Testauszüge (nötig vor einem
+Variantenvergleich, damit die Basis unter denselben Vorgaben neu entsteht),
+`--nur-teile` zusätzlich die Chunks des Volllaufs, ohne Argument alles bis auf
+Quelltext, Konfiguration und Referenzdateien.
 
 ---
 
