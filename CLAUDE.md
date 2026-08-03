@@ -240,7 +240,10 @@ Zustandsdatei zu vertrauen. Das ist Absicht — Zustandsdateien lügen nach eine
 Absturz, Verzeichnisinhalte nicht.
 
 `pipeline.py neu` ist das einzige Kommando, das Ergebnisse löscht, und es fragt
-vorher. Bitte keine `rm`-Befehle in Dokumentation oder Skripte einbauen. Der
+vorher. In Colab läuft jeder Schritt als Unterprozess ohne Terminal; die
+Rückfrage wandert dort auf ein ausdrückliches `--ja`. Ohne Bestätigung wird
+die Liste gezeigt und **nichts** angefasst — der Schritt endet mit
+Rückgabewert 1, nicht mit einem stillen Erfolg. Bitte keine `rm`-Befehle in Dokumentation oder Skripte einbauen. Der
 frühere Ablaufplan hatte `rm -f state.json` im Startblock und daneben den
 Hinweis „bei Abbruch denselben Befehl erneut" — das kostete Stunden Arbeit.
 

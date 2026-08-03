@@ -215,6 +215,27 @@ def selbsttest(cfg, b):
         if G.varianten(dict(probe, varianten=[], chunk_words_variante=800)):
             fehler.append("identische Variante wird nicht verworfen")
 
+        # Ohne Terminal darf die Rueckfrage nicht mit einem Traceback
+        # enden — und erst recht nicht stillschweigend loeschen.
+        class _Args:
+            ja = False
+            nur_test = True
+            nur_teile = False
+
+        def _eof(_):
+            raise EOFError
+
+        if PL.bestaetigung(_Args(), _eof) is not None:
+            fehler.append("fehlende Eingabe wird nicht als solche erkannt")
+        if PL.bestaetigung(_Args(), lambda _: "nein") is not False:
+            fehler.append("'nein' loescht trotzdem")
+        if PL.bestaetigung(_Args(), lambda _: " JA ") is not True:
+            fehler.append("getipptes 'ja' wird nicht angenommen")
+        _mit = _Args()
+        _mit.ja = True
+        if PL.bestaetigung(_mit, _eof) is not True:
+            fehler.append("--ja wirkt nicht ohne Terminal")
+
         # --nur-test darf die Chunks des Volllaufs nicht anfassen: Sonst
         # kann annotation.py hinterher keine Chunkpaare mehr bilden und
         # qa.py meldet den Lauf als unvollstaendig.

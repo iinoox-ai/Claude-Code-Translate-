@@ -540,6 +540,22 @@ WEG_ALLES = WEG_TEILE + [
 ]
 
 
+def bestaetigung(args, lesen=input):
+    """True = loeschen, False = abgelehnt, None = keine Eingabe moeglich.
+
+    In Colab startet jeder Schritt als Unterprozess ohne Terminal; ein
+    input() laeuft dort sofort auf EOF. Die Rueckfrage bleibt trotzdem
+    Pflicht — sie wandert nur vom getippten 'ja' auf ein ausdrueckliches
+    --ja, das ein Mensch nach dem Lesen der Liste setzt."""
+    if getattr(args, "ja", False):
+        return True
+    try:
+        return lesen("\nWirklich loeschen? Tippe 'ja': ").strip().lower() \
+            == "ja"
+    except EOFError:
+        return None
+
+
 def cmd_neu(args):
     weg = (WEG_TEST if args.nur_test
            else WEG_TEILE if args.nur_teile else WEG_ALLES)
@@ -555,7 +571,18 @@ def cmd_neu(args):
     print("\nNICHT betroffen: input.txt, projekt.json, anweisungen.md, "
           "glossar.json,\n  personen.json, figurenblatt.json, anrede.json, "
           "leitmotive.json, zitate.json,\n  alle *.py")
-    if input("\nWirklich loeschen? Tippe 'ja': ").strip().lower() != "ja":
+    antwort = bestaetigung(args)
+    if antwort is None:
+        flaggen = " ".join(f"--{f.replace('_', '-')}"
+                           for f in ("nur_test", "nur_teile")
+                           if getattr(args, f, False))
+        print("\nKeine Eingabe moeglich — dieser Schritt laeuft ohne "
+              "Terminal.")
+        print("Es wurde NICHTS geloescht. Die Liste oben ist der Stand.")
+        print("\nZum Bestaetigen denselben Aufruf mit --ja:")
+        print(f"  python3 pipeline.py neu {flaggen} --ja".replace("  ", " "))
+        sys.exit(1)
+    if not antwort:
         print("Abgebrochen.")
         return
     for p in vorhanden:
@@ -653,6 +680,9 @@ def main():
     p.add_argument("--fertig", action="store_true",
                    help="diesen Schritt als erledigt markieren")
     p = sub.add_parser("neu")
+    p.add_argument("--ja", action="store_true",
+                   help="ohne Rueckfrage loeschen — noetig, wo kein "
+                        "Terminal da ist (Colab)")
     p.add_argument("--nur-test", action="store_true",
                    help="nur die Testverzeichnisse (test/, testB/, …) — "
                         "fuer den Variantenvergleich")
