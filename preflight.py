@@ -215,6 +215,18 @@ def selbsttest(cfg, b):
         if G.varianten(dict(probe, varianten=[], chunk_words_variante=800)):
             fehler.append("identische Variante wird nicht verworfen")
 
+        # --nur-test darf die Chunks des Volllaufs nicht anfassen: Sonst
+        # kann annotation.py hinterher keine Chunkpaare mehr bilden und
+        # qa.py meldet den Lauf als unvollstaendig.
+        voll = {"teile", "uebersetzung_state.json", "lektorat_state.json"}
+        drin = [x for x in PL.WEG_TEST if x in voll]
+        if drin:
+            fehler.append(f"--nur-test loescht den Volllauf mit: {drin}")
+        if not any(x.startswith("testB/") for x in PL.WEG_TEST):
+            fehler.append("--nur-test raeumt die Variantenordner nicht")
+        if not voll <= set(PL.WEG_TEILE):
+            fehler.append("--nur-teile raeumt den Volllauf nicht mehr")
+
         schritte = [s[0] for s in PL.schritte_mit_varianten(
             PL.SCHRITTE_ROH if hasattr(PL, "SCHRITTE_ROH") else
             [("VARIANTEN", None, None, 0)], probe)]

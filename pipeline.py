@@ -505,7 +505,8 @@ def cmd_reset(cfg, args):
     print("\nDie Ergebnisdateien bleiben erhalten. Ein Schritt, der neu "
           "laeuft,\nsetzt an seinen vorhandenen Chunk-Dateien fort. Sollen "
           "diese weg:")
-    print("  python3 pipeline.py neu --nur-teile")
+    print("  python3 pipeline.py neu --nur-teile   (auch der Volllauf)")
+    print("  python3 pipeline.py neu --nur-test    (nur die Testauszuege)")
 
 
 # Variantenverzeichnisse kommen aus der Konfiguration dazu — sonst
@@ -514,11 +515,18 @@ def cmd_reset(cfg, args):
 _VARIANTEN_DIRS = [f"test{v['name']}"
                    for v in G.varianten(G.lade_config(pflicht=False))]
 
-WEG_TEILE = (["teile", "test/teile",
-              "uebersetzung_state.json", "test/uebersetzung_state.json",
-              "lektorat_state.json", "test/lektorat_state.json"]
-             + [f"{d}/teile" for d in _VARIANTEN_DIRS]
-             + [f"{d}/uebersetzung_state.json" for d in _VARIANTEN_DIRS])
+# Nur die Testverzeichnisse. Fuer den Variantenvergleich ist genau das
+# noetig: Die Basis muss neu gerechnet werden, damit sie unter denselben
+# Vorgaben entsteht wie B und C — die Chunks des Volllaufs bleiben aber
+# stehen, sonst kann annotation.py hinterher keine Chunkpaare mehr bilden
+# und qa.py meldet den Lauf als unvollstaendig.
+WEG_TEST = (["test/teile", "test/uebersetzung_state.json",
+             "test/lektorat_state.json"]
+            + [f"{d}/teile" for d in _VARIANTEN_DIRS]
+            + [f"{d}/uebersetzung_state.json" for d in _VARIANTEN_DIRS])
+
+WEG_TEILE = (["teile", "uebersetzung_state.json", "lektorat_state.json"]
+             + WEG_TEST)
 
 WEG_ALLES = WEG_TEILE + [
     G.MANIFEST, LOG, PID, "test", *_VARIANTEN_DIRS,
@@ -533,7 +541,8 @@ WEG_ALLES = WEG_TEILE + [
 
 
 def cmd_neu(args):
-    weg = WEG_TEILE if args.nur_teile else WEG_ALLES
+    weg = (WEG_TEST if args.nur_test
+           else WEG_TEILE if args.nur_teile else WEG_ALLES)
     vorhanden = [p for p in weg if os.path.exists(p)]
     if not vorhanden:
         print("Nichts zu loeschen.")
@@ -644,6 +653,9 @@ def main():
     p.add_argument("--fertig", action="store_true",
                    help="diesen Schritt als erledigt markieren")
     p = sub.add_parser("neu")
+    p.add_argument("--nur-test", action="store_true",
+                   help="nur die Testverzeichnisse (test/, testB/, …) — "
+                        "fuer den Variantenvergleich")
     p.add_argument("--nur-teile", action="store_true",
                    help="nur Chunk-Dateien und Zustaende")
     sub.add_parser("schritte")
