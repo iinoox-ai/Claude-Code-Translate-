@@ -125,7 +125,7 @@ def selbsttest(cfg, b):
             except RS.SyncFehler:
                 pass
 
-        for tab, spalten, ziel, _, pflicht in RS.TABS:
+        for tab, spalten, ziel, _, pflicht, _z in RS.TABS:
             if ziel not in G.F:
                 fehler.append(f"{tab}: Ziel '{ziel}' steht nicht in G.F")
             for s in pflicht:
@@ -150,6 +150,52 @@ def selbsttest(cfg, b):
 
         # Die Spalte heisst deutsch_ziel, das Feld heisst deutsch — und
         # block_anrede liest 'deutsch'. Beide Seiten aneinandergehalten.
+        # Hin und zurueck: Was der Zerleger ins Sheet schreibt, muss der
+        # Zeilenbauer wieder zum selben JSON machen. Sonst verliert die
+        # Erstbefuellung genau die Felder, die niemand nachzaehlt.
+        beispiel = {
+            "glossar":    {"moestuin": "Gemüsegarten"},
+            "personen":   {"Bennett": "er/ihn"},
+            "figuren":    {"Bennett": {"pronomen": "er/ihn",
+                                       "rolle": "Erzähler",
+                                       "sprache": "lakonisch"}},
+            "anrede":     {"Bennett zu Scott": {"figuren": ["Bennett", "Scott"],
+                                                "niederlaendisch": "u",
+                                                "deutsch": "Sie",
+                                                "hinweis": "bleibt"}},
+            "leitmotive": {"geen flauw idee": {"vorschlag": "keine blasse "
+                                                            "Ahnung",
+                                               "haeufigkeit": 12,
+                                               "absicht": "Formel"}},
+        }
+        for tabname, spalten, ziel, bauer, pflicht, zerleger in RS.TABS:
+            k, v = list(beispiel[ziel].items())[0]
+            zurueck, f2 = RS._pruefen_und_bauen(
+                tabname, [(2, dict(zip(spalten, zerleger(k, v))))],
+                bauer, pflicht)
+            if f2 or zurueck != beispiel[ziel]:
+                fehler.append(f"{tabname}: Hin- und Rueckweg unterscheiden "
+                              f"sich — {zurueck} statt {beispiel[ziel]}"
+                              + (f" ({f2})" if f2 else ""))
+
+        # Leerer Tab ueber gefuellter Datei: sperren. Sonst ersetzt der
+        # erste Schritt nach dem Anlegen der Tabs das Glossar durch {}.
+        voll = {G.F["glossar"]: {"moestuin": "Gemüsegarten"}}
+        if not RS.leerung_pruefen({"glossar": {}},
+                                  lesen=lambda p: voll.get(p, {})):
+            fehler.append("leerer Tab ueber gefuellter JSON wird nicht "
+                          "bemerkt — der naechste Schritt loescht sie")
+        if RS.leerung_pruefen({"glossar": {"a": "b"}},
+                              lesen=lambda p: voll.get(p, {})):
+            fehler.append("gefuellter Tab wird faelschlich als Leerung "
+                          "gemeldet")
+        if RS.leerung_pruefen({"glossar": {}}, lesen=lambda p: {}):
+            fehler.append("leerer Tab ueber leerer Datei wird gemeldet")
+        if RS.leerung_pruefen({"glossar": {}},
+                              lesen=lambda p: {"_hinweis": "nur Kommentar"}):
+            fehler.append("Unterstrich-Schluessel gelten faelschlich als "
+                          "Inhalt")
+
         tab = [t for t in RS.TABS if t[0] == "Anrede"][0]
         anrede, f = RS._pruefen_und_bauen(
             "Anrede",
