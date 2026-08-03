@@ -121,7 +121,31 @@ Antworte NUR mit einem JSON-Objekt:
 Keine Codefences, kein Kommentar."""
 
 
-def blindbewertung(cfg, quelle, a, b, n=4, label=""):
+GEWICHTUNG = (
+    "Die drei Signale sind nicht gleich viel wert. In dieser Reihenfolge:\n\n"
+    "1. **Diff-Statistik** — auszaehlbar, kein Urteil. Ein Durchgang, dessen "
+    "Aenderungen ueberwiegend Typografie sind, verdient seine Zeit nicht.\n"
+    "2. **Fremdurteil** — ein anderes Modell als das uebersetzende. Es hat "
+    "keinen Grund, die eigene Arbeit zu bevorzugen.\n"
+    "3. **Selbstcheck** — dasselbe Modell, das uebersetzt hat, prueft die "
+    "Treue gegen das Original. **Nachrangig wegen Selbstpraeferenz**: "
+    "Modelle bevorzugen ihre eigenen Formulierungen, auch blind.\n")
+
+
+def signal_kopf(cfg, rolle, was):
+    """Beschriftet ein Modellsignal mit dem Modell, das es geliefert hat.
+
+    Frueher stand hier 'lokales Modell' und 'Selbstbewertung' — beides
+    war nach der API-Umstellung falsch und hat einen Leser in die Irre
+    gefuehrt, der die Staerke des Signals daran ablas."""
+    modell = G.modell_fuer(cfg, rolle) or cfg.get("modell", "?")
+    fremd = modell != (G.modell_fuer(cfg, "uebersetzung")
+                       or cfg.get("modell", ""))
+    art = "Fremdurteil" if fremd else "Selbstcheck, nachrangig"
+    return f"{was} — {modell} ({art})"
+
+
+def blindbewertung(cfg, quelle, a, b, n=4, label="", rolle="judge"):
     pq = G.absaetze(quelle)
     paare_ab = ausrichten(G.absaetze(a), G.absaetze(b))
     kandidaten = []
@@ -141,7 +165,7 @@ def blindbewertung(cfg, quelle, a, b, n=4, label=""):
                 f"=== UEBERSETZUNG A ===\n{A}\n\n=== UEBERSETZUNG B ===\n{B}")
         try:
             d = G.json_aus_antwort(
-                G.chat(cfg, BLIND_SYSTEM, user, 0.2, rolle="judge"))
+                G.chat(cfg, BLIND_SYSTEM, user, 0.2, rolle=rolle))
             if not d:
                 raise RuntimeError("kein JSON")
             besser = d.get("besser")
@@ -370,9 +394,9 @@ def main():
     print(f"  Perfektanteil: {q:.1%} ({mit} von {ges} Saetzen), "
           f"Politik {cfg['tempus']}")
 
-    blind = []
+    blind, selbst = [], []
     if not args.kein_modell and entwurf.strip() != final.strip():
-        print("\nBlinde Bewertung durch das lokale Modell ...")
+        print(f"\n{signal_kopf(cfg, 'judge', 'Blindes Urteil')} ...")
         import uebersetzung as U
         paras = G.absaetze(open(G.F["quelle"], encoding="utf-8").read())
         t1, t2, _ = U.testauszuege(paras, cfg["test_words_erzaehlung"],
@@ -382,15 +406,29 @@ def main():
         blind += blindbewertung(cfg, "\n\n".join(t1), e1, f1, 4, "Erzaehlung")
         if e2.strip():
             blind += blindbewertung(cfg, "\n\n".join(t2), e2, f2, 4, "Dialog")
-        if blind:
-            print("\n  Ergebnis:")
+        def ergebnis(liste, titel):
+            if not liste:
+                return
+            print(f"\n  {titel}:")
             for teil in ("Erzaehlung", "Dialog"):
-                c = Counter(x["_echt"] for x in blind if x["_teil"] == teil)
+                c = Counter(x["_echt"] for x in liste if x["_teil"] == teil)
                 if c:
                     print(f"    {teil:12s} "
                           + ", ".join(f"{k}: {v}" for k, v in c.items()))
-            print("  (Selbstbewertung ist schwach — als drittes Signal "
-                  "lesen.)")
+
+        ergebnis(blind, "Ergebnis Fremdurteil")
+
+        # Drittes Signal: dasselbe Modell, das uebersetzt hat. Getrennt
+        # ausgewiesen, weil es wegen Selbstpraeferenz schwaecher ist —
+        # zusammengezaehlt waere es ein verstecktes Uebergewicht.
+        if G.modell_fuer(cfg, "uebersetzung") != G.modell_fuer(cfg, "judge"):
+            print(f"\n{signal_kopf(cfg, 'uebersetzung', 'Selbstcheck')} ...")
+            selbst += blindbewertung(cfg, "\n\n".join(t1), e1, f1, 2,
+                                     "Erzaehlung", rolle="uebersetzung")
+            if e2.strip():
+                selbst += blindbewertung(cfg, "\n\n".join(t2), e2, f2, 2,
+                                         "Dialog", rolle="uebersetzung")
+            ergebnis(selbst, "Ergebnis Selbstcheck (nachrangig)")
 
     if cfg["export_bewertung"]:
         import uebersetzung as U
@@ -421,9 +459,13 @@ def main():
         for k, v in sorted(stat.items(), key=lambda x: -x[1]):
             L.append(f"| {k} | {v} | {v/gesamt:.0%} |")
         L.append("")
-        if blind:
-            L.append("## Blinde Selbstbewertung des lokalen Modells\n")
-            for i, x in enumerate(blind, 1):
+        L += ["## Wie die Signale zu gewichten sind\n", GEWICHTUNG]
+        for liste, rolle, titel in ((blind, "judge", "Blindes Urteil"),
+                                    (selbst, "uebersetzung", "Selbstcheck")):
+            if not liste:
+                continue
+            L.append(f"## {signal_kopf(cfg, rolle, titel)}\n")
+            for i, x in enumerate(liste, 1):
                 L.append(f"**{x.get('_teil')} {i}** — besser: "
                          f"{x.get('_echt')} (Abstand {x.get('abstand','?')})  \n"
                          f"{str(x.get('begruendung',''))[:400]}\n")

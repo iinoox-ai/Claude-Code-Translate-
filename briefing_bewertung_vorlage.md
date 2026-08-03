@@ -3,10 +3,18 @@
 Du bekommst eine Testübersetzung in zwei Fassungen (Entwurf und Revision),
 dazu die Diff-Statistik und ein blindes Urteil.
 
-Zum Urteil: Es stammt von einem **Fremdmodell** (Gemini 3.1 Pro), nicht von
-dem Modell, das übersetzt hat. Die Selbstpräferenz, vor der ältere Fassungen
-dieses Briefings warnten, entfällt damit — das Signal ist stärker, als es
-dort stand. Belastbarer bleibt trotzdem die Diff-Statistik.
+Zu den Urteilen: Das Bewertungspaket weist bis zu **drei Signale getrennt**
+aus, und die Überschrift nennt jeweils das Modell, von dem sie stammen.
+
+1. **Diff-Statistik** — auszählbar, kein Urteil, und deshalb das belastbarste.
+2. **Blindes Urteil** eines Fremdmodells — es hat keinen Grund, die eigene
+   Arbeit zu bevorzugen.
+3. **Selbstcheck** desselben Modells, das übersetzt hat. Steht dort
+   »Selbstcheck, nachrangig«, ist das ernst gemeint: Modelle bevorzugen ihre
+   eigenen Formulierungen, auch blind.
+
+Zähle die Urteile nicht zusammen. Widersprechen sie einander, gilt die
+Reihenfolge oben.
 
 **Der Testauszug besteht aus zwei Teilen**, getrennt ausgewiesen: eine
 Erzählpassage und eine dialoglastige Passage. Bewerte beide getrennt. Bei
