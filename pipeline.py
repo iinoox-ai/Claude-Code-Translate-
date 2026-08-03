@@ -49,8 +49,10 @@ SCHRITTE = [
      ["preflight.py"], 5),
     ("konkordanz",   "Kandidatenanalyse, Analysepaket oder lokales Glossar",
      ["konkordanz.py"], 15),
-    ("PAUSE_glossar", "Glossardateien extern erstellen und hochladen",
-     None, 0),
+    ("vorbereitung", "Referenzdateien und Anweisungsentwurf erzeugen",
+     ["vorbereitung.py"], 6),
+    ("PAUSE_review", "Referenzdateien und anweisungen.md pruefen und "
+                     "freigeben", None, 0),
     ("test",         "Testuebersetzung, zwei Auszuege",
      ["uebersetzung.py", "--test"], 35),
     ("testB",        "Testuebersetzung mit alternativer Chunkgroesse",
@@ -139,8 +141,6 @@ def kostenuebersicht(m):
 
 def uebersprungen(cfg, name):
     """Schritte, die die Konfiguration nicht braucht."""
-    if name == "PAUSE_glossar" and cfg["glossar_quelle"] == "lokal":
-        return True
     if name in ("testB", "chunkvergleich") and \
        cfg["chunk_words_variante"] == cfg["chunk_words"]:
         return True
@@ -280,12 +280,15 @@ def cmd_run(cfg, args):
                 # waehrend der Pause direkt bearbeitbar.
                 ordner = os.getcwd()
                 if G.ist_colab():
-                    if name == "PAUSE_glossar":
-                        print(f"1. Im Drive-Ordner {ordner}:")
-                        print("   analysepaket.md und briefing_glossar.md "
-                              "herunterladen")
-                        print("2. Die sechs Rueckgabedateien in denselben "
-                              "Ordner legen")
+                    if name == "PAUSE_review":
+                        print(f"1. Im Drive-Ordner {ordner} bzw. im "
+                              f"Spreadsheet pruefen:")
+                        print("   Glossar, Personen, Figurenblatt, Anrede, "
+                              "Leitmotive, Stilprofil, Kapitel")
+                        print("2. anweisungen.md lesen und schaerfen — sie "
+                              "geht woertlich in die Prompts")
+                        print("   Dateien auf .neu sind Vorschlaege neben "
+                              "vorhandenen Daten")
                         print("3. Dann in einer Zelle:")
                     else:
                         print(f"1. Im Drive-Ordner {ordner}:")
@@ -298,13 +301,15 @@ def cmd_run(cfg, args):
                           f"--ab {name} --fertig")
                     print("   und Zelle 1 erneut ausfuehren.")
                 else:
-                    if name == "PAUSE_glossar":
-                        print("1. Instanz STOPPEN (nicht zerstoeren)")
-                        print("2. analysepaket.md und briefing_glossar.md "
-                              "herunterladen")
-                        print("3. Die sechs Rueckgabedateien nach "
-                              "/workspace legen")
-                        print("4. Instanz starten, dann:")
+                    if name == "PAUSE_review":
+                        print("1. Referenzdateien pruefen: Glossar, "
+                              "Personen, Figurenblatt, Anrede,")
+                        print("   Leitmotive, Stilprofil, Kapitel")
+                        print("2. anweisungen.md lesen und schaerfen — sie "
+                              "geht woertlich in die Prompts")
+                        print("3. Dateien auf .neu sind Vorschlaege neben "
+                              "vorhandenen Daten")
+                        print("4. Danach:")
                     else:
                         print("1. Instanz STOPPEN")
                         print("2. Berichte herunterladen und pruefen")

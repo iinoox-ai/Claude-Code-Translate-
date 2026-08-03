@@ -87,6 +87,33 @@ Dateien in `teile/`.
   über `google.colab.userdata`; außerhalb Colab normale
   Umgebungsvariablen. Keys erscheinen nie in Dateien, Logs oder Berichten.
 
+## Vorbereitung erzeugt die Referenzdateien
+
+`vorbereitung.py` läuft als Pipelineschritt zwischen `konkordanz` und dem
+Testlauf und erzeugt aus dem Analysepaket Glossar, Personen, Figurenblatt,
+Anrede, Leitmotive, `stilprofil.json`, `kapitel.json` und einen Entwurf von
+`anweisungen.md`. Danach hält die Pipeline bei `PAUSE_review`.
+
+Drei Dinge, die nicht „aufgeräumt" werden dürfen:
+
+- **Je Lieferung ein eigener Aufruf.** Die Befunde stehen im System-Prompt und
+  sind ab dem zweiten Aufruf zwischengespeichert; acht kleine Aufrufe kosten
+  weniger als einer mit acht Dateien, und jede Lieferung ist einzeln prüfbar
+  und über `--nur <name>` einzeln nachziehbar.
+- **Vorhandene Dateien werden nie überschrieben.** Hat die Zieldatei Inhalt,
+  geht die Lieferung nach `<datei>.neu` — wie in `konkordanz.py`. Für
+  `anweisungen.md` gilt dasselbe über `anweisungen_vorschlag.md`.
+- **Die Formprüfung je Lieferung ist die Frage, die der Leser stellt.** Ein
+  Vorschlag in falscher Form wird gar nicht erst geschrieben, statt später
+  stillschweigend übersprungen zu werden.
+
+`stilprofil.json` geht als eigener Baustein in den System-Prompt der
+Übersetzung (gilt fürs ganze Buch, deshalb dort und nicht im User-Prompt —
+sonst zerfällt das zwischengespeicherte Präfix). Die Kapitelzeile des
+aktuellen Chunks steht im User-Prompt; die Schlüssel von `kapitel.json` sind
+Überschriften **im Wortlaut der Quelle**, und das laufende Kapitel wirkt bis
+zur nächsten Überschrift fort.
+
 ## Referenzdaten: Sheets sind die Quelle, JSONs sind Artefakte
 
 Bei gesetzter `sheets_id` werden Glossar, Personen, Figurenblatt, Anrede,
