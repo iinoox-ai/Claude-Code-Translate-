@@ -170,10 +170,17 @@ ohne Usage-Erfassung gelten als unfertig.
 
 ## Kalibrierung gilt je Modell-Ära
 
-`revision_pass`, `lektorat_passes` und `chunk_words` wurden unter Mistral
-gemessen und sind unter Opus 5 **offen**, bis der Testlauf sie neu
-entschieden hat. Alte Messwerte nicht als Naturgesetz behandeln, neue
-Entscheidungen mit Messung in `ENTSCHEIDUNGEN.md` nachtragen.
+`revision_pass`, `lektorat_passes` und `chunk_words` sind unter Opus 5
+gemessen und entschieden — die Zahlen stehen in `ENTSCHEIDUNGEN.md` unter
+„Gemessen unter Opus 5". Kurzfassung: Revision bleibt an (99 % substanzielle
+Änderungen), Lektoratsfolge bleibt (86 % Wort und Wendung), `chunk_words`
+bleibt bei 800 (Fremdurteil 3:1), Fable 5 verworfen (kein Vorteil bei
+2,6-fachem Preis).
+
+**Die Werte gelten für 1919 und für diese Modellgeneration**, nicht als
+Naturgesetz. Die beste Chunkgröße hängt vom Text ab; die Variante bleibt
+deshalb in `projekt.json` und wird bei jedem Buch neu gemessen. Neue
+Entscheidungen mit Messung nachtragen.
 
 ## Nach jeder Änderung an Normalisierern, Metriken oder Prompts
 

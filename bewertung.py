@@ -279,17 +279,31 @@ def variantenvergleich(cfg, kein_modell=False):
         paras = G.absaetze(open(G.F["quelle"], encoding="utf-8").read())
         t1, t2, _ = U.testauszuege(paras, cfg["test_words_erzaehlung"],
                                    cfg["test_words_dialog"])
-        quelle = "\n\n".join(t1)
+        # Erzaehlung UND Dialog, getrennt. Bei NL->DE liegt die Schwaeche
+        # im Dialog — ein Vergleich, der ihn auslaesst, beantwortet die
+        # Frage nur zur Haelfte und sieht trotzdem vollstaendig aus.
+        teile = G.lade_json(TESTDIR + "/teile.json", still=True)
+        basis1, basis2 = (teile_trennen(basis_p, teile) if teile
+                          else (basis, ""))
         print(f"\n{signal_kopf(cfg, 'judge', 'Blindes Urteil je Variante')}")
         for name, _, t in texte:
-            ergebnisse = blindbewertung(cfg, quelle, basis, t, 4,
-                                        f"A gegen {name}",
+            pfad = f"test{name}/" + G.F["uebersetzung"]
+            v1, v2 = teile_trennen(pfad, teile) if teile else (t, "")
+            ergebnisse = blindbewertung(cfg, "\n\n".join(t1), basis1, v1, 4,
+                                        f"{name} Erzaehlung",
                                         namen=("A", name))
-            urteile[name] = Counter(x["_echt"] for x in ergebnisse)
-            if urteile[name]:
-                print(f"  A gegen {name}: "
-                      + ", ".join(f"{k}: {v}"
-                                  for k, v in urteile[name].items()))
+            if v2.strip() and t2:
+                ergebnisse += blindbewertung(cfg, "\n\n".join(t2), basis2,
+                                             v2, 4, f"{name} Dialog",
+                                             namen=("A", name))
+            urteile[name] = {
+                teil: Counter(x["_echt"] for x in ergebnisse
+                              if x["_teil"].endswith(teil))
+                for teil in ("Erzaehlung", "Dialog")}
+            for teil, c in urteile[name].items():
+                if c:
+                    print(f"  A gegen {name}, {teil:11s} "
+                          + ", ".join(f"{k}: {v}" for k, v in c.items()))
 
     if cfg["export_bewertung"]:
         L = ["# Variantenvergleich\n",
@@ -297,11 +311,14 @@ def variantenvergleich(cfg, kein_modell=False):
         L += [f"- {n} ({b})" for n, b, _ in texte]
         if urteile:
             L.append("\n## Blindes Urteil (Paarvergleich gegen die Basis)\n")
-            L.append("| Variante | Urteile |\n|---|---|")
-            for name, c in urteile.items():
-                L.append(f"| {name} | "
-                         + ", ".join(f"{k}: {v}" for k, v in c.items())
-                         + " |")
+            L.append("Erzaehlung und Dialog getrennt — bei diesem Sprachpaar "
+                     "liegt die Schwaeche im Dialog.\n")
+            L.append("| Variante | Teil | Urteile |\n|---|---|---|")
+            for name, teile_c in urteile.items():
+                for teil, c in teile_c.items():
+                    L.append(f"| {name} | {teil} | "
+                             + (", ".join(f"{k}: {v}" for k, v in c.items())
+                                or "kein Urteil") + " |")
             L.append("")
         L += ["\nAlle Fassungen stammen aus demselben Ausgangstext. Sag mir, "
               "welche die beste ist und woran du es siehst — besonders an "
