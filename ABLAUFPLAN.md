@@ -1,319 +1,285 @@
 # Ablaufplan — literarische Übersetzung Niederländisch → Deutsch
 
-Gesteuert über ein einziges Skript. `pipeline.py` kennt den Ablauf, weiß wo er
-steht, setzt an der richtigen Stelle fort und löscht nur auf ausdrücklichen
-Befehl.
+Betrieben wird in Google Colab. Der Code kommt per `git` in die VM, gearbeitet
+wird im Drive-Projektordner. Jeder fertige Abschnitt liegt sofort dauerhaft in
+Drive — **ein Abbruch ist ein Nicht-Ereignis.**
 
-> **Dieser Skriptsatz ist für NL → DE.** Jedes Skript gibt die Sprachrichtung
-> in der ersten Zeile aus, `projekt.json` trägt `"sprachpaar": "nl-de"`, und
-> der Preflight prüft, ob `input.txt` überhaupt niederländisch ist.
-
-**Zeitbedarf GPU:** ~6,5 h bei 100.000 Wörtern · **Kosten:** ~45 $ auf einer B200
-**Prüffenster:** beliebig lang, Instanz auf *Stop* (Cent pro Stunde)
+Gesteuert wird alles über `pipeline.py`. Es kennt den Ablauf, weiß, wo er
+steht, und setzt nach einer Unterbrechung fort. Die Einzelskripte sind
+aufrufbar, werden im Normalbetrieb aber vom Orchestrator gestartet.
 
 ---
 
-## Die fünf Kommandos, die du brauchst
+## 1 · Einmal je Sitzung
 
-```bash
-python3 pipeline.py init         # einmal: Konfiguration anlegen
-python3 pipeline.py run --hg     # loslaufen, im Hintergrund
-python3 pipeline.py status       # wo stehe ich
-python3 pipeline.py log -f       # mitlesen (Strg+C zum Verlassen)
-python3 pipeline.py stop         # anhalten
+Notebook `colab_runner.ipynb` öffnen. Die Zellen tragen Nummern; **Zelle 0**
+holt den Code, ohne einen Lauf zu starten:
+
+```python
+colab_start.lauf("pipeline.py", "status", code=CODE)
 ```
 
-`run` macht immer am nächsten offenen Schritt weiter. Bei einem Abbruch —
-egal ob Fehler, `stop` oder Instanzneustart — ist derselbe Befehl die Antwort.
-**Es gibt kein `rm` im normalen Ablauf.** Das einzige Kommando, das Ergebnisse
-löscht, ist `pipeline.py neu`, und es fragt vorher.
+Zelle 0 gibt zwei Zeilen aus, auf die es ankommt:
+
+```
+9dc7af5 Merge pull request #23 …
+aktuell mit origin/main
+```
+
+Steht dort `ACHTUNG: N Commits hinter origin/main`, läuft alles Folgende gegen
+alten Code. Dann erst den Pull klären — jeder weitere Versuch ist verschwendet.
+
+**Secrets** im Colab-Reiter hinterlegen und der Sitzung Zugriff geben:
+`ANTHROPIC_API_KEY` und `GoogleKI`. Sie erscheinen nie in Dateien, Logs oder
+Berichten.
+
+**Nur im Sheets-Betrieb**, einmal je Sitzung:
+
+```python
+colab_start.sheets_anmelden()
+```
+
+Die Zelle meldet an und prüft nach, ob ein Unterprozess die Anmeldung sieht.
+Sagt sie „Die Anmeldung gilt nur in dieser Zelle", laufen die Sheets-Aufrufe
+über `colab_start.sync_im_kernel()` statt über `colab_start.lauf(...)`.
 
 ---
 
-## Was in dieser Fassung anders ist
+## 2 · Ein neues Buch einrichten
 
-**Chunk-Ausgaben liegen einzeln** in `teile/` und werden erst am Ende
-zusammengesetzt. Resume zählt Dateien statt einer Zustandsdatei zu vertrauen;
-ein einzelner Chunk lässt sich neu rechnen (`uebersetzung.py --chunk 37`).
+1. Drive-Ordner anlegen, `input.txt` hineinlegen.
+2. `PROJEKT` in Zelle 0 und Zelle 1 auf diesen Ordner setzen.
+3. Zelle 1 einmal starten — sie kopiert `projekt.json` und `anweisungen.md`
+   aus dem Repo, wenn dort keine liegen, und sagt es. **Eine vorhandene
+   `projekt.json` wird nie überschrieben.**
+4. Wer mit Sheets arbeitet: Spreadsheet anlegen, die ID oder die volle Adresse
+   als `sheets_id` in `projekt.json` eintragen, dann
 
-**`anweisungen.md` hat keine Kommentare in den Abschnitten mehr.** In der
-ersten Fassung landeten die Platzhalter-Beispiele wörtlich in den
-System-Prompts — das Modell bekam Anweisungen über eine Figur, die es nicht
-gibt. Zusätzlich filtert der Loader Kommentare heraus.
+```python
+colab_start.lauf("referenz_sync.py", "--vorlage", code=CODE)
+```
 
-**Der Preflight beginnt mit einem Selbsttest**, der jeden Normalisierer und
-jeden Prompt auf einer Kunstzeile durchlaufen lässt. Zwei Fehler der ersten
-Fassung wären damit sofort aufgefallen.
-
-**Die ß-Ersetzung schützt Homographen.** Vorher wurde `die Masse der Menschen`
-zu `die Maße`, `die Busse fuhren` zu `die Buße`. Jetzt schreibungsabhängig:
-kleingeschriebenes `gross` wird zu `groß`, großgeschriebenes `Gross` bleibt als
-Nachname stehen.
-
-**Der Diminutivzähler zählt richtig.** Vorher galten `sprechen`, `zwischen`,
-`Zeichen`, `Kuchen` als Diminutive — zwölf Treffer statt zwei.
-
-**Die Tempusmetrik arbeitet satzweise**, erfasst also die deutsche Verbklammer
-(`dass er es gesagt hat`) und produziert keine Falschtreffer mehr.
-
-**Jeder Chunk bekommt einen Fallenblock** mit den falschen Freunden,
-Diminutiven und `zou`-Vorkommen, die in *diesem* Abschnitt wirklich stehen —
-statt einer Vierundzwanzig-Punkte-Liste im Dauerkontext.
-
-**Epigraph und Attributionszeile** werden gemeinsam ausgeklammert, beim
-Zusammensetzen eingefügt und vom Lektorat ausgenommen. Die Qualitätsprüfung
-schlägt Alarm, wenn ein Zitat trotzdem verändert wurde.
+Damit steht die Einrichtung. Alles Weitere macht der Lauf.
 
 ---
 
-## Schritt 0 — Instanz und Dateien
+## 3 · Der Lauf
 
-**Anforderungen:** ≥ 150 GB VRAM auf möglichst wenigen GPUs, ≥ 250 GB Disk.
+Zelle 1. Sie mountet Drive, holt den Code, lädt die Secrets, wechselt in den
+Projektordner und startet den Lauf im Vordergrund:
 
-Im Jupyter-Dateibrowser hochladen: alle `.py`, alle `.md`, `projekt.json` und
-das Manuskript als `input.txt`. **Nicht** per Heredoc ins Terminal einfügen.
-
-```bash
-cd /workspace
-ls -la *.py *.md projekt.json input.txt
-ollama pull mistral-medium-3.5:128b-q8_0
-python3 pipeline.py init
+```python
+colab_start.lauf("pipeline.py", "run", code=CODE)
 ```
 
-`init` fragt sieben Dinge:
+Die laufende Fortschrittsausgabe hält die Sitzung nebenbei wach. Sie ist kein
+Beiwerk — ohne sie stuft Colab die Sitzung als untätig ein.
 
-| Frage | Vorgabe |
-|---|---|
-| Wörtliche Rede | `»Rede«`, innen `›so‹` |
-| ß verwenden | ja (bundesdeutsch) |
-| Diminutive | auflösen, `-chen` nur bei echter Verkleinerung |
-| Erzähltempus | quellnah — Wechsel Präteritum/Perfekt folgen |
-| Glossarweg | extern |
-| Volltext exportieren | ja |
-| Chunkgrößen-Vergleich | ja, 800 gegen 1200 Wörter |
+**Bricht etwas ab: Zelle 1 erneut starten.** Der Resume zählt die Dateien in
+`teile/` und setzt am nächsten offenen Abschnitt fort. Verloren geht höchstens
+der eine Abschnitt, an dem gerade gearbeitet wurde.
+
+### Die Schritte
+
+| Schritt | Was passiert | Modell |
+|---|---|:-:|
+| `selbsttest` | Normalisierer, Metriken und Prompts prüfen | — |
+| `preflight` | Systemprüfung, Textprüfung, Zitaterkennung | — |
+| `zitatrecherche` | Zitatnachweise suchen, Freigabeliste erzeugen | ja |
+| `konkordanz` | Kandidatenanalyse, Analysepaket | — |
+| `vorbereitung` | Referenzdateien und Anweisungsentwurf erzeugen | ja |
+| **`PAUSE_review`** | **Referenzdateien und `anweisungen.md` prüfen** | — |
+| `test` | Testübersetzung, zwei Auszüge | ja |
+| `testB`, `testC` | dieselben Auszüge in den Vergleichsvarianten | ja |
+| `bewertung` | Testübersetzung bewerten | ja |
+| `variantenvergleich` | Varianten gegen die Basis, mit Kosten je Variante | — |
+| `test_lektorat` | Testlektorat | ja |
+| `qa_test_lekt` | Qualitätsprüfung des Testlektorats | — |
+| `bew_lektorat` | Testlektorat bewerten | ja |
+| **`PAUSE_pruefung`** | **Berichte prüfen, entscheiden, einspielen** | — |
+| `voll` | vollständige Übersetzung | ja |
+| `qa_uebersetzung` | Qualitätsprüfung der Übersetzung | — |
+| `lektorat` | vollständiges Lektorat | ja |
+| `qa_lektorat` | Qualitätsprüfung des Lektorats | — |
+| `annotation` | Begründungen und Volltext-Screening (berichtend) | ja |
+| `konsistenz` | globale Konsistenzprüfung über das ganze Buch | — |
+| `paket` | Ergebnis paketieren | — |
+
+Die aktuelle Liste mit Restzeiten und Chunkstand:
+
+```python
+colab_start.lauf("pipeline.py", "status", code=CODE)
+```
+
+Solange Zelle 1 läuft, wird diese Zelle nur eingereiht. Den Chunkstand liest
+man während eines Laufs an der Ausgabe von Zelle 1 ab.
 
 ---
 
-## SITZUNG A
+## 4 · Die beiden Pausen
 
-```bash
-python3 pipeline.py run --hg
-python3 pipeline.py status
+Der Lauf hält von selbst an und sagt, was zu tun ist.
+
+### `PAUSE_review` — nach der Vorbereitung
+
+Zu prüfen sind Glossar, Personen, Figurenblatt, Anrede, Leitmotive,
+Stilprofil und Kapitel — im Spreadsheet oder als Dateien im Projektordner.
+Dateien auf `.neu` sind **Vorschläge neben vorhandenen Daten**; sie werden
+nicht von selbst übernommen.
+
+Dann `anweisungen.md` lesen und schärfen. Sie geht wörtlich in die
+System-Prompts: nur Anweisungen, keine Erläuterungen. Was vor der ersten
+`##`-Zeile steht, wird nie gelesen.
+
+Weiter mit:
+
+```python
+colab_start.lauf("pipeline.py", "reset", "--ab", "PAUSE_review", "--fertig", code=CODE)
 ```
 
-Die Pipeline arbeitet von selbst durch: Selbsttest, Preflight, Konkordanz —
-und hält dann an.
+Danach Zelle 1 erneut.
 
-```
-PAUSE — Glossardateien extern erstellen und hochladen
-```
+### `PAUSE_pruefung` — nach dem Testlauf
 
-**→ Instanz STOPPEN.** `analysepaket.md` und `briefing_glossar.md`
-herunterladen, zusammen hochladen, die sechs Rückgabedateien nach `/workspace`
-legen. Instanz starten, dann:
+Zu lesen sind `bewertung_uebersetzung.md`, `bewertung_lektorat.md`,
+`bewertung_varianten.md` und die QA-Berichte. Die Entscheidungen, die hier
+fallen: Lohnt der Revisionsdurchgang? Welche Chunkgröße? Welches Modell?
+Trägt die Tonlage?
 
-```bash
-python3 pipeline.py reset --ab PAUSE_glossar --fertig
-python3 pipeline.py run --hg
-```
+Angepasste Werte kommen nach `projekt.json`. Weiter mit:
 
-Der Preflight prüft beim nächsten Schritt, dass die Dateien gültiges JSON sind
-und das Glossar nicht leer ist — ein stiller Lauf ohne Terminologie ist damit
-ausgeschlossen.
-
-Weiter laufen automatisch: Testübersetzung (zwei Auszüge, Erzählung und
-Dialog), dieselbe Passage mit 1200 Wörtern je Chunk, Bewertung,
-Chunkgrößen-Vergleich, Testlektorat, Qualitätsprüfung, Lektoratsbewertung.
-
-Am Ende der Testübersetzung werden die **Prüfgrenzen kalibriert** — aus den
-gemessenen Verhältnissen statt aus einer Faustregel.
-
-```
-PAUSE — Berichte prüfen, entscheiden, Dateien einspielen
-```
-
-**→ Instanz STOPPEN.**
-
----
-
-## PRÜFFENSTER — ohne GPU
-
-Herunterladen: `bewertung_uebersetzung.md`, `bewertung_lektorat.md`,
-`bewertung_chunkgroesse.md`, die drei Briefings, `test/qa_lektorat.txt`.
-
-### Selbst prüfen
-
-```bash
-python3 diffview.py test/lektorat_diff.txt --html test/bericht.html
-python3 diffview.py test/lektorat_diff.txt --only Umbau
-python3 diffview.py test/lektorat_diff.txt --stats
-```
-
-Worauf du bei dieser Sprachrichtung achtest:
-
-- **Diminutive** — die Bewertung nennt die Zahl je 1000 Wörter und die
-  häufigsten Treffer. Über 2,0 bei der Politik „auflösen" ist zu viel.
-- **`zou`** — als `würde` übersetzt, wo `soll` gemeint war? Das verschiebt die
-  Aussageebene ganzer Absätze.
-- **Falsche Freunde** — `Meer` statt See, `laufen` statt gehen, `gekocht`
-  statt gekauft, `Tafel` statt Tisch.
-- **`am …-sein`** und **`es gibt`-Schwemme**.
-- **Tempus** — der Perfektanteil steht in der Bewertung. Trägt der Wechsel im
-  Deutschen?
-- **Chunkgröße** — 800 gegen 1200: Wo sind die Nahtstellen unauffälliger?
-
-### Externe Bewertung
-
-Pakete und Briefings hochladen. Zurück kommen: Empfehlung zu den Durchgängen,
-die ausgefüllte `anweisungen.md`, eine angepasste `projekt.json`, und die
-endgültige Formulierung der Tempusanweisung — die hängt davon ab, ob dein Text
-eine erste oder dritte Person hat.
-
-### Einspielen
-
-```bash
-# angepasste Konfiguration einspielen, statt sie zu überschreiben
-python3 pipeline.py config projekt_neu.json
-```
-
-Der Merge übernimmt nur Schlüssel, die geändert werden dürfen, und schützt
-`ratio_min`, `ratio_max`, `ratio_kalibriert` und `sprachpaar` programmatisch.
-Was abgelehnt wurde, wird mit Begründung ausgegeben.
-
-`anweisungen.md` und `zitate.json` einfach hochladen. Bei Epigraphen dort
-unter `original_deutsch` den deutschen Wortlaut eintragen — bleibt das Feld
-leer, setzt die Übersetzung einen markierten Platzhalter und meldet ihn.
-
-**→ Instanz STARTEN.**
-
-```bash
-python3 pipeline.py reset --ab PAUSE_pruefung --fertig
-python3 pipeline.py run --hg
+```python
+colab_start.lauf("pipeline.py", "reset", "--ab", "PAUSE_pruefung", "--fertig", code=CODE)
 ```
 
 ---
 
-## SITZUNG B
+## 5 · Referenzdaten im Spreadsheet
 
-Läuft ohne Zutun durch: Vollübersetzung, Qualitätsprüfung mit Notbremse,
-Lektorat, Qualitätsprüfung, globale Konsistenzprüfung, Paket.
+Bei gesetzter `sheets_id` ist das Spreadsheet die Quelle; die JSONs sind
+erzeugte Artefakte und werden überschrieben. Sie von Hand zu editieren ist
+dann sinnlos.
 
-Die **Notbremse** hält die Kette an, wenn die Übersetzung unvollständig ist,
-die Ausgabe fast leer, das Wortverhältnis außerhalb 0,75–1,45 oder mehr als
-15 % der Absätze verloren gingen. Warnungen darunter stoppen nichts.
+Tabs: `Glossar`, `Personen`, `Figurenblatt`, `Anrede`, `Kapitel`,
+`Leitmotive`, `ZitateReview`. `stilprofil.json` hat bewusst keinen Tab — es
+ist kein Datensatz, sondern ein Steckbrief, und bleibt eine Datei.
 
-```bash
-python3 pipeline.py status     # Chunkzähler und Restzeit
-python3 pipeline.py log -f
+Vorhandene JSONs einmalig ins Spreadsheet übertragen:
+
+```python
+colab_start.lauf("referenz_sync.py", "--erstbefuellung", code=CODE)
 ```
 
-Bei Abbruch: `python3 pipeline.py run --hg`. Jeder Schritt setzt an seinen
-vorhandenen Chunk-Dateien fort.
+Vor einem Lauf prüfen, ohne etwas zu schreiben:
 
-### Einzelne Stelle nachbessern
-
-Ist ein Chunk misslungen, braucht es keinen Gesamtlauf:
-
-```bash
-python3 uebersetzung.py --chunk 37
-python3 lektorat.py --chunk 12
+```python
+colab_start.lauf("referenz_sync.py", "--pruefen", code=CODE)
 ```
+
+Die Prüfung meldet **zeilengenau in Spreadsheet-Zählung** — Kopfzeile ist
+Zeile 1, der erste Datensatz Zeile 2:
+
+```
+FEHLER: Referenzdaten fehlerhaft:
+  Personen, Zeile 8: pronomen fehlt
+```
+
+Ohne `sheets_id` bleibt alles wie früher: Die JSONs werden direkt gelesen.
 
 ---
 
-## Abschluss
+## 6 · Zitate
 
-```bash
-cat qa_uebersetzung.txt
-cat qa_lektorat.txt
-cat qa_konsistenz.txt
-python3 diffview.py lektorat_diff.txt --html bericht.html
+`zitatrecherche` sucht zu jedem erkannten Zitat die anerkannte deutsche
+Fassung — und **setzt sie nicht ein.** Der Vorschlag landet mit Übersetzer,
+Fundstelle und Konfidenz in `zitate_review.md` bzw. im Tab `ZitateReview`.
+
+Eingesetzt wird ausschließlich, was in der Spalte `freigegeben` ein `ja`
+trägt. Nach dem Eintragen:
+
+```python
+colab_start.lauf("zitatrecherche.py", "--uebernehmen", code=CODE)
 ```
 
-`qa_lektorat.txt` enthält vier Prüfungen, die beim Lesen leicht untergehen:
-
-- **Registerkontrolle** — `hab`, `kriegen`, `wegen dem`, `weil` mit
-  Verbzweitstellung vor und nach dem Lektorat
-- **Tempuskontrolle** — ob der gewollte Wechsel geglättet wurde
-- **Diminutivzähler** — ob das Lektorat welche hinzugefügt hat
-- **Zitattreue** — ob eingesetzte Originalzitate unangetastet blieben
-
-`qa_konsistenz.txt` prüft über die ganze Buchlänge: Leitmotive auf
-Wortlautvarianz (Bericht in `leitmotiv_varianten.txt`), Terminologie auf
-Begriffe, die in einem Buchdrittel verschwinden, und näherungsweise die
-Anredeformen je Figur.
-
-Zur Anredeprüfung gehört ein Vorbehalt, der auch im Bericht steht: Wer wen
-duzt, ist per Muster nicht bestimmbar — dafür müsste bekannt sein, wer in
-einer Passage zu wem spricht. Die Prüfung ist ein Näherungsmaß und liefert
-Falschmeldungen.
-
-### Herunterladen
-
-```bash
-python3 paket.py
-```
-
-`ergebnis.tar.gz` im Dateibrowser rechtsklicken → **Download**, auf dem
-eigenen Gerät entpacken und prüfen. Erst danach:
-
-```bash
-python3 pipeline.py neu
-```
-
-Das Kommando listet auf, was es löschen würde, und verlangt die Eingabe `ja`.
-`input.txt`, `projekt.json`, `anweisungen.md`, die Glossardateien und alle
-`.py` bleiben unangetastet.
-
-**Erst dann die Instanz zerstören.**
+Ohne Freigabe bleibt an der Stelle eine markierte Lücke. Das ist Absicht: Ein
+rückübersetztes Motto ist ein Satz, den der zitierte Autor nie geschrieben
+hat, und das fällt im Druck auf. Nicht-niederländische Zitate bleiben im
+Original und brauchen keine Freigabe.
 
 ---
 
-## Haltepunkte
+## 7 · Kosten
 
-| Punkt | Instanz | Grund |
+Jeder Modellaufruf meldet seine Token-Usage; `manifest.json` summiert je
+Rolle. Am Ende eines Laufs erscheint die Übersicht von selbst. Zwischendurch:
+
+```python
+colab_start.lauf("pipeline.py", "status", code=CODE)
+```
+
+Vor einem teuren Schritt lohnt der Blick ohne Kosten:
+
+```python
+colab_start.lauf("vorbereitung.py", "--nur-anzeigen", code=CODE)
+```
+
+```python
+colab_start.lauf("annotation.py", "--nur-anzeigen", code=CODE)
+```
+
+Größenordnung für ein Buch von rund 110.000 Wörtern, gemessen am ersten
+Volllauf: Übersetzung mit Revision rund 36 $, Lektorat rund 23 $,
+Vorbereitung rund 1 $. Die Werte hängen am Modell und an der Chunkgröße —
+`variantenvergleich` weist sie je Variante getrennt aus.
+
+---
+
+## 8 · Wenn etwas klemmt
+
+| Meldung | Was los ist | Was hilft |
 |---|---|---|
-| `PAUSE_glossar` | **Stop** | Wartezeit auf die Glossardateien |
-| `PAUSE_pruefung` | **Stop** | das große Prüffenster |
-| nach dem Download | **Destroy** | erst wenn das Archiv geprüft ist |
+| `ANTHROPIC_API_KEY fehlt` | Secret nicht hinterlegt oder der Sitzung nicht freigegeben | Colab-Reiter „Secrets", Schalter für dieses Notebook |
+| `Schluessel google: fehlt` | Secret heißt nicht `GoogleKI` | umbenennen, Zelle 1 erneut |
+| HTTP 429 | Ratenlimit des Anbieters | nichts tun — die Pipeline wartet und wiederholt bis `max_retries` |
+| HTTP 400 bei einem Modell | Modellname veraltet oder Parameter abgelehnt | `pipeline.py technik --uebernehmen`, dann erneut |
+| Zelle bricht ab, „Verbindung wird wiederhergestellt" | Browser hat die Verbindung verloren, die VM läuft meist weiter | Dateien in `teile/` ansehen; wachsen sie, nur neu verbinden |
+| Laufzeit wirklich weg | VM recycelt | Zelle 1 erneut — der Resume zählt `teile/` |
+| `Referenzdaten fehlerhaft: …, Zeile N` | Sheet-Zeile unvollständig oder doppelt | im Spreadsheet korrigieren, denselben Schritt erneut |
+| `Das Spreadsheet wuerde vorhandene Daten loeschen` | Tabs leer, JSONs gefüllt | erst `referenz_sync.py --erstbefuellung` |
+| `Tab 'X' fehlt im Spreadsheet` | Tabname vertippt oder Tab fehlt | Namen prüfen, sonst `referenz_sync.py --vorlage` |
+| `Verhältnis 0.29 -> Durchgang verworfen` | Antwort kam gekürzt zurück | passiert; der Chunk wird bis zu `max_retries` wiederholt |
+| `unrecognized arguments: --…` | Code in der VM ist alt | Zelle 0, auf „aktuell mit origin/main" achten |
+| `module … has no attribute …` | Kernel hält alte Importe | Zelle 0 leert sie und importiert neu |
 
-*Stop* erhält die Platte und kostet nur Speichergebühr. *Destroy* löscht
-alles — dann sind 138 GB Modell neu zu ziehen.
+Ergebnisse löscht **nur** `pipeline.py neu`, und es fragt vorher.
 
 ---
 
-## Alle Kommandos
+## Anhang · Betrieb ohne Colab
 
-| Aktion | Befehl |
-|---|---|
-| Konfiguration anlegen | `python3 pipeline.py init` |
-| Weiterlaufen | `python3 pipeline.py run --hg` |
-| Stand ansehen | `python3 pipeline.py status` |
-| Log lesen | `python3 pipeline.py log -n 60` |
-| Log mitlesen | `python3 pipeline.py log -f` |
-| Anhalten | `python3 pipeline.py stop` |
-| Schrittliste | `python3 pipeline.py schritte` |
-| Konfiguration einspielen | `python3 pipeline.py config datei.json` |
-| Schritt wieder öffnen | `python3 pipeline.py reset --ab NAME` |
-| Pause als erledigt | `python3 pipeline.py reset --ab NAME --fertig` |
-| Chunk-Dateien verwerfen | `python3 pipeline.py neu --nur-teile` |
-| Alles verwerfen | `python3 pipeline.py neu` |
-| Einzelnen Chunk neu | `python3 uebersetzung.py --chunk N` |
-| Nur Selbsttest | `python3 preflight.py --selbsttest` |
-| Modell im VRAM? | `ollama ps` — muss `100% GPU` zeigen |
+Die Pipeline läuft auf jedem Server, auf dem `python3` und `requests`
+vorhanden sind. Es entfallen Drive-Mount und Colab-Secrets; die Schlüssel
+kommen aus Umgebungsvariablen:
 
-## Wenn etwas schiefgeht
+```bash
+export ANTHROPIC_API_KEY=...
+export GEMINI_API_KEY=...
+```
 
-| Symptom | Ursache | Abhilfe |
-|---|---|---|
-| `projekt.json ist für 'de-en'` | falscher Skriptsatz | NL→DE-Satz hochladen |
-| `Text sieht nicht niederländisch aus` | falsche Datei | `input.txt` prüfen |
-| Selbsttest schlägt fehl | Skript beim Paste zerstört | über den Editor neu hochladen |
-| `401 Unauthorized` | vast.ai-Proxy | `ss -tlnp \| grep ollama`, Port in `projekt.json` |
-| Extrem langsam | Modell nicht ganz im VRAM | `ollama ps`, `num_ctx` senken |
-| `glossar.json ist leer` | Rückgabedateien fehlen | die sechs Dateien hochladen |
-| Notbremse ausgelöst | siehe `qa_uebersetzung.txt` | Ursache beheben, `run` |
-| Fingerabdruck geändert | `anweisungen.md` mitten im Lauf geändert | `reset --ab voll` oder bewusst weiterlaufen |
-| Diminutivschwemme | Politik greift nicht | `## Übersetzung` schärfen |
-| Tempus geglättet | Korrektorat zu eifrig | `## Korrektorat` füllen |
-| Zitat verändert | Schutz griff nicht | `zitate.json` prüfen, `lektorat.py --chunk N` |
+Gearbeitet wird im Projektordner, gestartet direkt:
+
+```bash
+python3 pipeline.py run
+```
+
+`--hg` startet den Lauf im Hintergrund und legt eine PID-Datei an; in Colab
+ist das gesperrt, weil der Lauf dort in den Vordergrund der Zelle gehört.
+
+Für den Sheets-Zugriff braucht es dann ein Dienstkonto in
+`GOOGLE_APPLICATION_CREDENTIALS`. Ohne das bleibt `sheets_id` leer, und die
+Referenz-JSONs werden direkt gepflegt — der Rückfallpfad ist vollwertig und
+wird nicht entfernt.
+
+Der Ollama-Rückfall existiert weiter: Bleibt `modell_<rolle>` leer, greift
+`backend`/`modell` aus `projekt.json`. Gedacht ist er für den Fall, dass eine
+API ausfällt, nicht für den Normalbetrieb.

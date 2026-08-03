@@ -23,7 +23,10 @@ Aufrufe:
 
 import argparse
 import difflib
+import hashlib
 import html
+import json
+import os
 import re
 import sys
 
@@ -170,6 +173,8 @@ color:#888;margin-right:.5rem;font-weight:600}
 del{background:#ffe0e0;color:#8b0000;text-decoration:none;padding:0 .15em;border-radius:2px}
 ins{background:#d8f5d8;color:#0a5a0a;text-decoration:none;padding:0 .15em;border-radius:2px}
 .ctx{color:#888}
+.grund{color:#4a6; font-size:0.9em; margin-top:.3em; padding-left:1em;
+       border-left:2px solid #4a6}
 .Umbau{border-left-color:#c33}.Teilsatz{border-left-color:#e8a33d}
 .Wort,.Wendung{border-left-color:#3a7bbf}
 .Typografie,.Interpunktion{border-left-color:#ccc}
@@ -178,12 +183,16 @@ ins{background:#d8f5d8;color:#0a5a0a;text-decoration:none;padding:0 .15em;border
 """
 
 
-def fmt_html(kat, chunk, name, left, old, new, right):
+def fmt_html(kat, chunk, name, left, old, new, right, grund=""):
     e = html.escape
-    return (f'<div class="row {kat}"><span class="tag">{chunk} · {e(name)} · {kat}</span>'
-            f'<span class="ctx">…{e(left)}</span> '
-            f'<del>{e(old)}</del> <ins>{e(new)}</ins> '
-            f'<span class="ctx">{e(right)}…</span></div>')
+    zeile = (f'<div class="row {kat}">'
+             f'<span class="tag">{chunk} · {e(name)} · {kat}</span>'
+             f'<span class="ctx">…{e(left)}</span> '
+             f'<del>{e(old)}</del> <ins>{e(new)}</ins> '
+             f'<span class="ctx">{e(right)}…</span>')
+    if grund:
+        zeile += f'<div class="grund">{e(grund)}</div>'
+    return zeile + "</div>"
 
 
 # ==================================================================
@@ -203,6 +212,10 @@ def main():
     ap.add_argument("--stats", action="store_true", help="nur Statistik")
     ap.add_argument("--html", metavar="DATEI", help="HTML-Bericht schreiben")
     ap.add_argument("--no-color", action="store_true")
+    ap.add_argument("--begruendungen", metavar="DATEI", default=None,
+                    help="Begruendungen aus annotation.py einblenden")
+    ap.add_argument("--begruendung", action="store_true",
+                    help="Begruendungen auch auf der Konsole zeigen")
     args = ap.parse_args()
 
     if len(args.files) == 2:
@@ -239,8 +252,23 @@ def main():
         if args.stats:
             return
 
+    gruende = {}
+    if args.begruendungen and os.path.exists(args.begruendungen):
+        try:
+            gruende = json.load(open(args.begruendungen, encoding="utf-8"))
+        except Exception as e:
+            print(f"WARNUNG: {args.begruendungen} nicht lesbar — {e}")
+
+    def grund_fuer(chunk, kat, alt, neu):
+        if not gruende:
+            return ""
+        roh = f"{chunk}|{kat}|{alt}|{neu}"
+        return gruende.get(
+            hashlib.sha256(roh.encode("utf-8")).hexdigest()[:8], "")
+
     if args.html:
-        body = "".join(fmt_html(k, c, n, l, o, nw, r)
+        body = "".join(fmt_html(k, c, n, l, o, nw, r,
+                                grund_fuer(c, k, o, nw))
                        for k, c, n, l, o, nw, r in rows)
         summary = " · ".join(f"{nm}: {sum(v.values())}" for nm, v in stats.items())
         open(args.html, "w", encoding="utf-8").write(
@@ -251,6 +279,10 @@ def main():
 
     for k, c, n, l, o, nw, r in rows:
         print(fmt_text(k, c, n, l, o, nw, r, color))
+        if args.begruendung:
+            g = grund_fuer(c, k, o, nw)
+            if g:
+                print(f"      -> {g}")
     print(f"\n{len(rows)} Aenderungen angezeigt.")
 
 

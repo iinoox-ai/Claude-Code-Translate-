@@ -4,6 +4,12 @@ Du bekommst das Ergebnis eines Testlektorats mit bis zu drei Stufen:
 deterministische Normalisierung, Stillektorat, Korrektorat. Dazu
 Diff-Statistik, Warnungen und die Qualitätsprüfung.
 
+**Zur Gewichtung der Signale:** Die Diff-Statistik ist auszählbar und
+belastbar. Ein Modellurteil kommt hinzu, wo eines vorliegt — von einem
+Fremdmodell ist es stärker als vom bearbeitenden Modell selbst, das seine
+eigenen Formulierungen bevorzugt. Steht in einem Bericht »Selbstcheck,
+nachrangig«, ist genau das gemeint.
+
 ## Erste Aufgabe: welche Stufen lohnen sich?
 
 Beurteile jede Stufe einzeln. Der Maßstab ist nicht, ob sich etwas geändert

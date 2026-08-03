@@ -242,6 +242,128 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Paket 4 nicht pruefbar", repr(e))
 
+    # --- Paket 9: der Ablaufplan muss zur Schrittliste passen ----------
+    # Ein Plan, der einen Schritt nicht kennt, schickt den Leser ins
+    # Leere — und das faellt erst auf, wenn jemand danach arbeitet.
+    try:
+        import pipeline as PL
+        pfad = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "ABLAUFPLAN.md")
+        plan = open(pfad, encoding="utf-8").read()
+        fehler = []
+        fehlend = [n for n in [s[0] for s in PL.SCHRITTE]
+                   if f"`{n}`" not in plan]
+        if fehlend:
+            fehler.append(f"Schritte fehlen im Ablaufplan: "
+                          f"{', '.join(fehlend)}")
+        haupt = plan.split("## Anhang")[0]
+        if re.search(r"(?m)^\s*!?\s*rm\s|\brm -", haupt):
+            fehler.append("Der Plan enthaelt einen rm-Befehl")
+        for wort in ("VRAM", "ollama ps", "Instanz zerstoeren"):
+            if wort.lower() in haupt.lower():
+                fehler.append(f"GPU-Kapitel nicht entfernt: '{wort}'")
+        if fehler:
+            b.add("FEHLER", "Ablaufplan veraltet", "; ".join(fehler))
+        else:
+            b.add("OK", f"Ablaufplan kennt alle {len(PL.SCHRITTE)} Schritte, "
+                        f"kein rm, keine GPU-Kapitel")
+    except Exception as e:
+        b.add("WARN", "Ablaufplan nicht pruefbar", repr(e))
+
+    # --- Paket 8: drei Signale, getrennt und richtig beschriftet -------
+    try:
+        import bewertung as BW
+        fehler = []
+        c = dict(cfg, modell_uebersetzung="claude-opus-5",
+                 modell_judge="gemini-3.1-pro-preview")
+        fremd = BW.signal_kopf(c, "judge", "Blindes Urteil")
+        eigen = BW.signal_kopf(c, "uebersetzung", "Selbstcheck")
+        if "gemini-3.1-pro-preview" not in fremd or "Fremdurteil" not in fremd:
+            fehler.append(f"Fremdurteil falsch beschriftet: {fremd}")
+        if "claude-opus-5" not in eigen or "nachrangig" not in eigen:
+            fehler.append(f"Selbstcheck falsch beschriftet: {eigen}")
+        # Judge = uebersetzendes Modell: dann ist es KEIN Fremdurteil, und
+        # der Bericht muss das sagen, statt ein starkes Signal vorzutaeuschen.
+        gleich = BW.signal_kopf(dict(c, modell_judge="claude-opus-5"),
+                                "judge", "Blindes Urteil")
+        if "Fremdurteil" in gleich:
+            fehler.append("gleiches Modell wird als Fremdurteil ausgegeben")
+        for wort in ("Diff-Statistik", "Fremdurteil", "Selbstpraeferenz"):
+            if wort not in BW.GEWICHTUNG:
+                fehler.append(f"Gewichtungshinweis nennt '{wort}' nicht")
+        # Die alten Etiketten duerfen nirgends mehr stehen.
+        quelle = open("bewertung.py", encoding="utf-8").read()
+        for alt in ("lokalen Modells", "Selbstbewertung ist schwach"):
+            if alt in quelle.replace("Frueher stand hier", ""):
+                fehler.append(f"altes Etikett '{alt}' steht noch im Bericht")
+        if fehler:
+            b.add("FEHLER", "Judge-Beschriftung fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Bewertung: drei Signale getrennt, jedes mit dem "
+                        "Modell beschriftet, das es geliefert hat")
+    except Exception as e:
+        b.add("FEHLER", "Judge-Routing nicht pruefbar", repr(e))
+
+    # --- Paket 7: Annotation ist berichtend, nicht editierend ----------
+    try:
+        import annotation as A
+        import diffview as D
+        fehler = []
+
+        # Der Nachweis, dass der Schritt keinen Schreibzugriff auf Text
+        # hat: Keine Textdatei darf in der Freigabeliste stehen, und der
+        # Schreibweg muss alles andere abweisen.
+        geschuetzt = [G.F[k] for k in ("quelle", "uebersetzung", "entwurf",
+                                       "normalisiert", "lektoriert")]
+        drin = [p for p in geschuetzt if p in A.SCHREIBBAR]
+        if drin:
+            fehler.append(f"Textdateien in SCHREIBBAR: {drin}")
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            for ziel in geschuetzt + ["lektorat_diff.txt", "projekt.json"]:
+                try:
+                    A.schreiben(os.path.join(tmp, ziel), "x")
+                    fehler.append(f"annotation.py konnte {ziel} schreiben")
+                except A.SchreibSperre:
+                    pass
+            try:
+                A.schreiben(os.path.join(tmp, A.SCREENING), "# leer\n")
+            except Exception as e:
+                fehler.append(f"erlaubtes Ziel abgewiesen: {e!r}")
+
+        # Typografie und Interpunktion werden nicht annotiert.
+        for kat in ("Typografie", "Interpunktion"):
+            if kat in A.SUBSTANZIELL:
+                fehler.append(f"{kat} wird faelschlich annotiert")
+        for kat in ("Wort", "Wendung", "Teilsatz"):
+            if kat not in A.SUBSTANZIELL:
+                fehler.append(f"{kat} fehlt in den annotierten Kategorien")
+
+        # Die Kennung muss stabil sein — sonst sind alle Begruendungen
+        # nach dem zweiten Lauf verwaist.
+        k1 = A.kennung(7, "Wort", "lief", "ging")
+        if k1 != A.kennung(7, "Wort", "lief", "ging"):
+            fehler.append("Kennung ist nicht stabil")
+        if k1 == A.kennung(8, "Wort", "lief", "ging"):
+            fehler.append("Kennung unterscheidet Chunks nicht")
+
+        # Und der Bericht zeigt die Begruendung genau dann, wenn es eine
+        # gibt — dieselbe Kennung auf beiden Seiten.
+        html_mit = D.fmt_html("Wort", 7, "Stil", "er", "lief", "ging", "los",
+                              "falscher Freund behoben")
+        if "falscher Freund behoben" not in html_mit:
+            fehler.append("Begruendung erscheint nicht im HTML-Bericht")
+        if "grund" in D.fmt_html("Typografie", 1, "det", "a", "-", "–", "b"):
+            fehler.append("leere Begruendung erzeugt trotzdem eine Spalte")
+
+        if fehler:
+            b.add("FEHLER", "Annotation fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Annotation berichtet nur: kein Schreibzugriff auf "
+                        "Text, keine Typografie-Begruendungen")
+    except Exception as e:
+        b.add("FEHLER", "Annotation nicht pruefbar", repr(e))
+
     # --- Paket 6: Zitate. Der Kern ist, was NICHT passiert. ------------
     try:
         import zitatrecherche as Z

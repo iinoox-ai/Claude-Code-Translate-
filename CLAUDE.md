@@ -150,6 +150,18 @@ anfasst, hält diese Regel und den zugehörigen Selbsttestfall am Leben.
 Grund: Tempus und Person der einen Erzählebene dürfen nicht in die andere
 bluten.
 
+## Annotation und Screening fassen den Text nicht an
+
+`annotation.py` läuft nach dem Lektorat und liefert zwei Berichte: eine Zeile
+Begründung je substanzieller Änderung (`begruendungen.json`, erscheint als
+Spalte in `bericht.html`) und ein Screening über das ganze Buch
+(`screening_review.md`).
+
+**Der Schritt kann nicht editieren, nicht nur „soll nicht":** Jeder
+Schreibzugriff geht durch `annotation.schreiben()`, und die Funktion kennt
+genau zwei erlaubte Ziele. Wer das aufweicht, macht aus einem Bericht einen
+dritten Editierpass — und jeder Pass glättet.
+
 ## Kosten sind Teil des Ergebnisses
 
 Jeder API-Aufruf meldet seine Token-Usage; `manifest.json` summiert je
