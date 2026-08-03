@@ -109,6 +109,22 @@ def selbsttest(cfg, b):
         if RS.sicherstellen({"sheets_id": ""}, still=True) is not False:
             fehler.append("sicherstellen() ist ohne sheets_id kein No-op")
 
+        # Der Dateiname als sheets_id war der erste Fehler im Echtbetrieb.
+        echt = "1a2B3c4D5e6F7g8H9i0JklMnoPqrStUvWxYz"
+        for eingabe in (echt,
+                        f"https://docs.google.com/spreadsheets/d/{echt}/edit",
+                        f"  {echt}  "):
+            if RS.sheet_id(eingabe) != echt:
+                fehler.append(f"sheet_id({eingabe[:30]}…) liefert "
+                              f"{RS.sheet_id(eingabe)!r}")
+        for daneben in ("Bucharbeit.gsheet", "Mein Buch", ""):
+            try:
+                RS.sheet_id(daneben)
+                fehler.append(f"'{daneben}' wird faelschlich als ID "
+                              f"akzeptiert")
+            except RS.SyncFehler:
+                pass
+
         for tab, spalten, ziel, _, pflicht in RS.TABS:
             if ziel not in G.F:
                 fehler.append(f"{tab}: Ziel '{ziel}' steht nicht in G.F")
