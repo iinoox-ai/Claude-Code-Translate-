@@ -40,6 +40,7 @@ DE_MARKER = [r"\bder\b", r"\bdie\b", r"\bdas\b", r"\bund\b", r"\bnicht\b",
 # Selbsttest — haette den \u-Fehler und die ss/ß-Kollision gefunden
 # ==================================================================
 def selbsttest(cfg, b):
+    import inspect
     b.abschnitt("Selbsttest")
     import lektorat as L
     import uebersetzung as U
@@ -317,6 +318,23 @@ def selbsttest(cfg, b):
                                 "judge", "Blindes Urteil")
         if "Fremdurteil" in gleich:
             fehler.append("gleiches Modell wird als Fremdurteil ausgegeben")
+        # Die Tauschlogik muss mit beliebigen Namen richtig zurueckrechnen:
+        # Bei Entwurf/Revision ebenso wie bei Basis/Variante. Ein
+        # vertauschtes Etikett dreht das Ergebnis um, ohne aufzufallen.
+        for namen in (("entwurf", "revision"), ("A", "C")):
+            faelle = [(("A", False), namen[0]), (("B", False), namen[1]),
+                      (("A", True), namen[1]), (("B", True), namen[0]),
+                      (("gleichwertig", False), "gleichwertig")]
+            for (besser, getauscht), soll in faelle:
+                ist = BW.zurueckrechnen(besser, getauscht, namen)
+                if ist != soll:
+                    fehler.append(
+                        f"Tauschlogik: {namen}, besser={besser}, "
+                        f"getauscht={getauscht} -> {ist} statt {soll}")
+        if "namen" not in inspect.signature(BW.blindbewertung).parameters:
+            fehler.append("blindbewertung kennt keine Fassungsnamen — "
+                          "der Variantenvergleich kann nicht urteilen")
+
         for wort in ("Diff-Statistik", "Fremdurteil", "Selbstpraeferenz"):
             if wort not in BW.GEWICHTUNG:
                 fehler.append(f"Gewichtungshinweis nennt '{wort}' nicht")
