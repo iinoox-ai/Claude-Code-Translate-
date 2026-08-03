@@ -237,7 +237,22 @@ def main():
     print(f"Chunkpaare fuers Screening: {len(paare)} "
           f"({(len(paare) + CHUNKS_JE_AUFRUF - 1)//CHUNKS_JE_AUFRUF} "
           f"Aufrufe)")
-    print(f"Modell: {modell}\n")
+    print(f"Modell: {modell}")
+
+    # Kostenschaetzung wie in vorbereitung.py — 'Kosten sind Teil des
+    # Ergebnisses' gilt auch fuer den Schritt, der nur berichtet.
+    t = G.tarif(modell)
+    if t:
+        faktor = G.token_faktor()
+        wort_b = sum(len((a["alt"] + a["neu"] + a["kontext"]).split())
+                     for a in aenderungen)
+        wort_s = sum(len(z.split()) for _, z in paare) * 2
+        ein = (wort_b + wort_s) * faktor
+        aus = (len(aenderungen) * 15
+               + len(paare) // CHUNKS_JE_AUFRUF * 60) * faktor
+        print(f"Kosten: rund {(ein*t['ein'] + aus*t['aus'])/1e6:.2f} $ "
+              f"(geschaetzt {ein:,.0f} Token ein, {aus:,.0f} aus)")
+    print()
     if args.nur_anzeigen:
         print("Nur Anzeige — kein Modellaufruf.")
         return
