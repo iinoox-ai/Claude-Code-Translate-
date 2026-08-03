@@ -111,6 +111,76 @@ def _technik_melden(ziel, quelle):
     return zeilen
 
 
+def sheets_anmelden(code=CODE):
+    """Einmal je Sitzung IN EINER ZELLE ausfuehren, nicht im Unterprozess.
+
+    Colab fuehrt die Google-Anmeldung ueber den Kernel-Kanal zur
+    Oberflaeche. Den gibt es nur im Notebook-Prozess; die Pipeline
+    startet ihre Schritte aber grundsaetzlich als Unterprozess, und dort
+    stirbt authenticate_user() mit einem AttributeError statt mit einer
+    Aussage.
+
+    Danach wird nachgesehen, ob ein Unterprozess die Anmeldung wirklich
+    sieht — sonst haette man eine gruene Zelle und trotzdem keinen
+    Zugriff."""
+    import subprocess
+    import sys
+    from google.colab import auth
+    auth.authenticate_user()
+    print("Angemeldet.")
+
+    pruef = ("import google.auth, sys\n"
+             "try:\n"
+             "    google.auth.default()\n"
+             "    print('SICHTBAR')\n"
+             "except Exception as e:\n"
+             "    print('UNSICHTBAR', e)\n")
+    r = subprocess.run([sys.executable, "-c", pruef],
+                       capture_output=True, text=True, cwd=code)
+    if "SICHTBAR" in r.stdout:
+        print("Unterprozesse sehen die Anmeldung — referenz_sync laeuft "
+              "jetzt ueber colab_start.lauf(...).")
+        return True
+    print("Die Anmeldung gilt nur in dieser Zelle, nicht in "
+          "Unterprozessen.\n"
+          "Fuer den Sync stattdessen im Kernel arbeiten:\n"
+          "    colab_start.sync_im_kernel()")
+    print(f"  ({(r.stdout + r.stderr).strip()[:200]})")
+    return False
+
+
+def sync_im_kernel(projekt=PROJEKT_STANDARD, code=CODE, vorlage=False,
+                   nur_pruefen=False):
+    """Rueckfall: den Sync im Notebook-Prozess laufen lassen.
+
+    Nur fuer den Sheets-Zugriff gedacht. Alles andere gehoert weiter in
+    den Unterprozess — dort ist ausgeschlossen, dass ein zwischenzeitlich
+    geholter Codestand von einem alten Import verdeckt wird."""
+    import os
+    import sys
+    os.chdir(projekt)
+    if code not in sys.path:
+        sys.path.insert(0, code)
+    for name, modul in list(sys.modules.items()):
+        if (getattr(modul, "__file__", None) or "").startswith(code):
+            del sys.modules[name]
+    import gemeinsam as G
+    import referenz_sync as R
+    cfg = G.lade_config()
+    if not R.aktiv(cfg):
+        print("sheets_id ist leer — Rueckfallpfad aktiv, nichts zu tun.")
+        return
+    try:
+        if vorlage:
+            R.vorlage(cfg)
+        else:
+            R.sync(cfg, schreiben=not nur_pruefen)
+            if nur_pruefen:
+                print("Nur geprueft — keine Datei geschrieben.")
+    except R.SyncFehler as e:
+        print(f"FEHLER: {e}")
+
+
 def technik_uebernehmen(projekt=PROJEKT_STANDARD, code=CODE):
     """Uebertraegt NUR die technischen Schluessel aus dem Repo.
 

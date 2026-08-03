@@ -24,6 +24,7 @@ erste Datensatz steht in Zeile 2.
 import argparse
 import json
 import os
+import re
 import sys
 
 import gemeinsam as G
@@ -88,9 +89,85 @@ def aktiv(cfg):
     return bool(str(cfg.get("sheets_id", "")).strip())
 
 
-def _client(cfg):
+ID_ZEICHEN = re.compile(r"^[A-Za-z0-9_-]{20,}$")
+
+
+def sheet_id(roh):
+    """Nimmt die ID oder die ganze Bearbeitungs-URL, liefert die ID.
+
+    Der Dateiname ist keine ID. Das sieht man ihm nicht an, und die
+    Fehlermeldung von Google dazu ist unbrauchbar — also hier abfangen,
+    bevor eine Anmeldung ueberhaupt versucht wird."""
+    s = str(roh).strip()
+    m = re.search(r"/spreadsheets/d/([A-Za-z0-9_-]+)", s)
+    if m:
+        return m.group(1)
+    if ID_ZEICHEN.match(s):
+        return s
+    raise SyncFehler(
+        f"'{s}' sieht nicht nach einer Spreadsheet-ID aus.\n"
+        f"  Gemeint ist der markierte Teil der Adresse, nicht der "
+        f"Dateiname:\n"
+        f"  https://docs.google.com/spreadsheets/d/1a2B3c…XyZ/edit\n"
+        f"                                        ^^^^^^^^^^^\n"
+        f"  Die ganze Adresse einzutragen geht auch.")
+
+
+def _im_kernel():
+    """Laeuft dieser Prozess IM Notebook-Kernel — oder als Unterprozess?
+
+    Colabs authenticate_user() spricht ueber den Kernel-Kanal mit der
+    Oberflaeche. In einem Unterprozess gibt es den nicht, und der Aufruf
+    stirbt mit AttributeError statt mit einer Aussage. Die Pipeline
+    startet ihre Schritte grundsaetzlich als Unterprozess."""
+    try:
+        from IPython import get_ipython
+        return getattr(get_ipython(), "kernel", None) is not None
+    except Exception:
+        return False
+
+
+def _credentials():
+    """Drei Wege, in dieser Reihenfolge: Dienstkonto, bereits vorhandene
+    Anmeldung, interaktive Anmeldung. Der mittlere ist der wichtige —
+    ueber ihn sehen die Unterprozesse, was in der Zelle angemeldet
+    wurde."""
+    pfad = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+    if pfad:
+        import google.oauth2.service_account as sa
+        return sa.Credentials.from_service_account_file(
+            pfad, scopes=["https://www.googleapis.com/auth/spreadsheets",
+                          "https://www.googleapis.com/auth/drive"])
+    try:
+        import google.auth
+        creds, _ = google.auth.default()
+        return creds
+    except Exception:
+        pass
+    if G.ist_colab() and _im_kernel():
+        from google.colab import auth
+        import google.auth
+        auth.authenticate_user()
+        creds, _ = google.auth.default()
+        return creds
+    if G.ist_colab():
+        raise SyncFehler(
+            "Keine Google-Anmeldung vorhanden, und dieser Schritt laeuft "
+            "als Unterprozess —\n"
+            "  dort kann Colab das Anmeldefenster nicht oeffnen.\n\n"
+            "  Einmal je Sitzung in einer Zelle ausfuehren:\n"
+            "      colab_start.sheets_anmelden()\n\n"
+            "  Danach diesen Schritt erneut starten.")
+    raise SyncFehler(
+        "Ausserhalb von Colab braucht der Sheets-Zugriff ein Dienstkonto "
+        "in GOOGLE_APPLICATION_CREDENTIALS.\n"
+        "  Ohne das: sheets_id leeren und die JSONs direkt pflegen.")
+
+
+def _buch(cfg):
     """gspread nur hinter Laufzeit-Erkennung. Fehlt es, ist das kein
     Fehler des Aufrufers, sondern ein Grund fuer den Rueckfallpfad."""
+    kennung = sheet_id(cfg["sheets_id"])     # zuerst, kostet keine Anmeldung
     try:
         import gspread
     except ImportError:
@@ -98,19 +175,15 @@ def _client(cfg):
             "sheets_id ist gesetzt, aber gspread ist nicht verfuegbar.\n"
             "  In Colab ist es vorinstalliert. Sonst: sheets_id leeren, "
             "dann werden die JSONs direkt gelesen.")
-    if G.ist_colab():
-        from google.colab import auth
-        import google.auth
-        auth.authenticate_user()
-        creds, _ = google.auth.default()
-        return gspread.authorize(creds)
-    pfad = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
-    if not pfad:
+    try:
+        return gspread.authorize(_credentials()).open_by_key(kennung)
+    except SyncFehler:
+        raise
+    except Exception as e:
         raise SyncFehler(
-            "Ausserhalb von Colab braucht der Sheets-Zugriff ein "
-            "Dienstkonto in GOOGLE_APPLICATION_CREDENTIALS.\n"
-            "  Ohne das: sheets_id leeren und die JSONs direkt pflegen.")
-    return gspread.service_account(filename=pfad)
+            f"Spreadsheet {kennung[:12]}… nicht erreichbar: {e}\n"
+            f"  Stimmt die ID, und ist das Dokument fuer dieses Konto "
+            f"freigegeben?")
 
 
 def _tab_lesen(buch, name, spalten):
@@ -173,7 +246,7 @@ def _schreiben(pfad, daten):
 def sync(cfg, schreiben=True, still=False):
     """Holt alle Tabs, validiert, schreibt die JSONs. Gibt einen Bericht
     je Tab zurueck. Bei Fehlern: SyncFehler mit allen Meldungen."""
-    buch = _client(cfg).open_by_key(str(cfg["sheets_id"]).strip())
+    buch = _buch(cfg)
     fehler, bericht = [], []
     fertig = {}
     for tabname, spalten, ziel, bauer, pflicht in TABS:
@@ -211,7 +284,7 @@ def sicherstellen(cfg, still=False):
 
 def vorlage(cfg):
     """Legt fehlende Tabs mit Kopfzeile an. Vorhandene bleiben unberuehrt."""
-    buch = _client(cfg).open_by_key(str(cfg["sheets_id"]).strip())
+    buch = _buch(cfg)
     da = {b.title for b in buch.worksheets()}
     alle = [(t, s) for t, s, _, _, _ in TABS] + [TAB_ZITATE]
     for name, spalten in alle:
@@ -220,7 +293,13 @@ def vorlage(cfg):
             continue
         blatt = buch.add_worksheet(title=name, rows=200,
                                    cols=max(4, len(spalten)))
-        blatt.update([spalten], "A1")
+        # gspread hat die Reihenfolge dieser beiden Argumente zwischen 5
+        # und 6 vertauscht. Welche Fassung in Colab steckt, entscheidet
+        # Google — also beide bedienen, statt eine zu raten.
+        try:
+            blatt.update([spalten], "A1")
+        except TypeError:
+            blatt.update("A1", [spalten])
         print(f"  {name}: angelegt ({', '.join(spalten)})")
 
 
@@ -239,7 +318,7 @@ def main():
         print("Die Referenz-JSONs werden direkt gelesen, nichts zu tun.")
         return
 
-    print(f"Spreadsheet: {str(cfg['sheets_id']).strip()[:12]}…\n")
+    print(f"Spreadsheet: {sheet_id(cfg['sheets_id'])[:12]}…\n")
     try:
         if args.vorlage:
             vorlage(cfg)
