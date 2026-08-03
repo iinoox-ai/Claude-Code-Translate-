@@ -799,7 +799,7 @@ class GeminiBackend(Backend):
                  "aus": u.get("candidatesTokenCount", 0),
                  "cache_lesen": u.get("cachedContentTokenCount", 0),
                  "cache_schreiben": 0}
-        return saeubern(text), usage
+        return (text if roh else saeubern(text)), usage
 
     def verfuegbare_modelle(self, cfg):
         """Modellnamen, die generateContent unterstuetzen.
@@ -826,7 +826,7 @@ class GeminiBackend(Backend):
         return sorted(namen)
 
     def chat(self, cfg, system, user, temperature, num_ctx=None,
-             rolle="annotation", modell=""):
+             rolle="annotation", modell="", roh=False):
         schluessel = api_schluessel("google")
         if not schluessel:
             sys.exit("FEHLER: GEMINI_API_KEY fehlt.\n"
