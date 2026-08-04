@@ -45,6 +45,8 @@ CODE = os.path.dirname(os.path.abspath(__file__))
 SCHRITTE = [
     ("selbsttest",   "Selbsttest der Normalisierer und Prompts",
      ["preflight.py", "--selbsttest"], 1),
+    ("tarife",       "Modellpreise gegen die Preisseiten halten",
+     ["tarife.py"], 1),
     ("preflight",    "Systempruefung, Textpruefung, Zitaterkennung",
      ["preflight.py"], 5),
     ("zitatrecherche", "Zitatnachweise suchen, Freigabeliste erzeugen",
