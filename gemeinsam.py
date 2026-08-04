@@ -87,6 +87,9 @@ STANDARD = {
     # Sparposten: Das Praefix ueberlebt eine Pause zwischen zwei Chunks.
     # Leer laesst die Voreinstellung des Anbieters (fuenf Minuten).
     "cache_ttl":                 "1h",
+    # Anbieter-SDK benutzen, wenn sie installiert ist. 'false' erzwingt den
+    # requests-Pfad — der bleibt der Rueckfall und muss lauffaehig bleiben.
+    "sdk_nutzen":                True,
 
     "chunk_words":               800,
     "chunk_words_variante":      1200,      # Rueckfall, wenn 'varianten' leer ist
@@ -155,6 +158,7 @@ AENDERBAR = {
     "rahmen_marker", "varianten", "technik_ausnahmen",
     "timeout_connect", "max_retries",
     "backend_standard", "max_tokens_api", "timeout_read_api", "cache_ttl",
+    "sdk_nutzen",
 } | {f"modell_{r}" for r in (
     "uebersetzung", "revision", "stil", "korrektorat",
     "vorbereitung", "zitat", "judge", "annotation", "vergleich")
@@ -385,7 +389,7 @@ EFFORT = {"niedrig": "low", "mittel": "medium", "hoch": "high",
 # Der Ueberschreibschutz der projekt.json bleibt: erkannt wird die
 # Abweichung, uebernommen wird sie nur auf ausdrueckliche Ansage.
 TECHNIK = ({"backend_standard", "max_tokens_api", "timeout_read_api",
-            "cache_ttl"}
+            "cache_ttl", "sdk_nutzen"}
            | {f"modell_{r}" for r in ROLLEN}
            | {f"effort_{r}" for r in ROLLEN})
 
@@ -815,6 +819,60 @@ def cache_ttl(cfg):
     return t if t in ("5m", "1h") else ""
 
 
+# Die Anbieter-SDK, wenn sie installiert ist. Sie bringt Streaming ohne
+# handgeschriebenen SSE-Parser, exakte Tokenzaehlung und den Stapel-Adapter.
+# Fehlt sie, laeuft der requests-Pfad unveraendert weiter — die Pipeline muss
+# auf einem nackten VPS mit nur 'requests' lauffaehig bleiben.
+_SDK = None          # None: noch nicht versucht. False: nicht vorhanden.
+_KLIENTEN = {}
+
+
+def anthropic_sdk():
+    """Das Modul 'anthropic', oder False. Einmal versucht, dann gemerkt."""
+    global _SDK
+    if _SDK is None:
+        try:
+            import anthropic
+            _SDK = anthropic
+        except Exception:
+            _SDK = False
+    return _SDK
+
+
+def sdk_antwort(klient, payload):
+    """Ein Aufruf ueber die SDK, als dasselbe dict wie der requests-Pfad.
+
+    'model_dump' gibt genau die Struktur zurueck, die auch ueber die Leitung
+    kaeme. Damit bleibt 'antwort_lesen' der einzige Ort, der Antworten
+    versteht — sonst driften die beiden Wege auseinander und nur einer wird
+    getestet."""
+    sdk = anthropic_sdk()
+    try:
+        return klient.messages.create(**payload).model_dump()
+    except Exception as e:
+        raise sdk_fehler(sdk, e) from e
+
+
+def sdk_fehler(sdk, e):
+    """SDK-Ausnahme -> ApiFehler im Wortlaut des requests-Pfads.
+
+    Der Wortlaut ist nicht Kosmetik: 'ttl_abgelehnt' und die Fehlersuche im
+    Log lesen 'HTTP <code>'. Ein SDK-Pfad mit eigenem Wortlaut haette den
+    Rueckfall der Cache-Lebensdauer still ausgehebelt."""
+    code = getattr(e, "status_code", None)
+    if code is None and sdk and isinstance(e, getattr(
+            sdk, "APIConnectionError", ())):
+        return ApiFehler(f"Netzwerkfehler: {e}")
+    if code is None:
+        return ApiFehler(str(e))
+    koerper = getattr(e, "body", None) or getattr(e, "message", "") or str(e)
+    if code in (401, 403):
+        return ApiFehler(
+            f"HTTP {code} — Schluessel fehlt, ist abgelaufen oder hat keine "
+            f"Berechtigung fuer dieses Modell.\n{str(koerper)[:300]}")
+    return ApiFehler(f"HTTP {code}: {str(koerper)[:300]}")
+
+
 def ttl_abgelehnt(fehler):
     """Ist dieser Fehler die Ablehnung der Cache-Lebensdauer?
 
@@ -885,16 +943,37 @@ class AnthropicBackend(Backend):
 
     ZAEHLER = "https://api.anthropic.com/v1/messages/count_tokens"
 
+    def klient(self, cfg):
+        """Der SDK-Klient, oder None. Einmal gebaut, dann behalten.
+
+        Je Aufruf einen neuen zu bauen wuerde den Verbindungspool
+        wegwerfen — bei 600 Aufrufen je Buch ist das keine Kleinigkeit."""
+        sdk = anthropic_sdk()
+        if not sdk or not cfg.get("sdk_nutzen", True):
+            return None
+        schluessel = api_schluessel("anthropic")
+        if not schluessel:
+            return None
+        if schluessel not in _KLIENTEN:
+            _KLIENTEN[schluessel] = sdk.Anthropic(
+                api_key=schluessel,
+                timeout=float(cfg.get("timeout_read_api", 600)),
+                max_retries=int(cfg.get("max_retries", 3)))
+        return _KLIENTEN[schluessel]
+
     def zaehle_tokens(self, cfg, system, user, modell=""):
         schluessel = api_schluessel("anthropic")
         if not schluessel:
             return None
+        anfrage = {"model": modell,
+                   "system": [{"type": "text", "text": system}],
+                   "messages": [{"role": "user", "content": user}]}
+        k = self.klient(cfg)
         try:
+            if k is not None:
+                return int(k.messages.count_tokens(**anfrage).input_tokens)
             r = requests.post(
-                self.ZAEHLER,
-                json={"model": modell,
-                      "system": [{"type": "text", "text": system}],
-                      "messages": [{"role": "user", "content": user}]},
+                self.ZAEHLER, json=anfrage,
                 headers={"x-api-key": schluessel,
                          "anthropic-version": self.VERSION,
                          "content-type": "application/json"},
@@ -915,13 +994,19 @@ class AnthropicBackend(Backend):
                       "anthropic-version": self.VERSION,
                       "content-type": "application/json"}
         timeout = (cfg["timeout_connect"], cfg.get("timeout_read_api", 600))
+        k = self.klient(cfg)
 
+        # Ein Payloadbauer, ein Antwortleser, zwei Transportwege. Wer die
+        # SDK an 'payload' vorbei aufruft, hat zwei Wahrheiten darueber,
+        # was wirklich rausgeht — und der Selbsttest prueft nur eine.
         def einmal():
             p = self.payload(cfg, system, user, rolle, modell, werkzeuge)
+            if k is not None:
+                return sdk_antwort(k, p)
             return sende(lambda: requests.post(self.URL, json=p,
                                                headers=kopfzeilen,
                                                timeout=timeout),
-                         cfg["max_retries"])
+                         cfg["max_retries"]).json()
         try:
             r = einmal()
         except ApiFehler as e:
@@ -936,7 +1021,7 @@ class AnthropicBackend(Backend):
                   f"             'cache_ttl' in projekt.json leeren, dann "
                   f"verschwindet diese Meldung.")
             r = einmal()
-        text, usage = self.antwort_lesen(r.json(), roh)
+        text, usage = self.antwort_lesen(r, roh)
         usage_buchen(rolle, modell, usage)
         return text
 

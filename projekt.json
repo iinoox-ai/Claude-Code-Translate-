@@ -46,6 +46,7 @@
   "ratio_max": 1.2,
   "ratio_min": 0.9,
   "revision_pass": true,
+  "sdk_nutzen": true,
   "sprachpaar": "nl-de",
   "tempus": "quellnah",
   "test_words_dialog": 1500,

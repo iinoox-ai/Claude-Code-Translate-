@@ -238,6 +238,12 @@ Einrichtungszelle des Runners. Fehlt der Import, trägt der `requests`-Pfad
 weiter. Die Ablehnung von litellm bleibt bestehen (Begründung in
 `ENTSCHEIDUNGEN.md`).
 
+**Beide Transportwege teilen sich `payload()` und `antwort_lesen()`.** Zwei
+Wege sind erlaubt, zwei Wahrheiten darüber, was rausgeht, nicht — der
+Selbsttest prüft den Payload genau einmal. `sdk_fehler()` behält den
+Wortlaut `HTTP <code>`, sonst greift der Rückfall der Cache-Lebensdauer auf
+dem SDK-Pfad nicht. `sdk_nutzen: false` erzwingt `requests`.
+
 ## Testen ohne GPU
 
 Alles außer den eigentlichen Modellaufrufen lässt sich lokal prüfen:

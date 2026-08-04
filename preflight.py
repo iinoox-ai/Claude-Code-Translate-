@@ -424,6 +424,76 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Kostenbuchung nicht pruefbar", repr(e))
 
+    # --- SDK-Pfad: derselbe Payload, dieselbe Antwort ------------------
+    # Zwei Transportwege sind erlaubt, zwei Wahrheiten nicht. Der Selbsttest
+    # prueft den Payload genau einmal; geht die SDK an 'payload' vorbei
+    # oder liest sie Antworten selbst, prueft er den Weg, den niemand
+    # benutzt. Und die Fehlermeldung muss 'HTTP <code>' behalten, sonst
+    # greift der Rueckfall der Cache-Lebensdauer auf dem SDK-Pfad nicht.
+    try:
+        fehler = []
+        b_a = G.AnthropicBackend()
+        soll = b_a.payload(cfg, "SYSTEM", "USER", "uebersetzung",
+                           "claude-opus-5")
+
+        class _Nachrichten:
+            def __init__(self): self.gesehen = None
+
+            def create(self, **kw):
+                self.gesehen = kw
+                return _Antwort()
+
+        class _Antwort:
+            def model_dump(self):
+                return {"content": [{"type": "text", "text": "Hallo."}],
+                        "stop_reason": "end_turn",
+                        "usage": {"input_tokens": 7, "output_tokens": 3,
+                                  "cache_read_input_tokens": 11,
+                                  "cache_creation_input_tokens": 0}}
+
+        class _Klient:
+            def __init__(self): self.messages = _Nachrichten()
+
+        klient = _Klient()
+        d = G.sdk_antwort(klient, soll)
+        if klient.messages.gesehen != soll:
+            fehler.append("SDK bekommt einen anderen Payload als requests")
+        text, usage = b_a.antwort_lesen(d)
+        if text != "Hallo." or usage["cache_lesen"] != 11:
+            fehler.append(f"SDK-Antwort falsch gelesen: {text!r}, {usage}")
+
+        # Fehlerabbildung: Status bleibt lesbar, TTL-Rueckfall greift.
+        class _Status(Exception):
+            status_code = 400
+            body = {"error": {"message": "ttl: unsupported value"}}
+        umgesetzt = G.sdk_fehler(G.anthropic_sdk(), _Status("kaputt"))
+        if not isinstance(umgesetzt, G.ApiFehler):
+            fehler.append("SDK-Fehler wird nicht zu ApiFehler")
+        if not G.ttl_abgelehnt(umgesetzt):
+            fehler.append(f"TTL-Rueckfall greift auf dem SDK-Pfad nicht: "
+                          f"{umgesetzt}")
+
+        class _Auth(Exception):
+            status_code = 401
+            body = "no key"
+        if "401" not in str(G.sdk_fehler(G.anthropic_sdk(), _Auth("x"))):
+            fehler.append("Statuscode geht in der Uebersetzung verloren")
+
+        # Der requests-Pfad bleibt der Rueckfall: abgeschaltete oder
+        # fehlende SDK darf keinen Klienten liefern.
+        if b_a.klient(dict(cfg, sdk_nutzen=False)) is not None:
+            fehler.append("'sdk_nutzen: false' wird nicht beachtet")
+
+        if fehler:
+            b.add("FEHLER", "SDK-Pfad fehlerhaft", "; ".join(fehler))
+        else:
+            vorhanden = "vorhanden" if G.anthropic_sdk() else "nicht \
+installiert, requests-Pfad"
+            b.add("OK", f"SDK-Pfad: derselbe Payload, derselbe Antwortleser, "
+                        f"Statuscodes erhalten ({vorhanden})")
+    except Exception as e:
+        b.add("FEHLER", "SDK-Pfad nicht pruefbar", repr(e))
+
     # --- Ueberlaengen: gezaehlt, nicht gekappt -------------------------
     # Kappen waere die naheliegende Reaktion und die falsche: Ein Absatz
     # gehoert zusammen, ein geschuetztes Zitat erst recht. Was bleibt, ist
@@ -462,7 +532,10 @@ def selbsttest(cfg, b):
         fehler = []
         gelaufen = []
         echt_run, alt_cwd = PL.cmd_run, os.getcwd()
-        with tempfile.TemporaryDirectory() as tmp:
+        # Der Befehl redet; im Selbsttestbericht hat das nichts zu suchen.
+        import contextlib, io
+        with tempfile.TemporaryDirectory() as tmp, \
+                contextlib.redirect_stdout(io.StringIO()):
             try:
                 os.chdir(tmp)
                 PL.cmd_run = lambda cfg, args: gelaufen.append(True)

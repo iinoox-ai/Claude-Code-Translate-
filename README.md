@@ -209,6 +209,10 @@ Zwei Eigenheiten, die nicht „repariert" werden dürfen:
   und `top_k` entfernt und antwortet darauf mit HTTP 400; Gemini ignoriert
   sie. Die Tiefe steuert `effort_<rolle>`. Der Selbsttest prüft beide
   Payloads darauf.
+- **Zwei Transportwege, ein Payload.** Ist die SDK `anthropic` installiert,
+  geht der Anthropic-Verkehr über sie, sonst über `requests`; beide bauen
+  denselben Payload und lesen die Antwort mit derselben Funktion. Ohne die
+  SDK läuft alles weiter — nur ohne Streaming und Stapelverarbeitung.
 - **Der System-Prompt trägt einen Cache-Marker.** Er ist über alle Chunks
   byteweise identisch. Wer Bausteine umsortiert, zerstört die Trefferquote
   unbemerkt — identische Präfixe sind Geld.
