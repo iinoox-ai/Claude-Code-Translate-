@@ -158,7 +158,7 @@ def begruenden(cfg, aenderungen):
         print(f"  {i+1}–{i+len(buendel)} von {len(aenderungen)} …",
               flush=True)
         try:
-            antwort = G.chat(cfg, SYSTEM_BEGRUENDUNG, frage, 0.0,
+            antwort = G.chat(cfg, SYSTEM_BEGRUENDUNG, frage,
                              rolle="annotation", roh=True)
             d = json_lesen(antwort)
             if isinstance(d, dict):
@@ -198,7 +198,7 @@ def screenen(cfg, quelle_chunks, paare):
               flush=True)
         try:
             antwort = G.chat(cfg, SYSTEM_SCREENING, "\n\n".join(stuecke),
-                             0.0, rolle="annotation", roh=True)
+                             rolle="annotation", roh=True)
             d = json_lesen(antwort)
             if isinstance(d, list):
                 befunde += [x for x in d if isinstance(x, dict)]

@@ -164,7 +164,7 @@ def pruefe_ping(e, cfg):
         probe["max_tokens_api"] = 1
         t0 = time.time()
         try:
-            G.BACKENDS[anbieter].chat(probe, "Antworte mit OK.", "OK", 0.0,
+            G.BACKENDS[anbieter].chat(probe, "Antworte mit OK.", "OK",
                                       rolle="verifikation", modell=modell)
             e.ok(f"{modell} antwortet ({time.time()-t0:.1f}s)",
                  f"Rollen: {', '.join(rollen)}{wann}")
@@ -201,7 +201,7 @@ def pruefe_echtlauf(e, cfg, anbieter_rollen, tragen):
         t0 = time.time()
         try:
             text = G.BACKENDS[anbieter].chat(
-                cfg, PROBE_SYSTEM, PROBE_NL, 0.0,
+                cfg, PROBE_SYSTEM, PROBE_NL,
                 rolle="verifikation", modell=modell)
         except Exception as ex:
             e.fehl(f"{modell}: Echtlauf fehlgeschlagen",
@@ -335,7 +335,8 @@ def main():
         anbieter_rollen = _anbieter_rollen(cfg)
         if not anbieter_rollen:
             e.info("Keine API-Rolle aktiv",
-                   "Die Konfiguration laeuft ganz ueber Ollama.")
+                   "Keine Rolle ist einem Modell zugeordnet — "
+                   "'pipeline.py modelle' zeigt die Belegung.")
         else:
             tragen = pruefe_ping(e, cfg)
             pruefe_echtlauf(e, cfg, anbieter_rollen, tragen)

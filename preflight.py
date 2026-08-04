@@ -1102,16 +1102,26 @@ def selbsttest_backends(b):
                 "effort_uebersetzung": "hoch",
                 "effort_annotation":   "niedrig"})
 
-    # --- Routing: Rolle -> Modell -> Backend, inklusive Rueckfallpfad ----
+    # --- Routing: Rolle -> Modell -> Backend ----------------------------
     try:
         fehler = []
         if G.backend_name(G.modell_fuer(cfg, "uebersetzung")) != "anthropic":
             fehler.append("uebersetzung landet nicht bei Anthropic")
         if G.backend_name(G.modell_fuer(cfg, "annotation")) != "google":
             fehler.append("annotation landet nicht bei Google")
-        # Leerer Schluessel muss auf Ollama zurueckfallen (VPS-Rueckfallpfad).
-        if G.backend_name(G.modell_fuer(dict(G.STANDARD), "stil")) != "ollama":
-            fehler.append("leeres modell_stil faellt nicht auf Ollama zurueck")
+        # Eine Rolle ohne Modell muss abbrechen statt still zu ersetzen.
+        leer = dict(G.STANDARD)
+        leer["modell_stil"] = ""
+        try:
+            G.modell_fuer(leer, "stil")
+            fehler.append("leeres modell_stil wird nicht gemeldet")
+        except SystemExit:
+            pass
+        try:
+            G.backend_name("mistral-medium-3.5:128b-q8_0")
+            fehler.append("unbekannter Anbieter wird nicht gemeldet")
+        except SystemExit:
+            pass
         if G.effort_fuer(cfg, "annotation") != "low":
             fehler.append("Effort 'niedrig' wird nicht auf 'low' abgebildet")
         if fehler:
@@ -1262,11 +1272,13 @@ def selbsttest_backends(b):
     except Exception as e:
         b.add("FEHLER", "Rohausgabe wirft Ausnahme", repr(e))
 
-    # --- Anzeige darf nicht den Rueckfallschluessel nennen ---------------
+    # --- Der Rueckfallschluessel ist weg, niemand darf ihn noch lesen ---
     # uebersetzung.py meldete im Kopf 'cfg["modell"]' — den Ollama-Namen —
     # obwohl ueber die Rolle laengst Opus 5 lief. Der Lauf war richtig, die
-    # Anzeige log. Payloadtests finden so etwas nicht, ein Blick in die
-    # Quelle schon.
+    # Anzeige log. Seit dem Wegfall des Ollama-Pfads gibt es den Schluessel
+    # gar nicht mehr: derselbe Zugriff waere jetzt ein KeyError mitten im
+    # Lauf. Payloadtests finden so etwas nicht, ein Blick in die Quelle
+    # schon.
     try:
         hier = os.path.dirname(os.path.abspath(__file__))
         schuldig = []
@@ -1281,13 +1293,13 @@ def selbsttest_backends(b):
                 if "cfg['modell']" in zeile or 'cfg["modell"]' in zeile:
                     schuldig.append(f"{datei}:{nr}")
         if schuldig:
-            b.add("FEHLER", "Anzeige nennt den Ollama-Rueckfallschluessel",
+            b.add("FEHLER", "Zugriff auf den entfallenen Schluessel 'modell'",
                   f"{', '.join(schuldig)}\n"
-                  f"           Im API-Betrieb stimmt cfg['modell'] nie. "
+                  f"           Den gibt es nicht mehr. "
                   f"G.modell_fuer(cfg, rolle) benutzen.")
         else:
-            b.add("OK", "Kein Skript zeigt cfg['modell'] statt des "
-                        "Rollenmodells an")
+            b.add("OK", "Kein Skript liest den entfallenen Schluessel "
+                        "cfg['modell']")
     except Exception as e:
         b.add("WARN", "Anzeigepruefung nicht durchfuehrbar", repr(e))
 
@@ -1339,9 +1351,8 @@ def pruefe_belegung(cfg, b):
     for rolle in G.aktive_rollen(cfg):
         modell = G.modell_fuer(cfg, rolle)
         anbieter = G.backend_name(modell)
-        zusatz = (f", Effort {G.effort_fuer(cfg, rolle)}"
-                  if anbieter != "ollama" else "")
-        b.add("INFO", f"  {rolle}", f"{modell} ({anbieter}{zusatz})")
+        b.add("INFO", f"  {rolle}",
+              f"{modell} ({anbieter}, Effort {G.effort_fuer(cfg, rolle)})")
 
 
 def pruefe_api(cfg, b, backends, ping):
@@ -1372,7 +1383,7 @@ def pruefe_api(cfg, b, backends, ping):
         probe["max_tokens_api"] = 1
         try:
             G.BACKENDS[anbieter].chat(probe, "Antworte mit OK.", "OK",
-                                      0.0, rolle=rolle, modell=modell)
+                                      rolle=rolle, modell=modell)
             b.add("OK", f"{modell} antwortet")
         except SystemExit:
             raise
@@ -1407,8 +1418,6 @@ def pruefe_kosten(cfg, b, woerter):
     summe, unsicher, ohne_tarif = 0.0, False, []
     for rolle in G.aktive_rollen(cfg):
         modell = G.modell_fuer(cfg, rolle)
-        if G.backend_name(modell) == "ollama":
-            continue
         t = G.tarif(modell)
         if not t:
             ohne_tarif.append(modell)
@@ -1435,91 +1444,6 @@ def pruefe_kosten(cfg, b, woerter):
 
 
 # ==================================================================
-def pruefe_ollama(cfg, b):
-    b.abschnitt("Backend und Modell")
-    b.add("INFO", "Backend", cfg.get("backend", "ollama"))
-    try:
-        modelle = G.modelle_vorhanden(cfg)
-    except requests.HTTPError as e:
-        code = e.response.status_code if e.response is not None else "?"
-        if code == 401:
-            b.add("FEHLER", f"Port {cfg['ollama_host']} liefert 401",
-                  "Davor sitzt der vast.ai-Proxy, nicht Ollama.\n"
-                  "           ss -tlnp | grep ollama  — Port in "
-                  "projekt.json eintragen.")
-        else:
-            b.add("FEHLER", f"Backend antwortet mit HTTP {code}")
-        return False
-    except Exception as e:
-        b.add("FEHLER", f"Backend nicht erreichbar ({cfg['ollama_host']})",
-              f"{e}\n           ss -tlnp | grep ollama")
-        return False
-
-    b.add("OK", f"Backend erreichbar ({cfg['ollama_host']})")
-    if cfg["modell"] not in modelle:
-        fam = [m for m in modelle
-               if m.split(":")[0] == cfg["modell"].split(":")[0]]
-        if len(fam) == 1:
-            b.add("WARN", f"'{cfg['modell']}' nicht vorhanden",
-                  f"Benutze '{fam[0]}'.")
-            cfg["modell"] = fam[0]
-        else:
-            b.add("FEHLER", f"Modell '{cfg['modell']}' fehlt",
-                  f"Vorhanden: {', '.join(modelle) or 'keines'}\n"
-                  f"           ollama pull {cfg['modell']}")
-            return False
-    else:
-        b.add("OK", f"Modell vorhanden: {cfg['modell']}")
-    return True
-
-
-def pruefe_gpu(cfg, b):
-    b.abschnitt("GPU-Belegung")
-    print("  Lade Modell zur Pruefung (kann einige Minuten dauern) ...")
-    try:
-        requests.post(f"{cfg['ollama_host']}/api/chat", timeout=(10, 1200),
-                      json={"model": cfg["modell"],
-                            "messages": [{"role": "user", "content": "Hallo"}],
-                            "stream": False, "keep_alive": "60m",
-                            "options": {"num_ctx": cfg["num_ctx"],
-                                        "num_predict": 4}}).raise_for_status()
-    except Exception as e:
-        b.add("FEHLER", "Testanfrage fehlgeschlagen", str(e))
-        return
-    try:
-        ps = subprocess.run(["ollama", "ps"], capture_output=True,
-                            text=True, timeout=30).stdout
-    except Exception as e:
-        b.add("WARN", "'ollama ps' nicht ausfuehrbar", str(e))
-        return
-
-    zeile = next((l for l in ps.splitlines()
-                  if cfg["modell"].split(":")[0] in l), "")
-    if not zeile:
-        b.add("WARN", "Modell nach der Testanfrage nicht in 'ollama ps'")
-    elif "100% GPU" in zeile:
-        b.add("OK", "Modell vollstaendig im VRAM (100% GPU)")
-    elif "CPU" in zeile:
-        m = re.search(r"(\d+)%/(\d+)%\s*CPU/GPU", zeile)
-        b.add("FEHLER", "Modell nicht vollstaendig im VRAM "
-                        f"({m.group(1)+'% CPU' if m else 'teilweise CPU'})",
-              "Der Lauf waere um Groessenordnungen langsamer.\n"
-              "           'num_ctx' senken, kleinere Quantisierung oder "
-              "groessere Instanz.")
-    else:
-        b.add("WARN", "GPU-Anteil unklar", zeile.strip())
-
-    try:
-        smi = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,memory.total,memory.used",
-             "--format=csv,noheader"], capture_output=True, text=True,
-            timeout=20).stdout.strip()
-        for l in smi.splitlines():
-            b.add("INFO", "GPU", l.strip())
-    except Exception:
-        pass
-
-
 def pruefe_umgebung(b):
     b.abschnitt("Umgebung")
     try:
@@ -1750,10 +1674,6 @@ def pruefe_config(cfg, b):
     b.add("INFO", "Chunkgroesse",
           f"{cfg['chunk_words']} (Vergleichsvariante "
           f"{cfg['chunk_words_variante']})")
-    if "ollama" in G.benutzte_backends(cfg) \
-            and cfg["chunk_words"] * 4 > cfg["num_ctx"]:
-        b.add("WARN", "num_ctx knapp fuer die Chunkgroesse",
-              f"Revisionspass braucht etwa {cfg['chunk_words']*4} Token.")
     unbekannt = [p for p in cfg["lektorat_passes"]
                  if p not in ("det", "stil", "korrektorat")]
     if unbekannt:
@@ -1800,16 +1720,9 @@ def main():
     import referenz_sync as R
     R.sicherstellen(cfg)
 
-    # Die Pruefungen richten sich nach den tatsaechlich benutzten Anbietern:
-    # ohne Ollama-Rolle gibt es weder GPU- noch VRAM-Frage.
     backends = G.benutzte_backends(cfg)
     pruefe_belegung(cfg, b)
 
-    if "ollama" in backends:
-        if not pruefe_ollama(cfg, b):
-            b.schreiben(REPORT)
-            sys.exit(1)
-        pruefe_gpu(cfg, b)
     if backends & {"anthropic", "google"}:
         if not pruefe_api(cfg, b, backends, ping=not args.quick):
             b.schreiben(REPORT)

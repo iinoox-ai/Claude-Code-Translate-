@@ -2,8 +2,8 @@
 
 Chunkweise Übersetzung buchlanger literarischer Texte mit einem Sprachmodell.
 Aktuell Niederländisch → Deutsch über API-Backends (Anthropic, Google), Betrieb
-in Google Colab mit Datenhaltung in Google Drive; Ollama bleibt als Rückfallpfad
-erhalten. Ein zweiter Satz für Deutsch → Englisch existiert separat.
+in Google Colab mit Datenhaltung in Google Drive. Ein zweiter Satz für
+Deutsch → Englisch existiert separat.
 
 Einstieg ist immer `pipeline.py`. Die Einzelskripte sind aufrufbar, werden im
 Normalbetrieb aber vom Orchestrator gestartet.
@@ -17,11 +17,11 @@ wichtigsten:
   Verlagsreihenfolge ab und ist Absicht.
 - **`gross` wird zu `groß` korrigiert, `Gross` nicht.** Schreibungsabhängig,
   weil großgeschrieben ein Nachname sein kann.
-- **Verstellbar sind `chunk_words`, `context_words` und `effort_<rolle>`.** Die
-  Temperatur-Schlüssel wirken seit der API-Umstellung nur noch auf dem
-  Ollama-Rückfallpfad — `claude-opus-5` hat `temperature`/`top_p`/`top_k`
-  entfernt und antwortet darauf mit HTTP 400. `repeat_penalty` über 1,0 wäre
-  bei diesem Text ohnehin schädlich.
+- **Verstellbar sind `chunk_words`, `context_words` und `effort_<rolle>`.**
+  Sampling-Parameter gibt es nicht mehr: `claude-opus-5` hat
+  `temperature`/`top_p`/`top_k` entfernt und antwortet darauf mit HTTP 400,
+  Gemini ignoriert sie. Mit dem Rückzug des Ollama-Pfads sind die
+  Temperatur-Schlüssel entfallen.
 - **Die lokale Blindbewertung bleibt trotz methodischer Schwäche.** Sie ist das
   dritte Signal, nicht die Entscheidungsgrundlage.
 - **Der Anredecheck ist ein Näherungsmaß** und produziert Falschmeldungen. Das
@@ -217,12 +217,17 @@ Ebenso wenig: API-Schlüssel. Die gehören in eine Umgebungsvariable, nicht in
 
 ## Abhängigkeiten
 
-Basis bleibt `requests` — beide APIs werden direkt angesprochen, bewusst
-ohne litellm (Begründung in `ENTSCHEIDUNGEN.md`). In Colab vorinstallierte
+Basis bleibt `requests`; beide APIs lassen sich damit direkt ansprechen, und
+der Pfad bleibt als Rückfall bestehen. Ollama ist im August 2026 entfernt
+worden — ein Rückfallpfad, den kein Selbsttest prüfen kann, ist keiner. In Colab vorinstallierte
 Bibliotheken (`google.colab`, `gspread`, `google-auth`) dürfen genutzt
 werden, aber nur hinter Laufzeit-Erkennung mit Fallback: Die Pipeline muss
 auf einem nackten VPS mit nur `requests` lauffähig bleiben. Kein
-`pip install` im Normalbetrieb.
+`pip install` im Normalbetrieb — mit genau einer benannten Ausnahme:
+`anthropic`, die SDK des Anbieters, auf Hauptversion festgelegt, in der
+Einrichtungszelle des Runners. Fehlt der Import, trägt der `requests`-Pfad
+weiter. Die Ablehnung von litellm bleibt bestehen (Begründung in
+`ENTSCHEIDUNGEN.md`).
 
 ## Testen ohne GPU
 

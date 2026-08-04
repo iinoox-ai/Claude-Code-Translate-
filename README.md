@@ -175,9 +175,9 @@ Der Merge übernimmt nur Schlüssel aus `AENDERBAR` und schützt
 `ratio_min`, `ratio_max`, `ratio_kalibriert`, `sprachpaar` programmatisch.
 Abgelehntes wird mit Begründung ausgegeben.
 
-**Sinnvoll verstellbar sind vier Parameter:** `chunk_words`, `context_words`,
-`temperature_uebersetzung`, `temperature_revision`. Warum nicht mehr, steht in
-`ENTSCHEIDUNGEN.md`.
+**Sinnvoll verstellbar sind drei Parameter:** `chunk_words`, `context_words`
+und `effort_<rolle>`. Sampling-Parameter nehmen beide APIs nicht mehr an.
+Warum nicht mehr, steht in `ENTSCHEIDUNGEN.md`.
 
 ---
 
@@ -188,7 +188,7 @@ eine Unterklasse:
 
 ```python
 class MeinBackend(Backend):
-    def chat(self, cfg, system, user, temperature, num_ctx=None):
+    def chat(self, cfg, system, user, rolle, modell, roh=False):
         ...
     def verfuegbare_modelle(self, cfg):
         ...
@@ -196,28 +196,23 @@ class MeinBackend(Backend):
 BACKENDS["mein"] = MeinBackend()
 ```
 
-Dann `"backend": "mein"` in `projekt.json`. Kein anderes Skript ändert sich.
+Ein Präfix in `PRAEFIXE` ordnet die Modellnamen des Anbieters zu — das
+Backend ergibt sich aus dem Modellnamen, nicht aus einem Schalter. Kein
+anderes Skript ändert sich.
 
-### Beim Wechsel auf ein API-Modell zu bedenken
+Zwei Eigenheiten, die nicht „repariert" werden dürfen:
 
-Der Adapter ist der kleine Teil. Der Rattenschwanz:
+- **Keine Sampling-Parameter.** `claude-opus-5` hat `temperature`, `top_p`
+  und `top_k` entfernt und antwortet darauf mit HTTP 400; Gemini ignoriert
+  sie. Die Tiefe steuert `effort_<rolle>`. Der Selbsttest prüft beide
+  Payloads darauf.
+- **Der System-Prompt trägt einen Cache-Marker.** Er ist über alle Chunks
+  byteweise identisch. Wer Bausteine umsortiert, zerstört die Trefferquote
+  unbemerkt — identische Präfixe sind Geld.
 
-- **Schlüsselverwaltung** über Umgebungsvariable, nicht in `projekt.json` —
-  die Datei wandert ins Repo und in Exportpakete.
-- **Ratenbegrenzung**: 429 mit exponentiellem Backoff, getrennt von der
-  bestehenden Retry-Logik.
-- **Prompt-Caching**: Der System-Prompt ist über alle Chunks identisch, der
-  Idealfall. Muss aber explizit angefordert werden.
-- **Kostenerfassung** pro Schritt, damit `status` sie ausweisen kann.
-- **Parallelisierung**: lokal sinnlos, über API der offensichtliche Gewinn.
-  Achtung: Für den Übersetzungspass hängt Chunk *n* an der Übersetzung von
-  *n−1*. Parallelisierbar ist nur, wer auf die Rückschau verzichtet — und das
-  kostet Konsistenz. Siehe `ENTSCHEIDUNGEN.md`.
-
-**Was dabei wegfällt:** Die Zwei-Sitzungs-Architektur existiert nur wegen der
-GPU-Miete. Ohne Instanz gibt es keine Stop/Destroy-Ökonomie, keinen
-GPU-Preflight und kein `num_ctx`-Limit, das die Chunkgröße deckelt. Der Ablauf
-wird deutlich einfacher.
+**Was nicht parallelisierbar ist:** Für den Übersetzungspass hängt Chunk *n*
+an der Übersetzung von *n−1*. Parallel geht nur, wer auf die Rückschau
+verzichtet — und das kostet Konsistenz. Siehe `ENTSCHEIDUNGEN.md`.
 
 ---
 

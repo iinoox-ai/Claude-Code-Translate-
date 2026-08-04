@@ -562,8 +562,6 @@ def main():
     p_ueb, p_rev = prompts(cfg)
     fingerprint = G.config_hash(cfg)
 
-    # Nicht cfg['modell'] anzeigen — das ist der Ollama-Rueckfallschluessel
-    # und stimmt im API-Betrieb nie. Was zaehlt, ist das Modell der Rolle.
     m_ueb = G.modell_fuer(cfg, "uebersetzung")
     print(f"Modell:     {m_ueb} ({G.backend_name(m_ueb)}, "
           f"Effort {G.effort_fuer(cfg, 'uebersetzung')})")
@@ -665,9 +663,7 @@ def main():
                              "===\n" + letzte + "\n\n")
                 user += "=== ZU ÜBERSETZENDER TEXT ===\n" + quelle
 
-                entwurf = G.chat(cfg, p_ueb, user,
-                                 cfg["temperature_uebersetzung"],
-                                 rolle="uebersetzung")
+                entwurf = G.chat(cfg, p_ueb, user, rolle="uebersetzung")
                 if not entwurf:
                     raise RuntimeError("leere Antwort in Pass 1")
 
@@ -688,9 +684,7 @@ def main():
                             + "=== NIEDERLÄNDISCHER AUSGANGSTEXT ===\n"
                             + quelle + "\n\n"
                             + "=== DEUTSCHER ENTWURF ===\n" + entwurf)
-                    rev = G.chat(cfg, p_rev, body,
-                                 cfg["temperature_revision"],
-                                 rolle="revision")
+                    rev = G.chat(cfg, p_rev, body, rolle="revision")
                     r2 = G.verhaeltnis(quelle, rev)
                     if rev and cfg["ratio_min"] <= r2 <= cfg["ratio_max"]:
                         endfassung = rev

@@ -381,15 +381,14 @@ def main():
 
     folge = [args.nur] if args.nur else list(cfg["lektorat_passes"])
     p_stil, p_korr = prompts(cfg)
-    PASS = {"stil": (p_stil, cfg["temperature_stil"], "Stillektorat"),
-            "korrektorat": (p_korr, cfg["temperature_korrektorat"],
-                            "Korrektorat")}
+    PASS = {"stil": (p_stil, "Stillektorat"),
+            "korrektorat": (p_korr, "Korrektorat")}
 
     text = open(quelle, encoding="utf-8").read()
     print(f"Quelle: {quelle}\nFolge:  {' -> '.join(folge)}")
     for stufe in [s for s in folge if s in PASS]:
         m = G.modell_fuer(cfg, stufe)
-        print(f"  {PASS[stufe][2]:<14} {m} ({G.backend_name(m)}, "
+        print(f"  {PASS[stufe][1]:<14} {m} ({G.backend_name(m)}, "
               f"Effort {G.effort_fuer(cfg, stufe)})")
     print()
 
@@ -434,7 +433,7 @@ def main():
     n = len(chunks)
     fingerprint = G.config_hash(cfg)
     print(f"{sum(len(c.split()) for c, _ in chunks)} Wörter in {n} Chunks")
-    print(f"LLM-Durchgänge: {' -> '.join(PASS[s][2] for s in llm)}")
+    print(f"LLM-Durchgänge: {' -> '.join(PASS[s][1] for s in llm)}")
     geschuetzt_n = sum(1 for _, g in chunks if g)
     if geschuetzt_n:
         print(f"Geschützt (Zitate): {geschuetzt_n} Absätze")
@@ -490,7 +489,7 @@ def main():
                 gepuffert = []
                 try:
                     for stufe in llm:
-                        system, temp, label = PASS[stufe]
+                        system, label = PASS[stufe]
                         t1 = time.time()
                         body = ""
                         if letzte:
@@ -500,7 +499,7 @@ def main():
                                      + letzte + "\n\n")
                         body += "=== ZU BEARBEITENDER TEXT ===\n" + aktuell
 
-                        neu = G.chat(cfg, system, body, temp, rolle=stufe)
+                        neu = G.chat(cfg, system, body, rolle=stufe)
                         if not neu:
                             raise RuntimeError(f"leere Antwort ({stufe})")
 

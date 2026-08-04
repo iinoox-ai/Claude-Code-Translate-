@@ -59,13 +59,9 @@ STANDARD = {
     "dash":                      "halbgeviert",
     "eszett":                    True,
 
-    "backend":                   "ollama",
-    "modell":                    "mistral-medium-3.5:128b-q8_0",
-    "ollama_host":               "http://localhost:21434",
-    "num_ctx":                   16384,
-
-    # API-Aera. Die Modellbelegung je Rolle steht in projekt.json; bleibt sie
-    # leer, faellt die Rolle auf 'modell'/'backend' zurueck (Ollama-Rueckfall).
+    # Die Modellbelegung je Rolle steht in projekt.json. Es gibt keinen
+    # Rueckfall mehr: Eine Rolle ohne Modell ist ein Konfigurationsfehler
+    # und wird gemeldet, nicht stillschweigend ersetzt.
     "backend_standard":          "anthropic",
     "modell_uebersetzung":       "",
     "modell_revision":           "",
@@ -99,10 +95,6 @@ STANDARD = {
          "modell_uebersetzung": "claude-fable-5"},
     ],
     "context_words":             250,
-    "temperature_uebersetzung":  0.35,
-    "temperature_revision":      0.25,
-    "temperature_stil":          0.25,
-    "temperature_korrektorat":   0.10,
     "revision_pass":             True,
 
     "lektorat_passes":           ["det", "stil", "korrektorat", "det"],
@@ -140,7 +132,6 @@ STANDARD = {
     "anrede_vorgabe":            "u=Sie, jij/je=du",
 
     "timeout_connect":           10,
-    "timeout_read":              900,       # 15 min statt 90 — Retry greift schneller
     "max_retries":               3,
 }
 
@@ -151,17 +142,14 @@ GESCHUETZT = {"ratio_min", "ratio_max", "ratio_kalibriert", "sprachpaar"}
 # Nur diese Schluessel darf ein externes Rueckspiel aendern (V4).
 AENDERBAR = {
     "chunk_words", "chunk_words_variante", "context_words",
-    "temperature_uebersetzung", "temperature_revision",
-    "temperature_stil", "temperature_korrektorat",
     "revision_pass", "lektorat_passes",
     "diminutive", "tempus", "anrede_vorgabe",
     "quotes", "eszett", "varietaet", "dash",
-    "num_ctx", "modell", "backend", "ollama_host",
     "test_words_erzaehlung", "test_words_dialog",
     "lektorat_ratio_min", "lektorat_ratio_max",
     "export_glossar", "export_bewertung", "glossar_quelle", "sheets_id",
     "rahmen_marker", "varianten", "technik_ausnahmen",
-    "timeout_connect", "timeout_read", "max_retries",
+    "timeout_connect", "max_retries",
     "backend_standard", "max_tokens_api", "timeout_read_api",
 } | {f"modell_{r}" for r in (
     "uebersetzung", "revision", "stil", "korrektorat",
@@ -456,16 +444,27 @@ def technik_schreiben(projekt_pfad, repo_pfad):
 
 
 def modell_fuer(cfg, rolle):
-    """Modellname der Rolle. Leer oder unbekannt -> 'modell' (Rueckfallpfad)."""
-    return (cfg.get(f"modell_{rolle}") or "").strip() or cfg.get(
-        "modell", STANDARD["modell"])
+    """Modellname der Rolle.
+
+    Ohne Eintrag ist Schluss: Seit dem Wegfall des Ollama-Pfads gibt es
+    kein Modell mehr, auf das sich zurueckfallen liesse. Ein stiller
+    Ersatz waere die teuerste Art, das zu bemerken — naemlich am
+    Kostenbericht."""
+    modell = (cfg.get(f"modell_{rolle}") or "").strip()
+    if not modell:
+        sys.exit(f"FEHLER: 'modell_{rolle}' ist nicht gesetzt.\n"
+                 f"  Belegung ansehen und ergaenzen: "
+                 f"python3 pipeline.py modelle")
+    return modell
 
 
 def backend_name(modell):
     for praefix, name in PRAEFIXE:
         if modell.startswith(praefix):
             return name
-    return "ollama"
+    sys.exit(f"FEHLER: zu '{modell}' gehoert kein bekannter Anbieter.\n"
+             f"  Erkannt werden Praefixe: "
+             f"{', '.join(p for p, _ in PRAEFIXE)}")
 
 
 def effort_fuer(cfg, rolle):
@@ -634,8 +633,8 @@ def kosten_je_rolle(manifest):
 class Backend:
     """Basisklasse. Ein weiterer Anbieter heisst: eine Unterklasse."""
 
-    def chat(self, cfg, system, user, temperature, num_ctx=None,
-             rolle="uebersetzung", modell="", roh=False):
+    def chat(self, cfg, system, user, rolle="uebersetzung", modell="",
+             roh=False):
         raise NotImplementedError
 
     def verfuegbare_modelle(self, cfg):
@@ -690,46 +689,6 @@ def sende(post, max_retries, schlafen=time.sleep):
     raise letzter or ApiFehler("Anfrage fehlgeschlagen")
 
 
-class OllamaBackend(Backend):
-    _think = True
-
-    def chat(self, cfg, system, user, temperature, num_ctx=None,
-             rolle="uebersetzung", modell="", roh=False):
-        host = cfg["ollama_host"]
-        timeout = (cfg["timeout_connect"], cfg["timeout_read"])
-
-        def post(mit_think):
-            p = {
-                "model": modell or cfg["modell"],
-                "messages": [{"role": "system", "content": system},
-                             {"role": "user", "content": user}],
-                "stream": False, "keep_alive": "60m",
-                "options": {"num_ctx": num_ctx or cfg["num_ctx"],
-                            "num_predict": -1, "temperature": temperature,
-                            "top_p": 1.0, "repeat_penalty": 1.0,
-                            "presence_penalty": 0.0},
-            }
-            if mit_think:
-                p["think"] = False
-            return requests.post(f"{host}/api/chat", json=p, timeout=timeout)
-
-        r = post(self._think)
-        if r.status_code == 400 and self._think:
-            OllamaBackend._think = False
-            r = post(False)
-        r.raise_for_status()
-        d = r.json()
-        if d.get("done_reason") == "length":
-            print("    WARNUNG: Ausgabe am Limit abgeschnitten.")
-        inhalt = d.get("message", {}).get("content", "")
-        return inhalt if roh else saeubern(inhalt)
-
-    def verfuegbare_modelle(self, cfg):
-        r = requests.get(f"{cfg['ollama_host']}/api/tags", timeout=10)
-        r.raise_for_status()
-        return [m["name"] for m in r.json().get("models", [])]
-
-
 class AnthropicBackend(Backend):
     """Messages-API. Zwei Eigenheiten sind Absicht, nicht Versehen:
 
@@ -776,8 +735,8 @@ class AnthropicBackend(Backend):
             print("    WARNUNG: Ausgabe am max_tokens-Limit abgeschnitten.")
         return (text if roh else saeubern(text)), usage
 
-    def chat(self, cfg, system, user, temperature, num_ctx=None,
-             rolle="uebersetzung", modell="", roh=False, werkzeuge=None):
+    def chat(self, cfg, system, user, rolle="uebersetzung", modell="",
+             roh=False, werkzeuge=None):
         schluessel = api_schluessel("anthropic")
         if not schluessel:
             sys.exit("FEHLER: ANTHROPIC_API_KEY fehlt.\n"
@@ -857,8 +816,8 @@ class GeminiBackend(Backend):
                      if weiter else None)
         return sorted(namen)
 
-    def chat(self, cfg, system, user, temperature, num_ctx=None,
-             rolle="annotation", modell="", roh=False):
+    def chat(self, cfg, system, user, rolle="annotation", modell="",
+             roh=False):
         schluessel = api_schluessel("google")
         if not schluessel:
             sys.exit("FEHLER: GEMINI_API_KEY fehlt.\n"
@@ -877,26 +836,25 @@ class GeminiBackend(Backend):
         return text
 
 
-BACKENDS = {"ollama": OllamaBackend(), "anthropic": AnthropicBackend(),
-            "google": GeminiBackend()}
+BACKENDS = {"anthropic": AnthropicBackend(), "google": GeminiBackend()}
 
 
-def backend(cfg, modell=None):
-    """Backend zum Modellnamen. Ohne Modell gilt der alte Konfigurationsweg."""
-    name = backend_name(modell) if modell else cfg.get("backend", "ollama")
-    b = BACKENDS.get(name)
+def backend(modell):
+    """Backend zum Modellnamen."""
+    b = BACKENDS.get(backend_name(modell))
     if b is None:
-        sys.exit(f"FEHLER: unbekanntes Backend '{name}'. "
+        sys.exit(f"FEHLER: kein Backend fuer '{modell}'. "
                  f"Verfuegbar: {', '.join(BACKENDS)}")
     return b
 
 
-def chat(cfg, system, user, temperature, num_ctx=None, rolle="uebersetzung",
-         roh=False, werkzeuge=None):
+def chat(cfg, system, user, rolle="uebersetzung", roh=False, werkzeuge=None):
     """Der einzige Modellaufruf des Projekts.
 
-    Die Rolle loest Modell, Backend und Effort auf. Fehlt 'modell_<rolle>',
-    greift der Ollama-Rueckfallpfad — unveraendertes Altverhalten.
+    Die Rolle loest Modell, Backend und Effort auf. Es gehen keine
+    Sampling-Parameter hinaus: claude-opus-5 hat temperature/top_p/top_k
+    entfernt und antwortet darauf mit HTTP 400, Gemini ignoriert sie. Die
+    Tiefe steuert 'effort_<rolle>'.
 
     'roh=True' schaltet saeubern() ab. Noetig, wenn die Antwort selbst
     Codebloecke enthaelt: saeubern schneidet den aeusseren Zaun ab und
@@ -904,7 +862,7 @@ def chat(cfg, system, user, temperature, num_ctx=None, rolle="uebersetzung",
     bleibt saeubern richtig — es entfernt genau die Vorreden und Zaeune,
     die ein Modell unaufgefordert um Prosa legt."""
     modell = modell_fuer(cfg, rolle)
-    b = backend(cfg, modell)
+    b = backend(modell)
     if werkzeuge and not isinstance(b, AnthropicBackend):
         # Serverseitige Werkzeuge gibt es nur auf dem Anthropic-Pfad. Lieber
         # ohne laufen als mit einer Payload, die der Anbieter ablehnt.
@@ -912,12 +870,8 @@ def chat(cfg, system, user, temperature, num_ctx=None, rolle="uebersetzung",
               f"Aufruf ohne Websuche")
         werkzeuge = None
     zusatz = {"werkzeuge": werkzeuge} if werkzeuge else {}
-    return b.chat(cfg, system, user, temperature, num_ctx=num_ctx,
-                  rolle=rolle, modell=modell, roh=roh, **zusatz)
-
-
-def modelle_vorhanden(cfg):
-    return backend(cfg).verfuegbare_modelle(cfg)
+    return b.chat(cfg, system, user, rolle=rolle, modell=modell, roh=roh,
+                  **zusatz)
 
 
 def aktive_rollen(cfg):

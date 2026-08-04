@@ -320,6 +320,8 @@ Für den Sheets-Zugriff braucht es dann ein Dienstkonto in
 Referenz-JSONs werden direkt gepflegt — der Rückfallpfad ist vollwertig und
 wird nicht entfernt.
 
-Der Ollama-Rückfall existiert weiter: Bleibt `modell_<rolle>` leer, greift
-`backend`/`modell` aus `projekt.json`. Gedacht ist er für den Fall, dass eine
-API ausfällt, nicht für den Normalbetrieb.
+**Einen Betrieb ohne API gibt es nicht mehr.** Der Ollama-Rückfall ist im
+August 2026 entfernt worden — er wurde nie ausgeführt und konnte von keinem
+Selbsttest geprüft werden. Bleibt `modell_<rolle>` leer, bricht der Schritt
+jetzt mit einer Meldung ab, statt still auf ein anderes Modell auszuweichen.
+Begründung in `ENTSCHEIDUNGEN.md`.

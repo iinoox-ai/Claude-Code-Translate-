@@ -182,7 +182,7 @@ def blindbewertung(cfg, quelle, a, b, n=4, label="", rolle="judge",
                 f"=== UEBERSETZUNG A ===\n{A}\n\n=== UEBERSETZUNG B ===\n{B}")
         try:
             d = G.json_aus_antwort(
-                G.chat(cfg, BLIND_SYSTEM, user, 0.2, rolle=rolle))
+                G.chat(cfg, BLIND_SYSTEM, user, rolle=rolle))
             if not d:
                 raise RuntimeError("kein JSON")
             besser = d.get("besser")

@@ -97,7 +97,7 @@ def recherchieren(cfg, z):
     frage = (f"Zitat:\n{z['text']}\n\n"
              f"Attributionszeile im Buch: {z.get('attribution', '')}\n\n"
              f"Bestimme die Sprache und liefere den Befund als JSON.")
-    antwort = G.chat(cfg, SYSTEM, frage, 0.0, rolle="zitat", roh=True,
+    antwort = G.chat(cfg, SYSTEM, frage, rolle="zitat", roh=True,
                      werkzeuge=WERKZEUGE)
     return antwort_lesen(antwort)
 

@@ -291,7 +291,7 @@ def lokal_glossar(cfg, text, kand, args):
         for versuch in (1, 2):
             try:
                 d = G.json_aus_antwort(
-                    G.chat(cfg, SYS, user, 0.2, rolle="vorbereitung"))
+                    G.chat(cfg, SYS, user, rolle="vorbereitung"))
                 if not d:
                     raise RuntimeError("kein JSON")
                 eintraege.update(d)

@@ -620,9 +620,9 @@ HTTP 400 — dieselbe Eigenschaft, die für Gemini schon dokumentiert war. Damit
 schrumpfen die vier verstellbaren Parameter im API-Betrieb auf zwei, und die
 Steuerung der Denktiefe wandert vollständig zu `effort`.
 
-Die Temperatur-Schlüssel bleiben trotzdem in der Konfiguration. Sie sind kein
-toter Code, sondern der Ollama-Rückfallpfad, und wer sie entfernt, nimmt dem
-VPS-Betrieb seine einzige Stellschraube für die Streuung.
+Die Temperatur-Schlüssel blieben zunächst in der Konfiguration, weil sie den
+Ollama-Rückfallpfad bedienten. → Mit dem Rückzug dieses Pfads (August 2026)
+sind sie entfallen; siehe „Ollama-Rückfallpfad zurückgezogen".
 
 Der Widerspruch wurde gemeldet und vor der Umsetzung entschieden, nicht still
 aufgelöst.
@@ -771,6 +771,57 @@ Dialogvergleich ist seit August 2026 eingebaut, lief aber für diese Messung
 noch nicht mit. Bei NL→DE liegt die Schwäche im Dialog — wer 1600 Wörter
 ernsthaft erwägt, misst dort nach.
 
+## Ollama-Rückfallpfad zurückgezogen
+
+**Entschieden (August 2026):** `OllamaBackend`, die Schlüssel `backend`,
+`modell`, `ollama_host`, `num_ctx`, `timeout_read` und die vier
+`temperature_*` sind entfernt. `chat()` nimmt keine Sampling-Parameter mehr
+entgegen. Eine Rolle ohne `modell_<rolle>` bricht ab, statt still zu ersetzen.
+
+Der Pfad war als Versicherung gedacht: identischer Code auf einem nackten VPS,
+falls Colab oder die APIs ausfallen. Nach einem Jahr ist die Bilanz eine
+andere. **Er wurde nie ausgeführt und nie geprüft** — kein Selbsttestfall
+konnte ihn abdecken, weil er einen laufenden Ollama-Server braucht. Ein
+Rückfallpfad, den niemand prüft, ist keine Versicherung, sondern eine
+Behauptung.
+
+Dazu kam, was er kostete: acht Konfigurationsschlüssel, die in `projekt.json`
+ganz oben standen und einem Leser als Erstes einen Mistral-Namen auf einem
+lokalen Port zeigten — während in Wahrheit Opus 5 lief. Ein Parameter
+(`temperature`) in jeder der zehn `chat()`-Aufrufstellen, der auf beiden
+tatsächlich genutzten APIs wirkungslos ist. Zwei Preflight-Prüfungen für eine
+GPU, die es nicht gibt.
+
+**Der stille Ersatz war das eigentliche Argument.** `modell_fuer()` fiel bei
+fehlendem Rolleneintrag auf `cfg["modell"]` zurück. Eine vergessene Zeile in
+`projekt.json` hätte damit nicht zu einem Abbruch geführt, sondern zu einem
+Lauf gegen ein anderes Modell — bemerkbar erst am Kostenbericht. Genau diese
+Fehlerklasse hat bei der Auswertung des 1919-Laufs schon einmal zwei Stunden
+gekostet.
+
+Der VPS-Betrieb bleibt möglich: derselbe Code, dieselben API-Schlüssel als
+Umgebungsvariablen, ohne Colab. Was entfällt, ist der Betrieb *ohne* API.
+
+## Ein Paket darf installiert werden
+
+**Entschieden (August 2026):** Die Regel „Kein `pip install` im Normalbetrieb"
+gilt weiterhin — mit genau einer benannten Ausnahme: `anthropic`, die SDK des
+Anbieters, auf Hauptversion festgelegt, in der Einrichtungszelle des Runners.
+
+Die Regel entstand gegen litellm, und diese Ablehnung bleibt bestehen: eine
+große, schnell drehende Abhängigkeit mit eigenem Abhängigkeitsbaum, bei der
+jeder Start die Hoffnung mitbringt, dass die aktuelle Version sich wie erwartet
+verhält. Die Hersteller-SDK ist etwas anderes — ein Paket, vom Anbieter
+gepflegt, mit dem die API selbst dokumentiert wird.
+
+Was sie bringt, ist nicht Bequemlichkeit: Streaming ohne handgeschriebenen
+SSE-Parser, exakte Tokenzählung statt eines Schätzfaktors, strukturierte
+Ausgaben statt fünf handgeschriebener JSON-Parser, und den Stapel-Adapter.
+
+Die Bedingung, um die es der Regel eigentlich ging, bleibt gewahrt: Fehlt der
+Import, läuft der `requests`-Pfad unverändert weiter. Ohne jede Installation
+lauffähig zu sein ist damit weiter gegeben.
+
 ---
 
 ## Verworfen — und warum
@@ -779,6 +830,10 @@ ernsthaft erwägt, misst dort nach.
 sprach dafür, die Entscheidung fiel trotzdem für lokales Hosting. Beim Wechsel
 gilt: Die `chat()`-Abstraktion ist dafür gebaut, der Eingriff ist klein.
 → Juli 2026 umgesetzt; siehe „API-Backends statt lokalem Hosting".
+
+**Ollama als Rückfallpfad.** → August 2026 zurückgezogen; siehe oben. Die
+Begründung von damals (Vertraulichkeit, Unabhängigkeit von der API) war
+bereits mit `export_glossar: true` hinfällig geworden.
 
 **Parallelisierung der Lektoratspässe.** Der Vorschlag war, als Kontext den
 *unbearbeiteten* Vorgänger-Chunk zu nehmen, weil der von Anfang an vorliegt.
