@@ -424,6 +424,45 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Kostenbuchung nicht pruefbar", repr(e))
 
+    # --- Aktive Rollen gegen die Wirklichkeit -------------------------
+    # 'aktive_rollen' ist die Grundlage der Kostenschaetzung und des Pings
+    # vor dem Lauf. Eine dort fehlende Rolle heisst: kostenlos und
+    # ungeprueft. Genau so sind 'zitat' und 'annotation' durchgerutscht,
+    # nachdem ihre Schritte laengst gebaut waren.
+    try:
+        import glob as _glob
+        fehler = []
+        gerufen = set()
+        code = os.path.dirname(os.path.abspath(__file__))
+        for pfad in _glob.glob(os.path.join(code, "*.py")):
+            if os.path.basename(pfad) in ("gemeinsam.py", "preflight.py",
+                                          "verifikation.py"):
+                continue
+            quelle = open(pfad, encoding="utf-8").read()
+            for m in re.finditer(r'rolle=["\'](\w+)["\']', quelle):
+                if m.group(1) in G.ROLLEN:
+                    gerufen.add(m.group(1))
+        # Gefunden werden nur woertlich hingeschriebene Rollen; 'stil' und
+        # 'korrektorat' kommen in lektorat.py aus einer Variablen. Das ist
+        # kein Loch, sondern die Grenze: Die Luecken lagen bisher immer
+        # dort, wo ein neuer Schritt seine Rolle woertlich nannte.
+        aktiv = set(G.aktive_rollen(G.lade_config(pflicht=False)))
+        fehlt = gerufen - aktiv
+        if fehlt:
+            fehler.append(f"wird gerufen, gilt aber als inaktiv: "
+                          f"{', '.join(sorted(fehlt))}")
+        # Gegenprobe: keine erfundene Rolle in der Liste.
+        erfunden = aktiv - set(G.ROLLEN)
+        if erfunden:
+            fehler.append(f"unbekannte Rolle: {', '.join(sorted(erfunden))}")
+        if fehler:
+            b.add("FEHLER", "Aktive Rollen unvollstaendig", "; ".join(fehler))
+        else:
+            b.add("OK", f"Aktive Rollen decken alle {len(gerufen)} wirklich "
+                        f"gerufenen Rollen ab")
+    except Exception as e:
+        b.add("FEHLER", "Aktive Rollen nicht pruefbar", repr(e))
+
     # --- Paket 9: der Ablaufplan muss zur Schrittliste passen ----------
     # Ein Plan, der einen Schritt nicht kennt, schickt den Leser ins
     # Leere — und das faellt erst auf, wenn jemand danach arbeitet.
@@ -1531,17 +1570,107 @@ def pruefe_api(cfg, b, backends, ping):
     return ok
 
 
-def pruefe_kosten(cfg, b, woerter):
-    """Schaetzung vor dem Volllauf. Lieber zu hoch als zu niedrig."""
+# Rollen, die das Buch chunkweise durcharbeiten: je Chunk ein Aufruf mit
+# demselben System-Prompt. Alle anderen rufen einmal oder wenige Male.
+CHUNKROLLEN = ("uebersetzung", "revision", "stil", "korrektorat")
+
+# Gemessen am Lauf 1919 (Opus 5, effort 'hoch'): 4110 Ausgabetoken je Chunk
+# bei rund 1450 Token deutschem Text. Knapp zwei Drittel der Ausgabe sind
+# Denkschritte — und die stehen auf derselben Rechnung wie der Text. Wer
+# das weglaesst, schaetzt die Ausgabe um den Faktor drei zu niedrig.
+DENKFAKTOR = 2.8
+
+# Referenzbloecke und Rueckschau im User-Prompt, wenn sich der Kopf nicht
+# bauen laesst (die JSONs entstehen erst in der Vorbereitung). Gemessen:
+# rund 2100 Token je Chunk bei 800 Quellwoertern.
+KOPF_TOKEN = 2100
+
+
+def _kosten_grundlagen(cfg, text):
+    """(Chunkzahl, System-Token je Rolle, Token eines Chunks, gezaehlt?).
+
+    Wo der Anbieter zaehlt, wird nicht geschaetzt: 'count_tokens' ist
+    kostenlos und kennt den Tokenizer, den das Modell wirklich benutzt."""
+    import uebersetzung as U
+    import lektorat as L
+
+    chunks = G.chunks_bauen(G.absaetze(text), cfg["chunk_words"])
+    n = max(1, len(chunks))
+    probe = chunks[0][0] if chunks else text[:4000]
+
+    p_ueb, p_rev = U.prompts(cfg)
+    p_stil, p_korr = L.prompts(cfg)
+    system = {"uebersetzung": p_ueb, "revision": p_rev,
+              "stil": p_stil, "korrektorat": p_korr}
+
+    faktor = G.token_faktor(G.lade_json(G.MANIFEST, still=True))
+    gezaehlt = True
+
+    # Getrennt zaehlen statt subtrahieren: einmal der System-Prompt mit
+    # einem Alibi-Nutzertext, einmal der Chunk ohne System-Prompt. Die
+    # Handvoll Token Nachrichtenruestung faellt gegen 800 Woerter nicht ins
+    # Gewicht — eine Differenz aus zwei Schaetzungen dagegen schon.
+    z = G.tokens_zaehlen(cfg, "uebersetzung", "-", probe)
+    if z is None:
+        gezaehlt, chunk_token = False, len(probe.split()) * faktor
+    else:
+        chunk_token = z
+
+    st = {}
+    for rolle, s in system.items():
+        z = G.tokens_zaehlen(cfg, rolle, s, "-")
+        if z is None:
+            gezaehlt = False
+            st[rolle] = len(s.split()) * faktor
+        else:
+            st[rolle] = z
+    return n, st, chunk_token, gezaehlt, faktor
+
+
+def pruefe_kosten(cfg, b, text):
+    """Schaetzung vor dem Volllauf. Lieber zu hoch als zu niedrig.
+
+    Drei Dinge, die die frueheren Schaetzungen zu niedrig gemacht haben und
+    hier deshalb einzeln stehen: Der System-Prompt geht in JEDEN Chunk (er
+    ist zwischengespeichert, aber nicht kostenlos), die Denkschritte machen
+    den groesseren Teil der Ausgabe aus, und die Rollen 'zitat' und
+    'annotation' tauchten gar nicht auf."""
     b.abschnitt("Kostenschaetzung")
-    faktor = G.token_faktor()
-    b.add("INFO", "Annahme", f"{faktor} Token je Quellwort (konservativ; "
-                             f"wird nach dem ersten Lauf an der gemessenen "
-                             f"Usage kalibriert)")
-    # Nicht jede Rolle sieht das ganze Buch: Judge und Vorbereitung arbeiten
-    # am Testauszug beziehungsweise an Konkordanzen, nicht am Volltext.
-    auszug = cfg["test_words_erzaehlung"] + cfg["test_words_dialog"]
-    umfang = {"judge": auszug, "vorbereitung": min(woerter, 20000)}
+    woerter = len(text.split())
+    try:
+        n, system_token, chunk_token, gezaehlt, faktor = \
+            _kosten_grundlagen(cfg, text)
+    except Exception as e:
+        b.add("WARN", "Kostenschaetzung nicht moeglich", repr(e))
+        return
+
+    b.add("INFO", "Grundlage",
+          f"{n} Chunks à {cfg['chunk_words']} Woerter, "
+          + ("Tokenzahlen beim Anbieter gezaehlt"
+             if gezaehlt else f"{faktor} Token je Wort geschaetzt "
+                              f"(kein Schluessel oder Zaehler nicht "
+                              f"erreichbar)"))
+    b.add("INFO", "Denkanteil",
+          f"Ausgabe = {DENKFAKTOR}× Text. Gemessen am Lauf 1919 unter "
+          f"Opus 5 bei effort 'hoch'; fuer andere Stufen ist der Wert "
+          f"nicht gemessen.")
+
+    # Nicht jede Rolle sieht das ganze Buch, und bei keiner von ihnen haengt
+    # die Ausgabelaenge an der Eingabelaenge: Ein Glossar aus 20 000 Woertern
+    # Analysepaket ist zwei Seiten lang, nicht zwanzig. Deshalb stehen
+    # Eingabe und Ausgabe hier getrennt.
+    # (Aufrufe, Kopf im System-Prompt, Eingabe je Aufruf, Ausgabe je Aufruf)
+    # — alles in Quellwoertern, abgelesen am Lauf 1919 und aufgerundet.
+    einmalig = {
+        # Acht Lieferungen plus Anweisungsentwurf; die Befunde stehen im
+        # System-Prompt und sind ab dem zweiten Aufruf zwischengespeichert.
+        "vorbereitung": (9, min(woerter, 20000), 400, 1500),
+        "zitat":        (1, 0, min(woerter, 4000), 1500),
+        # Je Chunk eine Begruendungszeile, dazu das Screening in Bloecken.
+        "annotation":   (n, 0, 2 * cfg["chunk_words"], 300),
+        # Vier Absatzpaare je Auszug, zwei Auszuege.
+        "judge":        (8, 0, 800, 250),
+    }
 
     summe, unsicher, ohne_tarif = 0.0, False, []
     for rolle in G.aktive_rollen(cfg):
@@ -1550,21 +1679,45 @@ def pruefe_kosten(cfg, b, woerter):
         if not t:
             ohne_tarif.append(modell)
             continue
-        n = umfang.get(rolle, woerter)
-        # Je Pass geht der Quelltext einmal rein und einmal (bearbeitet) raus;
-        # Kontextrueckschau und Prompt-Kopf schlagen grob als Aufschlag zu.
-        ein = n * faktor * 1.4
-        aus = n * faktor
-        d = (ein * t["ein"] + aus * t["aus"]) / 1e6
+        if rolle in CHUNKROLLEN:
+            s = system_token.get(rolle, 0)
+            # Der System-Prompt wird einmal geschrieben und n−1 mal gelesen.
+            ein = (chunk_token + KOPF_TOKEN + 2 * cfg["context_words"] * faktor) * n
+            schreiben, lesen = s, s * (n - 1)
+            aus = chunk_token * n * DENKFAKTOR
+            zusatz = f"{n} Chunks, System-Prompt {s:,.0f} Token"
+        else:
+            rufe, kopf, w_ein, w_aus = einmalig[rolle]
+            ein = rufe * w_ein * faktor
+            schreiben = kopf * faktor
+            lesen = kopf * faktor * max(0, rufe - 1)
+            aus = rufe * w_aus * faktor * DENKFAKTOR
+            zusatz = (f"{rufe} Aufrufe à rund {w_ein} Woerter ein, "
+                      f"{w_aus} aus")
+        d = G.kosten_dollar({"ein": ein, "aus": aus, "cache_lesen": lesen,
+                             "cache_schreiben": schreiben,
+                             "cache_schreiben_1h": schreiben
+                             if G.cache_ttl(cfg) == "1h" else 0}, t)
         summe += d
         unsicher = unsicher or not t["geprueft"]
-        b.add("INFO", f"  {rolle}", f"{modell}: rund {d:.2f} $ "
-                                    f"({n} Woerter)")
+        b.add("INFO", f"  {rolle}", f"{modell}: rund {d:.2f} $  ({zusatz})")
+
     if ohne_tarif:
         b.add("WARN", "Kein hinterlegter Tarif",
               f"{', '.join(sorted(set(ohne_tarif)))} — Schaetzung "
               f"unvollstaendig. Tarif in gemeinsam.TARIFE ergaenzen.")
-    b.add("INFO", "Summe (grob)", f"rund {summe:.2f} $ fuer {woerter} Woerter")
+    b.add("INFO", "Summe (grob)",
+          f"rund {summe:.2f} $ fuer {woerter} Woerter "
+          f"({summe / max(1, woerter) * 1000:.2f} $ je 1000 Woerter)")
+    # Die Richtung des Fehlers gehoert dazu, sonst liest jemand die Zahl
+    # als Punktschaetzung. Nachgerechnet an 1919: die Schaetzung lag rund
+    # 20 % ueber der gemessenen Uebersetzung und Revision, im Lektorat
+    # mehr, weil dort weder Denkanteil noch Ausgabelaenge gemessen sind.
+    b.add("INFO", "Richtung des Fehlers",
+          "Die Schaetzung faellt bewusst zu hoch aus. Am Buch 1919 lag "
+          "sie fuer Uebersetzung und Revision rund 20 % ueber dem "
+          "gemessenen Wert, im Lektorat deutlicher. Was der Lauf "
+          "wirklich kostet, steht danach in 'pipeline.py status'.")
     if unsicher:
         b.add("WARN", "Teil der Tarife ist nicht verifiziert",
               "Google-Tarife stehen mit Datum 31.07.2026 vorgemerkt und "
@@ -1863,7 +2016,7 @@ def main():
         text = pruefe_text(cfg, b)
         if text:
             finde_zitate(text, b)
-            pruefe_kosten(cfg, b, len(text.split()))
+            pruefe_kosten(cfg, b, text)
 
     G.speichere_config(cfg)
     ok = b.schreiben(REPORT)

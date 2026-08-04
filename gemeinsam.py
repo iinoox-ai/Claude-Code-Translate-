@@ -735,6 +735,15 @@ class Backend:
              roh=False):
         raise NotImplementedError
 
+    def zaehle_tokens(self, cfg, system, user, modell=""):
+        """Exakte Eingabetoken beim Anbieter, oder None.
+
+        Kostenlos bei beiden Anbietern und unabhaengig vom Tokenizer, den
+        das Modell gerade benutzt. 'None' heisst: nicht ermittelbar (kein
+        Schluessel, kein Netz, Endpunkt geaendert) — dann greift die
+        Schaetzung, statt dass ein Bericht ausfaellt."""
+        return None
+
     def verfuegbare_modelle(self, cfg):
         return []
 
@@ -874,6 +883,27 @@ class AnthropicBackend(Backend):
             print("    WARNUNG: Ausgabe am max_tokens-Limit abgeschnitten.")
         return (text if roh else saeubern(text)), usage
 
+    ZAEHLER = "https://api.anthropic.com/v1/messages/count_tokens"
+
+    def zaehle_tokens(self, cfg, system, user, modell=""):
+        schluessel = api_schluessel("anthropic")
+        if not schluessel:
+            return None
+        try:
+            r = requests.post(
+                self.ZAEHLER,
+                json={"model": modell,
+                      "system": [{"type": "text", "text": system}],
+                      "messages": [{"role": "user", "content": user}]},
+                headers={"x-api-key": schluessel,
+                         "anthropic-version": self.VERSION,
+                         "content-type": "application/json"},
+                timeout=(cfg.get("timeout_connect", 10), 60))
+            return int(r.json()["input_tokens"]) if r.status_code == 200 \
+                else None
+        except Exception:
+            return None
+
     def chat(self, cfg, system, user, rolle="uebersetzung", modell="",
              roh=False, werkzeuge=None):
         schluessel = api_schluessel("anthropic")
@@ -972,6 +1002,22 @@ class GeminiBackend(Backend):
                      if weiter else None)
         return sorted(namen)
 
+    def zaehle_tokens(self, cfg, system, user, modell=""):
+        schluessel = api_schluessel("google")
+        if not schluessel:
+            return None
+        try:
+            r = requests.post(
+                f"{self.BASIS}/{modell}:countTokens",
+                json=self.payload(cfg, system, user, "annotation", modell),
+                headers={"x-goog-api-key": schluessel,
+                         "content-type": "application/json"},
+                timeout=(cfg.get("timeout_connect", 10), 60))
+            return int(r.json()["totalTokens"]) if r.status_code == 200 \
+                else None
+        except Exception:
+            return None
+
     def chat(self, cfg, system, user, rolle="annotation", modell="",
              roh=False):
         schluessel = api_schluessel("google")
@@ -1030,21 +1076,39 @@ def chat(cfg, system, user, rolle="uebersetzung", roh=False, werkzeuge=None):
                   **zusatz)
 
 
+def tokens_zaehlen(cfg, rolle, system, user):
+    """Exakte Eingabetoken fuer diese Rolle, oder None.
+
+    Der Schaetzfaktor TOKEN_JE_WORT war bewusst hoch gesetzt, weil eine zu
+    niedrige Schaetzung vor einem fuenfstuendigen Lauf der teurere Fehler
+    ist. Wo der Anbieter zaehlt, wird nicht mehr geschaetzt."""
+    modell = modell_fuer(cfg, rolle)
+    return backend(modell).zaehle_tokens(cfg, system, user, modell)
+
+
 def aktive_rollen(cfg):
     """Rollen, die dieser Lauf tatsaechlich aufruft.
 
-    'annotation' und 'vergleich' gehoeren zu spaeteren Paketen und rufen
-    noch kein Modell — sie stehen deshalb nicht drin."""
+    Die Liste ist die Grundlage der Kostenschaetzung und des Pings vor dem
+    Lauf. Eine fehlende Rolle heisst dort: kostenlos und ungeprueft — und
+    genau so sind 'zitat' und 'annotation' durchgerutscht, nachdem ihre
+    Schritte gebaut waren. Wer einen modellrufenden Schritt ergaenzt,
+    ergaenzt ihn hier."""
     rollen = ["uebersetzung"]
     if cfg.get("revision_pass"):
         rollen.append("revision")
     for stufe in cfg.get("lektorat_passes", []):
         if stufe in ("stil", "korrektorat") and stufe not in rollen:
             rollen.append(stufe)
-    if cfg.get("glossar_quelle") == "lokal":
-        rollen.append("vorbereitung")
+    # vorbereitung.py ist ein fester Pipelineschritt; konkordanz.py ruft
+    # dieselbe Rolle zusaetzlich, wenn das Glossar lokal entsteht.
+    rollen.append("vorbereitung")
+    rollen.append("zitat")            # zitatrecherche.py
+    rollen.append("annotation")       # annotation.py: Begruendungen, Screening
     if cfg.get("export_bewertung"):
         rollen.append("judge")
+    # 'vergleich' bleibt draussen: konfiguriert, aber von keinem Schritt
+    # gerufen. Der Ping in verifikation.py prueft es trotzdem mit.
     return rollen
 
 
