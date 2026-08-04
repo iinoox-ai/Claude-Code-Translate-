@@ -207,8 +207,7 @@ def pruefe_echtlauf(e, cfg, anbieter_rollen, tragen):
                    f"{type(ex).__name__}: {ex}")
             continue
         nachher = _usage_stand()
-        d = {k: nachher.get(k, 0) - vorher.get(k, 0)
-             for k in ("ein", "aus", "cache_lesen", "cache_schreiben")}
+        d = {k: nachher.get(k, 0) - vorher.get(k, 0) for k in G.USAGE_FELDER}
         if not text.strip():
             e.fehl(f"{modell}: leere Antwort")
             continue

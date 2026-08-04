@@ -4,6 +4,7 @@
   "_hinweis_varianten": "Vergleichsvarianten des Testlaufs. Je Eintrag ein Name und, was abweicht: chunk_words und/oder modell_uebersetzung. Der Vergleich laeuft bei jedem Buch mit, weil die beste Chunkgroesse vom Text abhaengt und Modelle sich weiterentwickeln. Eine Modellvariante (z.B. {\"name\": \"C\", \"chunk_words\": 800, \"modell_uebersetzung\": \"claude-fable-5\"}) kostet ein Mehrfaches und wird bewusst hinzugefuegt, wenn ein neues Modell zu pruefen ist. Leere Liste = kein Vergleich.",
   "anrede_vorgabe": "u=Sie, jij/je=du",
   "backend_standard": "anthropic",
+  "cache_ttl": "1h",
   "chunk_words": 800,
   "chunk_words_variante": 1200,
   "context_words": 250,

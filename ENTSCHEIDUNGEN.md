@@ -863,6 +863,44 @@ verschiedenen Modellen müssen zwei Zeilen ergeben, nicht eine.
 
 ---
 
+## Cache-Lebensdauer eine Stunde — als Versicherung, nicht als Ersparnis
+
+**Entschieden (August 2026).** `cache_ttl: "1h"` in `projekt.json`.
+
+Zuerst die Zahl, die *gegen* die naheliegende Begründung spricht. Die
+Vermutung war, die Trefferquote des Prompt-Caches sei niedrig und eine längere
+Lebensdauer bringe Geld. Der Lauf 1919 sagt etwas anderes:
+
+| Rolle | gelesen | geschrieben | Trefferquote |
+|---|---|---|---|
+| `uebersetzung` | 901 965 | 36 131 | 96 % |
+| `revision` | 677 380 | 28 001 | 96 % |
+
+Bei 154 beziehungsweise 147 Aufrufen sind das rund sechs Neuschreibungen je
+Rolle — genau die Zahl der Colab-Sitzungen, in denen das Buch entstanden ist.
+Der Cache ist also nicht abgelaufen, er wurde kalt gestartet. Die Ersparnis
+liegt bereits bei 13,10 $, rund 16 % der Rechnung. **Als Kostenmaßnahme ist
+die Stunde damit verworfen.**
+
+Was bleibt, ist der Grund, aus dem sie trotzdem gesetzt wird: Sie ist eine
+Versicherung gegen alles, was den Abstand zwischen zwei Chunks über fünf
+Minuten treibt — größere Chunks, ein langsamer Durchgang, ein Blick in den
+Zwischenbericht, eine Wartezeit im Stapelbetrieb. Tritt das nicht ein, kostet
+sie fast nichts; tritt es ein, spart sie das Neuschreiben des ganzen Präfixes.
+
+Der Preis ist bekannt und wird jetzt auch richtig abgerechnet: Schreiben mit
+einer Stunde Lebensdauer kostet das Doppelte des Eingabepreises statt des
+1,25-fachen. Die Antwort liefert die Aufschlüsselung (`cache_creation`), und
+`kosten_dollar` rechnet beide Anteile getrennt — geschätzt wird nichts.
+
+**Sie darf keinen Lauf abbrechen.** Lehnt der Anbieter die Lebensdauer ab
+(HTTP 400 mit `ttl` in der Meldung), meldet der Lauf das einmal und läuft ohne
+sie weiter. Die Erkennung ist bewusst eng gefasst: Ein zu weiter Fang würde
+echte Payloadfehler verschlucken und still ein zweites Mal Geld ausgeben. Der
+Selbsttest hält drei Gegenproben dagegen (`temperature`-Fehler, 429, 500).
+
+---
+
 ## Verworfen — und warum
 
 **API-Frontier-Modell als Primärübersetzer** (zunächst). Die Kostenrechnung

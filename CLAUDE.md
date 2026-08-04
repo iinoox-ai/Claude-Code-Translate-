@@ -61,7 +61,12 @@ Zwei Eigenheiten, die nicht „repariert" werden dürfen:
   `gemeinsam.EFFORT`).
 - **Der System-Prompt trägt einen Cache-Marker** (Anthropic
   `cache_control`). Wer Prompt-Bausteine umsortiert, zerstört unbemerkt die
-  Cache-Trefferquote — identische Präfixe sind Geld.
+  Cache-Trefferquote — identische Präfixe sind Geld. Die Lebensdauer steht in
+  `cache_ttl` (Standard `1h`) und ist eine Versicherung gegen längere Pausen
+  zwischen zwei Chunks, keine Kostenmaßnahme: Die gemessene Trefferquote lag
+  bereits bei 96 %. Schreiben mit einer Stunde kostet doppelt; `kosten_dollar`
+  rechnet die Anteile getrennt. Lehnt der Anbieter die Lebensdauer ab, läuft
+  der Lauf ohne sie weiter, statt abzubrechen.
 
 Judge-Gewichtung in `bewertung.py`: Diff-Statistik → Gemini-3.1-Pro-Urteil →
 Opus-Selbstcheck (nachrangig wegen Selbstpräferenz). Reihenfolge ist
@@ -170,8 +175,12 @@ dritten Editierpass — und jeder Pass glättet.
 
 ## Kosten sind Teil des Ergebnisses
 
-Jeder API-Aufruf meldet seine Token-Usage; `manifest.json` summiert je
-Rolle, der Preflight schätzt vor dem Volllauf. Die Preise hält `tarife.py`
+Jeder API-Aufruf meldet seine Token-Usage; `manifest.json` bucht je
+**Lauf, Rolle und Modell** — nicht je Rolle allein, sonst etikettiert ein
+Testlauf mit anderem Modell die ganze Rolle um (das hat den Lauf 1919 um 57 %
+zu teuer ausgewiesen). Testläufe erscheinen getrennt vom Buchpreis. Der
+Preis kommt aus genau einer Formel (`gemeinsam.kosten_dollar`); der Preflight
+schätzt vor dem Volllauf. Die Preise hält `tarife.py`
 gegen die Preisseiten — übernommen wird nur ein eindeutiges Paar, sonst bleibt
 der hinterlegte Wert (Begründung in `ENTSCHEIDUNGEN.md`). Neue modellrufende Schritte
 ohne Usage-Erfassung gelten als unfertig.

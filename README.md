@@ -209,6 +209,13 @@ Zwei Eigenheiten, die nicht „repariert" werden dürfen:
 - **Der System-Prompt trägt einen Cache-Marker.** Er ist über alle Chunks
   byteweise identisch. Wer Bausteine umsortiert, zerstört die Trefferquote
   unbemerkt — identische Präfixe sind Geld.
+- **Die Cache-Lebensdauer (`cache_ttl`, Standard `1h`) ist eine
+  Versicherung.** Sie hält das Präfix über eine Pause zwischen zwei Chunks
+  hinweg. Als Sparmaßnahme taugt sie nicht: Die gemessene Trefferquote lag
+  schon bei 96 %. Schreiben mit einer Stunde kostet doppelt statt des
+  1,25-fachen; abgerechnet wird nach der Aufschlüsselung aus der Antwort.
+  Lehnt der Anbieter sie ab, meldet der Lauf das einmal und geht ohne sie
+  weiter.
 
 **Was nicht parallelisierbar ist:** Für den Übersetzungspass hängt Chunk *n*
 an der Übersetzung von *n−1*. Parallel geht nur, wer auf die Rückschau

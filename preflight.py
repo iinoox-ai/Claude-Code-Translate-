@@ -1216,13 +1216,76 @@ def selbsttest_backends(b):
             fehler.append("System-Prompt ist keine Blockliste")
         elif system[-1].get("cache_control", {}).get("type") != "ephemeral":
             fehler.append("Cache-Marker fehlt auf dem letzten System-Block")
+
+        # Cache-Lebensdauer: gesetzt wenn konfiguriert, weg wenn nicht.
+        # Ein 'ttl' im Payload, das keiner bestellt hat, kostet beim
+        # Schreiben doppelt — das faellt sonst nur auf der Rechnung auf.
+        marker = (system or [{}])[-1].get("cache_control", {})
+        if marker.get("ttl") != "1h":
+            fehler.append(f"cache_ttl '1h' kommt nicht im Payload an: "
+                          f"{marker.get('ttl')!r}")
+        ohne = dict(cfg, cache_ttl="")
+        m2 = G.AnthropicBackend().payload(ohne, "S", "U", "uebersetzung",
+                                          "claude-opus-5")
+        if "ttl" in m2["system"][-1].get("cache_control", {}):
+            fehler.append("leeres cache_ttl setzt trotzdem eine Lebensdauer")
+
         if fehler:
             b.add("FEHLER", "Anthropic-Payload fehlerhaft", "; ".join(fehler))
         else:
-            b.add("OK", "Anthropic-Payload: Cache-Marker und Effort gesetzt, "
-                        "keine Sampling-Parameter")
+            b.add("OK", "Anthropic-Payload: Cache-Marker mit Lebensdauer und "
+                        "Effort gesetzt, keine Sampling-Parameter")
     except Exception as e:
         b.add("FEHLER", "Anthropic-Payload wirft Ausnahme", repr(e))
+
+    # --- Cache-Lebensdauer: Preis und Rueckfall -------------------------
+    # Sie ist eine Versicherung, kein Sparposten. Zwei Dinge muessen
+    # stimmen: Sie darf einen Lauf nicht abbrechen, und sie muss richtig
+    # bepreist werden — eine Stunde kostet beim Schreiben doppelt.
+    try:
+        fehler = []
+        if not G.ttl_abgelehnt(G.ApiFehler(
+                "HTTP 400: {'error': {'message': 'ttl: unsupported value'}}")):
+            fehler.append("Ablehnung der Lebensdauer wird nicht erkannt")
+        # Gegenproben: kein zweiter, bezahlter Versuch bei echten Fehlern.
+        for text in ("HTTP 400: temperature is not supported",
+                     "HTTP 429: rate limit, ttl exceeded",
+                     "HTTP 500: interner Fehler"):
+            if G.ttl_abgelehnt(G.ApiFehler(text)):
+                fehler.append(f"faengt zu weit: {text[:24]}")
+
+        t = G.tarif("claude-opus-5")
+        lang = G.kosten_dollar({"cache_schreiben": 1000,
+                                "cache_schreiben_1h": 1000}, t)
+        kurz = G.kosten_dollar({"cache_schreiben": 1000}, t)
+        if abs(lang - 1000 * t["ein"] * 2.0 / 1e6) > 1e-12:
+            fehler.append(f"Stunden-Cache falsch bepreist: {lang}")
+        if abs(kurz - 1000 * t["ein"] * 1.25 / 1e6) > 1e-12:
+            fehler.append(f"Fuenf-Minuten-Cache falsch bepreist: {kurz}")
+        # Gemischt: der Rest der Gesamtzahl zaehlt als kurzlebig.
+        gemischt = G.kosten_dollar({"cache_schreiben": 1000,
+                                    "cache_schreiben_1h": 400}, t)
+        soll = (400 * 2.0 + 600 * 1.25) * t["ein"] / 1e6
+        if abs(gemischt - soll) > 1e-12:
+            fehler.append(f"Mischung falsch bepreist: {gemischt} statt {soll}")
+
+        # Die Aufschluesselung muss aus der Antwort kommen, nicht geraten.
+        _, u = G.AnthropicBackend().antwort_lesen(
+            {"content": [{"type": "text", "text": "x"}],
+             "usage": {"input_tokens": 1, "output_tokens": 2,
+                       "cache_read_input_tokens": 3,
+                       "cache_creation_input_tokens": 40,
+                       "cache_creation": {"ephemeral_1h_input_tokens": 40}}})
+        if u.get("cache_schreiben_1h") != 40:
+            fehler.append(f"Cache-Aufschluesselung nicht gelesen: {u}")
+
+        if fehler:
+            b.add("FEHLER", "Cache-Lebensdauer fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Cache-Lebensdauer: Ablehnung eng erkannt, "
+                        "Schreibpreis nach Lebensdauer getrennt")
+    except Exception as e:
+        b.add("FEHLER", "Cache-Lebensdauer nicht pruefbar", repr(e))
 
     # --- Gemini-Payload -------------------------------------------------
     try:

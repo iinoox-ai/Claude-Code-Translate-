@@ -83,6 +83,10 @@ STANDARD = {
     "effort_vergleich":          "hoch",
     "max_tokens_api":            32000,
     "timeout_read_api":          600,       # Auftrag Paket 1: hoechstens 10 min
+    # Lebensdauer des Prompt-Caches. '1h' ist eine Versicherung, kein
+    # Sparposten: Das Praefix ueberlebt eine Pause zwischen zwei Chunks.
+    # Leer laesst die Voreinstellung des Anbieters (fuenf Minuten).
+    "cache_ttl":                 "1h",
 
     "chunk_words":               800,
     "chunk_words_variante":      1200,      # Rueckfall, wenn 'varianten' leer ist
@@ -150,7 +154,7 @@ AENDERBAR = {
     "export_glossar", "export_bewertung", "glossar_quelle", "sheets_id",
     "rahmen_marker", "varianten", "technik_ausnahmen",
     "timeout_connect", "max_retries",
-    "backend_standard", "max_tokens_api", "timeout_read_api",
+    "backend_standard", "max_tokens_api", "timeout_read_api", "cache_ttl",
 } | {f"modell_{r}" for r in (
     "uebersetzung", "revision", "stil", "korrektorat",
     "vorbereitung", "zitat", "judge", "annotation", "vergleich")
@@ -380,7 +384,8 @@ EFFORT = {"niedrig": "low", "mittel": "medium", "hoch": "high",
 #
 # Der Ueberschreibschutz der projekt.json bleibt: erkannt wird die
 # Abweichung, uebernommen wird sie nur auf ausdrueckliche Ansage.
-TECHNIK = ({"backend_standard", "max_tokens_api", "timeout_read_api"}
+TECHNIK = ({"backend_standard", "max_tokens_api", "timeout_read_api",
+            "cache_ttl"}
            | {f"modell_{r}" for r in ROLLEN}
            | {f"effort_{r}" for r in ROLLEN})
 
@@ -550,6 +555,12 @@ def token_faktor(manifest=None):
     return TOKEN_JE_WORT
 
 
+# Alle gebuchten Tokenarten an einer Stelle. Wer eine ergaenzt, ergaenzt sie
+# damit zugleich in Buchung, Differenz und Rollenstand.
+USAGE_FELDER = ("ein", "aus", "cache_lesen", "cache_schreiben",
+                "cache_schreiben_1h")
+
+
 # Laufkontext der Buchung. Ein Testlauf mit einem anderen Modell darf die
 # Buchung der Buchproduktion nicht ueberschreiben — genau das ist beim Lauf
 # 1919 passiert und hat die Kosten um 57 % zu hoch ausgewiesen.
@@ -588,12 +599,12 @@ def usage_buchen(rolle, modell, usage):
             m = json.load(open(MANIFEST, encoding="utf-8"))
         k = m.setdefault("kosten", {})
         e = k.setdefault(kosten_schluessel(_LAUF, rolle, modell),
-                         {"lauf": _LAUF, "rolle": rolle, "modell": modell,
-                          "aufrufe": 0, "ein": 0, "aus": 0,
-                          "cache_lesen": 0, "cache_schreiben": 0})
+                         dict({"lauf": _LAUF, "rolle": rolle,
+                               "modell": modell, "aufrufe": 0},
+                              **dict.fromkeys(USAGE_FELDER, 0)))
         e["aufrufe"] += 1
-        for feld in ("ein", "aus", "cache_lesen", "cache_schreiben"):
-            e[feld] += int(usage.get(feld, 0) or 0)
+        for feld in USAGE_FELDER:
+            e[feld] = int(e.get(feld, 0)) + int(usage.get(feld, 0) or 0)
         tmp = MANIFEST + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(m, f, ensure_ascii=False, indent=2)
@@ -626,8 +637,7 @@ def kosten_differenz_schreiben(vorher, pfad):
                 continue
             alt = vorher.get(schluessel, {})
             diff = {f: int(e.get(f, 0)) - int(alt.get(f, 0))
-                    for f in ("aufrufe", "ein", "aus", "cache_lesen",
-                              "cache_schreiben")}
+                    for f in ("aufrufe",) + USAGE_FELDER}
             if diff["aufrufe"] > 0:
                 for f in ("lauf", "rolle", "modell"):
                     diff[f] = e.get(f, "")
@@ -643,7 +653,7 @@ def kosten_differenz_schreiben(vorher, pfad):
 # 1,25 bei fuenf Minuten, 2,0 bei einer Stunde.
 CACHE_LESE_FAKTOR = 0.1
 CACHE_SCHREIB_FAKTOR = 1.25
-
+CACHE_SCHREIB_FAKTOR_1H = 2.0
 
 def kosten_dollar(e, t):
     """Preis einer Buchung. Eine Formel fuer alle Auswertungen.
@@ -652,9 +662,14 @@ def kosten_dollar(e, t):
     bewertung.py liessen den Cache weg und lagen dadurch zu niedrig."""
     if not t:
         return None
+    # 'cache_schreiben' ist die Gesamtzahl; der Anteil mit einer Stunde
+    # Lebensdauer steht daneben und kostet mehr.
+    lang = int(e.get("cache_schreiben_1h", 0))
+    kurz = max(0, int(e.get("cache_schreiben", 0)) - lang)
     return (int(e.get("ein", 0)) * t["ein"]
             + int(e.get("cache_lesen", 0)) * t["ein"] * CACHE_LESE_FAKTOR
-            + int(e.get("cache_schreiben", 0)) * t["ein"] * CACHE_SCHREIB_FAKTOR
+            + kurz * t["ein"] * CACHE_SCHREIB_FAKTOR
+            + lang * t["ein"] * CACHE_SCHREIB_FAKTOR_1H
             + int(e.get("aus", 0)) * t["aus"]) / 1e6
 
 
@@ -681,7 +696,7 @@ def kosten_stand_rolle(rolle):
     """Bisher gebuchte Token einer Rolle, ueber alle Modelle und Laeufe.
 
     Fuer Aufrufer, die nur die Differenz ihres eigenen Aufrufs brauchen."""
-    stand = dict.fromkeys(("ein", "aus", "cache_lesen", "cache_schreiben"), 0)
+    stand = dict.fromkeys(USAGE_FELDER, 0)
     try:
         m = json.load(open(MANIFEST, encoding="utf-8"))
     except Exception:
@@ -772,8 +787,37 @@ def sende(post, max_retries, schlafen=time.sleep):
     raise letzter or ApiFehler("Anfrage fehlgeschlagen")
 
 
+# Lebensdauer des Cache-Eintrags. Wird sie vom Anbieter abgelehnt, faellt
+# der Lauf hierueber auf die Voreinstellung zurueck, statt abzubrechen.
+_TTL_ABGELEHNT = False
+
+
+def cache_ttl(cfg):
+    """Gewuenschte Cache-Lebensdauer, oder '' fuer die Voreinstellung.
+
+    'Versicherung, keine Kostenersparnis': Bei einer Stunde ueberlebt das
+    Praefix eine Pause zwischen zwei Chunks — eine getrennte Colab-Sitzung,
+    einen Blick in den Bericht, einen langsamen Chunk. Bezahlt wird das mit
+    einem hoeheren Schreibpreis; das lohnt erst, wenn ohne TTL geschrieben
+    werden muesste."""
+    if _TTL_ABGELEHNT:
+        return ""
+    t = str(cfg.get("cache_ttl", "") or "").strip()
+    return t if t in ("5m", "1h") else ""
+
+
+def ttl_abgelehnt(fehler):
+    """Ist dieser Fehler die Ablehnung der Cache-Lebensdauer?
+
+    Eng gefasst: nur HTTP 400, und nur wenn die Meldung den Marker selbst
+    benennt. Ein zu weiter Fang wuerde echte Payloadfehler verschlucken und
+    still ein zweites Mal Geld ausgeben."""
+    t = str(fehler)
+    return t.startswith("HTTP 400") and "ttl" in t.lower()
+
+
 class AnthropicBackend(Backend):
-    """Messages-API. Zwei Eigenheiten sind Absicht, nicht Versehen:
+    """Messages-API. Drei Eigenheiten sind Absicht, nicht Versehen:
 
     - Der System-Prompt traegt einen Cache-Marker. Er ist ueber alle Chunks
       byteweise identisch; wer Bausteine umsortiert, zerstoert die
@@ -781,18 +825,24 @@ class AnthropicBackend(Backend):
     - Es gehen KEINE Sampling-Parameter raus. claude-opus-5 hat
       temperature/top_p/top_k entfernt und antwortet darauf mit HTTP 400.
       Die Tiefe steuert 'effort'. Begruendung in ENTSCHEIDUNGEN.md.
+    - Die Cache-Lebensdauer ist eine Versicherung, kein Sparposten. Lehnt
+      der Anbieter sie ab, laeuft der Lauf ohne sie weiter.
     """
 
     URL     = "https://api.anthropic.com/v1/messages"
     VERSION = "2023-06-01"
 
     def payload(self, cfg, system, user, rolle, modell, werkzeuge=None):
+        marker = {"type": "ephemeral"}
+        ttl = cache_ttl(cfg)
+        if ttl:
+            marker["ttl"] = ttl
         p = {
             "model": modell,
             "max_tokens": int(cfg.get("max_tokens_api", 32000)),
             # Liste statt String: nur ein Block kann den Cache-Marker tragen.
             "system": [{"type": "text", "text": system,
-                        "cache_control": {"type": "ephemeral"}}],
+                        "cache_control": marker}],
             "messages": [{"role": "user", "content": user}],
             "output_config": {"effort": effort_fuer(cfg, rolle)},
         }
@@ -810,10 +860,16 @@ class AnthropicBackend(Backend):
         text = "".join(b.get("text", "") for b in d.get("content", [])
                        if b.get("type") == "text")
         u = d.get("usage") or {}
+        # Die Aufschluesselung entscheidet ueber den Preis: ein Eintrag mit
+        # einer Stunde Lebensdauer kostet beim Schreiben doppelt, einer mit
+        # fuenf Minuten das 1,25-fache. Ohne sie waere jede Kostenzeile eine
+        # Schaetzung.
+        c = u.get("cache_creation") or {}
         usage = {"ein": u.get("input_tokens", 0),
                  "aus": u.get("output_tokens", 0),
                  "cache_lesen": u.get("cache_read_input_tokens", 0),
-                 "cache_schreiben": u.get("cache_creation_input_tokens", 0)}
+                 "cache_schreiben": u.get("cache_creation_input_tokens", 0),
+                 "cache_schreiben_1h": c.get("ephemeral_1h_input_tokens", 0)}
         if d.get("stop_reason") == "max_tokens":
             print("    WARNUNG: Ausgabe am max_tokens-Limit abgeschnitten.")
         return (text if roh else saeubern(text)), usage
@@ -825,14 +881,31 @@ class AnthropicBackend(Backend):
             sys.exit("FEHLER: ANTHROPIC_API_KEY fehlt.\n"
                      "  Colab:  im Secrets-Reiter hinterlegen\n"
                      "  sonst:  export ANTHROPIC_API_KEY=...")
-        p = self.payload(cfg, system, user, rolle, modell, werkzeuge)
         kopfzeilen = {"x-api-key": schluessel,
                       "anthropic-version": self.VERSION,
                       "content-type": "application/json"}
         timeout = (cfg["timeout_connect"], cfg.get("timeout_read_api", 600))
-        r = sende(lambda: requests.post(self.URL, json=p, headers=kopfzeilen,
-                                        timeout=timeout),
-                  cfg["max_retries"])
+
+        def einmal():
+            p = self.payload(cfg, system, user, rolle, modell, werkzeuge)
+            return sende(lambda: requests.post(self.URL, json=p,
+                                               headers=kopfzeilen,
+                                               timeout=timeout),
+                         cfg["max_retries"])
+        try:
+            r = einmal()
+        except ApiFehler as e:
+            # Die Lebensdauer ist eine Versicherung. Kennt der Anbieter sie
+            # nicht, waere ein Abbruch mitten im Buch der teurere Fehler:
+            # einmal melden, ohne sie weiterlaufen.
+            if not (cache_ttl(cfg) and ttl_abgelehnt(e)):
+                raise
+            globals()["_TTL_ABGELEHNT"] = True
+            print(f"    WARNUNG: Cache-Lebensdauer '{cfg.get('cache_ttl')}' "
+                  f"wird abgelehnt — der Lauf geht ohne sie weiter.\n"
+                  f"             'cache_ttl' in projekt.json leeren, dann "
+                  f"verschwindet diese Meldung.")
+            r = einmal()
         text, usage = self.antwort_lesen(r.json(), roh)
         usage_buchen(rolle, modell, usage)
         return text
