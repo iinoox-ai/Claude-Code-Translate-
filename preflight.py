@@ -215,6 +215,21 @@ def selbsttest(cfg, b):
         if G.varianten(dict(probe, varianten=[], chunk_words_variante=800)):
             fehler.append("identische Variante wird nicht verworfen")
 
+        # Ein Buch darf ein anderes Modell waehlen, ohne dass der
+        # Technik-Abgleich es beim naechsten Lauf still zuruecksetzt.
+        pj = {"modell_uebersetzung": "claude-sonnet-5",
+              "modell_stil": "veraltet",
+              "technik_ausnahmen": ["modell_uebersetzung"]}
+        rp = {"modell_uebersetzung": "claude-opus-5",
+              "modell_stil": "claude-opus-5"}
+        ueberschrieben = [k for k, _, _ in G.technik_abweichung(pj, rp)]
+        if "modell_uebersetzung" in ueberschrieben:
+            fehler.append("technik setzt die Modellwahl des Buchs zurueck")
+        if "modell_stil" not in ueberschrieben:
+            fehler.append("technik zieht veraltete Schluessel nicht mehr nach")
+        if not G.technik_beansprucht(pj, rp):
+            fehler.append("beanspruchte Schluessel werden nicht gemeldet")
+
         # Ohne Terminal darf die Rueckfrage nicht mit einem Traceback
         # enden — und erst recht nicht stillschweigend loeschen.
         class _Args:

@@ -41,6 +41,10 @@ Umlaute in Bezeichnern und Kommentaren werden vermieden (`saeubern`,
 
 ## Backends und Modelle
 
+Ein Buch kann eine abweichende Modellwahl beanspruchen: Die betroffenen
+Schlüssel kommen in `technik_ausnahmen`, dann lässt `pipeline.py technik` sie
+in Ruhe und meldet sie nur.
+
 Die Modellbelegung je Rolle steht in `projekt.json`
 (`modell_uebersetzung`, `modell_revision`, `modell_stil`,
 `modell_korrektorat`, `modell_vorbereitung`, `modell_judge`,

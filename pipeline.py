@@ -408,6 +408,14 @@ def cmd_technik(args):
     if not os.path.exists(repo):
         sys.exit(f"FEHLER: {repo} fehlt.")
 
+    pj, rp = G._json_lesen(projekt), G._json_lesen(repo)
+    eigen = G.technik_beansprucht(pj, rp)
+    if eigen:
+        print("Von diesem Buch beansprucht (bleibt unangetastet):")
+        for k, alt, neu in eigen:
+            print(f"  {k}: {alt!r}   (Repo: {neu!r})")
+        print()
+
     ab = G.technik_vergleich(projekt, repo)
     if not ab:
         print("Keine Abweichung. Die technischen Einstellungen sind aktuell.")
