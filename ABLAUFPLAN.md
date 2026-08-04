@@ -104,6 +104,7 @@ der eine Abschnitt, an dem gerade gearbeitet wurde.
 | Schritt | Was passiert | Modell |
 |---|---|:-:|
 | `selbsttest` | Normalisierer, Metriken und Prompts prüfen | — |
+| `tarife` | Modellpreise gegen die Preisseiten halten | — |
 | `preflight` | Systemprüfung, Textprüfung, Zitaterkennung | — |
 | `zitatrecherche` | Zitatnachweise suchen, Freigabeliste erzeugen | ja |
 | `konkordanz` | Kandidatenanalyse, Analysepaket | — |
@@ -246,6 +247,19 @@ colab_start.lauf("vorbereitung.py", "--nur-anzeigen", code=CODE)
 ```python
 colab_start.lauf("annotation.py", "--nur-anzeigen", code=CODE)
 ```
+
+Die hinterlegten Preise hält `tarife.py` gegen die Preisseiten der Anbieter.
+**Keiner der beiden hat eine Preis-API** — ausgelesen wird eine Seite für
+Menschen. Übernommen wird deshalb nur, was eindeutig ist: genau zwei Beträge
+im Umfeld des Modellnamens, Eingabe billiger als Ausgabe. Alles andere wird
+gemeldet, und der hinterlegte Wert bleibt. Das Ergebnis landet mit Quelle und
+Datum in `tarife.json` und hat Vorrang vor den Konstanten im Code.
+
+```python
+colab_start.lauf("tarife.py", "--erzwingen", code=CODE)
+```
+
+Ohne `--erzwingen` wird höchstens einmal pro Woche neu geholt.
 
 Größenordnung für ein Buch von rund 110.000 Wörtern, gemessen am ersten
 Volllauf: Übersetzung mit Revision rund 36 $, Lektorat rund 23 $,

@@ -320,6 +320,45 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Backend-Signaturen nicht pruefbar", repr(e))
 
+    # --- Tarife: nur Eindeutiges wird uebernommen ----------------------
+    # Ein falsch ausgelesener Preis verzerrt jeden Kostenbericht, ohne
+    # dass es auffaellt. Deshalb wird geraten nur, wo nichts zu raten ist.
+    try:
+        import tarife as T
+        fehler = []
+        faelle = [
+            ([5.0, 25.0], {"ein": 5.0, "aus": 25.0}, "bestaetigt"),
+            ([3.0, 15.0], {"ein": 5.0, "aus": 25.0}, "abweichend"),
+            ([1.0, 5.0, 25.0], {"ein": 5.0, "aus": 25.0}, "unklar"),
+            ([25.0, 5.0][:1], {"ein": 5.0, "aus": 25.0}, "unklar"),
+            ([25.0, 25.0][:1], None, "unklar"),
+            (None, {"ein": 5.0, "aus": 25.0}, "fehlt"),
+        ]
+        for gefunden, hinterlegt, soll in faelle:
+            ist = T.urteil(gefunden, hinterlegt)[0]
+            if ist != soll:
+                fehler.append(f"urteil({gefunden}) -> {ist} statt {soll}")
+        # Eingabe teurer als Ausgabe gibt es nicht — das waere ein
+        # vertauschtes Paar, und vertauscht ist schlimmer als unbekannt.
+        if T.urteil([25.0, 5.0], None)[0] != "unklar":
+            fehler.append("vertauschtes Preispaar wird uebernommen")
+
+        text = ("Model claude-opus-5 Input $5.00 per million tokens "
+                "Output $25.00 per million tokens")
+        if T.preise_finden(text, "claude-opus-5") != [5.0, 25.0]:
+            fehler.append(f"Preise nicht gefunden: "
+                          f"{T.preise_finden(text, 'claude-opus-5')}")
+        if T.preise_finden(text, "claude-sonnet-5") is not None:
+            fehler.append("unbekanntes Modell liefert trotzdem Preise")
+
+        if fehler:
+            b.add("FEHLER", "Tarifabgleich fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Tarife: nur eindeutige Preispaare werden "
+                        "uebernommen, alles andere bleibt hinterlegt")
+    except Exception as e:
+        b.add("FEHLER", "Tarifabgleich nicht pruefbar", repr(e))
+
     # --- Paket 9: der Ablaufplan muss zur Schrittliste passen ----------
     # Ein Plan, der einen Schritt nicht kennt, schickt den Leser ins
     # Leere — und das faellt erst auf, wenn jemand danach arbeitet.

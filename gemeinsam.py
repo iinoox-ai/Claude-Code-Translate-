@@ -516,7 +516,20 @@ TARIFE = {
 TOKEN_JE_WORT = 2.4
 
 
-def tarif(modell):
+def tarif(modell, datei="tarife.json"):
+    """Preis je Mio Token. tarife.json hat Vorrang vor der Konstante.
+
+    Die Konstante bleibt die dokumentierte Grundlage; die Datei traegt,
+    was tarife.py an den Preisseiten geholt und als eindeutig befunden
+    hat — mit Quelle und Datum."""
+    if os.path.exists(datei):
+        try:
+            e = json.load(open(datei, encoding="utf-8")).get(modell)
+            if isinstance(e, dict) and "ein" in e and "aus" in e:
+                return {"ein": float(e["ein"]), "aus": float(e["aus"]),
+                        "geprueft": True, "hinweis": e.get("quelle", "")}
+        except Exception:
+            pass
     return TARIFE.get(modell)
 
 

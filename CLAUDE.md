@@ -171,7 +171,9 @@ dritten Editierpass — und jeder Pass glättet.
 ## Kosten sind Teil des Ergebnisses
 
 Jeder API-Aufruf meldet seine Token-Usage; `manifest.json` summiert je
-Rolle, der Preflight schätzt vor dem Volllauf. Neue modellrufende Schritte
+Rolle, der Preflight schätzt vor dem Volllauf. Die Preise hält `tarife.py`
+gegen die Preisseiten — übernommen wird nur ein eindeutiges Paar, sonst bleibt
+der hinterlegte Wert (Begründung in `ENTSCHEIDUNGEN.md`). Neue modellrufende Schritte
 ohne Usage-Erfassung gelten als unfertig.
 
 ## Kalibrierung gilt je Modell-Ära

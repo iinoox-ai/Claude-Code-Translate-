@@ -70,6 +70,29 @@ deshalb ist die Korrektur nötig, und deshalb muss sie genau sein.
 Die Liste in `HOMOGRAPHEN` ist die Stelle, an der bei einem neuen Text
 nachgebessert wird.
 
+## Tarife werden geholt, aber nur Eindeutiges übernommen
+
+**Entschieden:** `tarife.py` liest die Preisseiten beider Anbieter und schreibt
+`tarife.json` — aber nur, wenn im Umfeld des Modellnamens **genau zwei**
+Beträge stehen und der kleinere die Eingabe ist. Alles andere wird gemeldet,
+der hinterlegte Wert bleibt.
+
+**Keiner der beiden Anbieter veröffentlicht eine Preis-API.** Es gibt HTML für
+Menschen, und das ändert jederzeit sein Layout. Ein Auslesen daraus ist eine
+Schätzung über eine Textstelle, keine Auskunft. Drei oder mehr Beträge in der
+Nähe bedeuten fast immer, dass die Seite Stufen oder Cache-Preise mitführt —
+da wird nicht geraten.
+
+Ein vertauschtes Paar (Eingabe teurer als Ausgabe) gilt ausdrücklich als
+unklar. Vertauscht ist schlimmer als unbekannt: Unbekannt schreibt „Tarif
+unbekannt" in den Bericht, vertauscht schreibt eine falsche Zahl, die niemand
+nachrechnet.
+
+`gemeinsam.TARIFE` bleibt die dokumentierte Grundlage; `tarife.json` hat
+Vorrang und trägt Quelle und Datum. Geholt wird höchstens einmal pro Woche —
+Preise ändern sich nicht täglich, und kein Lauf soll an zwei fremden Servern
+hängen.
+
 ## Annotation berichtet — und kann gar nicht editieren
 
 **Entschieden:** `annotation.py` schreibt ausschließlich `begruendungen.json`
