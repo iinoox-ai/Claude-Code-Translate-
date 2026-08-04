@@ -1338,6 +1338,44 @@ def chunks_bauen(paras, ziel, ausnahmen=None):
     return chunks
 
 
+# Ab wann ein Chunk als uebergross gilt. Nicht 1,0: Die Chunkbildung haelt
+# Absatzgrenzen ein, und ein Absatz endet selten genau auf der Zielmarke.
+UEBERLAENGE = 1.25
+
+
+def chunk_ueberlaengen(chunks, ziel, faktor=UEBERLAENGE):
+    """(Nummer, Woerter, geschuetzt) je Chunk ueber der Marke.
+
+    Gekappt wird bewusst nicht: Ein Absatz gehoert zusammen, und ein
+    geschuetztes Zitat erst recht. Gezaehlt wird trotzdem, denn Ueberlaenge
+    ist die Ursache hinter zwei Befunden, die sonst raetselhaft bleiben —
+    verworfene Laengenverhaeltnisse und verschobene Absatzzahlen."""
+    grenze = ziel * faktor
+    raus = []
+    for i, (text, geschuetzt) in enumerate(chunks, 1):
+        w = len(text.split())
+        if w > grenze:
+            raus.append((i, w, geschuetzt))
+    return raus
+
+
+def ueberlaengen_melden(chunks, ziel, drucken=print):
+    """Eine Zeile, wenn es Ueberlaengen gibt — sonst schweigen."""
+    lang = chunk_ueberlaengen(chunks, ziel)
+    if not lang:
+        return lang
+    groesster = max(w for _, w, _ in lang)
+    geschuetzt = sum(1 for _, _, g in lang if g)
+    drucken(f"Ueberlange Chunks:  {len(lang)} von {len(chunks)} ueber "
+            f"{ziel * UEBERLAENGE:.0f} Woertern, groesster {groesster}"
+            + (f", davon {geschuetzt} geschuetzt (Zitate)"
+               if geschuetzt else ""))
+    drucken("                    Nicht gekappt — Absatzgrenzen haben "
+            "Vorrang. Erwarte dort eher\n"
+            "                    verworfene Laengenverhaeltnisse.")
+    return lang
+
+
 def schlusswoerter(text, n):
     w = text.split()
     if len(w) <= n:

@@ -268,6 +268,16 @@ Chunk-Ausgaben liegen einzeln in `teile/`. Resume zählt Dateien statt einer
 Zustandsdatei zu vertrauen. Das ist Absicht — Zustandsdateien lügen nach einem
 Absturz, Verzeichnisinhalte nicht.
 
+`pipeline.py weiter` gibt die nächste offene Pause frei und läuft weiter — ein
+Befehl statt `reset --ab NAME --fertig` plus `run`. Es hakt immer nur eine
+Pause ab und **nie** einen fehlgeschlagenen Schritt; `reset` bleibt für das,
+was es wirklich kann: einen gelaufenen Schritt wieder öffnen.
+
+Übergroße Chunks werden **gezählt, nicht gekappt** (`chunk_ueberlaengen`,
+Marke 1,25 × `chunk_words`). Ein Absatz gehört zusammen, ein geschütztes Zitat
+erst recht. Gemeldet werden sie in der Vorabprüfung und beim Chunkbau, weil sie
+die Ursache hinter verworfenen Längenverhältnissen sind.
+
 `pipeline.py neu` ist das einzige Kommando, das Ergebnisse löscht, und es fragt
 vorher. In Colab läuft jeder Schritt als Unterprozess ohne Terminal; die
 Rückfrage wandert dort auf ein ausdrückliches `--ja`. Ohne Bestätigung wird

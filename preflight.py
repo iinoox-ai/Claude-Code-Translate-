@@ -424,6 +424,93 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Kostenbuchung nicht pruefbar", repr(e))
 
+    # --- Ueberlaengen: gezaehlt, nicht gekappt -------------------------
+    # Kappen waere die naheliegende Reaktion und die falsche: Ein Absatz
+    # gehoert zusammen, ein geschuetztes Zitat erst recht. Was bleibt, ist
+    # zaehlen — und dabei darf weder ein normaler Chunk als uebergross noch
+    # ein wirklich uebergrosser als normal durchgehen.
+    try:
+        fehler = []
+        chunks = [("wort " * 800, False),          # genau Ziel
+                  ("wort " * 1001, False),         # ueber 1,25×
+                  ("wort " * 999, False),          # knapp darunter
+                  ("wort " * 3000, True)]          # geschuetztes Zitat
+        lang = G.chunk_ueberlaengen(chunks, 800)
+        if [i for i, _, _ in lang] != [2, 4]:
+            fehler.append(f"falsche Auswahl: {[i for i, _, _ in lang]}")
+        if not any(g for _, _, g in lang):
+            fehler.append("geschuetzter Chunk nicht als solcher gemeldet")
+        if G.chunk_ueberlaengen([("wort " * 800, False)], 800):
+            fehler.append("Chunk auf der Zielmarke gilt als uebergross")
+        if fehler:
+            b.add("FEHLER", "Ueberlaengenzaehler fehlerhaft",
+                  "; ".join(fehler))
+        else:
+            b.add("OK", "Ueberlaengen werden gezaehlt und benannt, "
+                        "geschuetzte Chunks getrennt ausgewiesen")
+    except Exception as e:
+        b.add("FEHLER", "Ueberlaengenzaehler nicht pruefbar", repr(e))
+
+    # --- 'weiter' gibt Pausen frei, sonst nichts -----------------------
+    # Der Befehl hakt einen Schritt als erledigt ab, ohne ihn laufen zu
+    # lassen. Das ist bei einer Pause genau richtig und bei allem anderen
+    # genau falsch: Ein fehlgeschlagener Volllauf, den 'weiter' abhakt,
+    # waere ein halbes Buch, das als fertig gilt.
+    try:
+        import tempfile
+        import pipeline as PL
+        fehler = []
+        gelaufen = []
+        echt_run, alt_cwd = PL.cmd_run, os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                os.chdir(tmp)
+                PL.cmd_run = lambda cfg, args: gelaufen.append(True)
+
+                def stand(bis_zu, status="fertig"):
+                    """Manifest, in dem alles vor 'bis_zu' erledigt ist."""
+                    s = {}
+                    for n in PL.NAMEN[:PL.NAMEN.index(bis_zu)]:
+                        s[n] = {"status": "fertig"}
+                    s[bis_zu] = {"status": status}
+                    with open(G.MANIFEST, "w", encoding="utf-8") as f:
+                        json.dump({"schritte": s}, f)
+
+                # Pause: wird freigegeben, danach laeuft es weiter.
+                stand("PAUSE_review", "wartet")
+                PL.cmd_weiter(cfg, argparse.Namespace(hg=False))
+                m = json.load(open(G.MANIFEST, encoding="utf-8"))
+                if m["schritte"]["PAUSE_review"]["status"] != "fertig":
+                    fehler.append("Pause wird nicht freigegeben")
+                if not gelaufen:
+                    fehler.append("nach der Freigabe laeuft nichts weiter")
+                # Die naechste Pause bleibt zu — freigegeben wird eine.
+                if m["schritte"].get("PAUSE_pruefung", {}).get("status") \
+                        == "fertig":
+                    fehler.append("gibt mehr als eine Pause frei")
+
+                # Gegenprobe: ein fehlgeschlagener Schritt ist keine Pause.
+                stand("voll", "fehler")
+                gelaufen.clear()
+                PL.cmd_weiter(cfg, argparse.Namespace(hg=False))
+                m = json.load(open(G.MANIFEST, encoding="utf-8"))
+                if m["schritte"]["voll"]["status"] == "fertig":
+                    fehler.append("hakt einen fehlgeschlagenen Schritt ab")
+                if not gelaufen:
+                    fehler.append("laeuft nicht weiter, wenn keine Pause "
+                                  "offen ist")
+            finally:
+                PL.cmd_run = echt_run
+                os.chdir(alt_cwd)
+
+        if fehler:
+            b.add("FEHLER", "'weiter' fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "'weiter' gibt genau eine Pause frei und hakt "
+                        "keinen gescheiterten Schritt ab")
+    except Exception as e:
+        b.add("FEHLER", "'weiter' nicht pruefbar", repr(e))
+
     # --- Aktive Rollen gegen die Wirklichkeit -------------------------
     # 'aktive_rollen' ist die Grundlage der Kostenschaetzung und des Pings
     # vor dem Lauf. Eine dort fehlende Rolle heisst: kostenlos und
@@ -1643,6 +1730,25 @@ def pruefe_kosten(cfg, b, text):
     except Exception as e:
         b.add("WARN", "Kostenschaetzung nicht moeglich", repr(e))
         return
+
+    # Uebergrosse Chunks werden bewusst nicht gekappt (Absatzgrenzen haben
+    # Vorrang). Sichtbar muessen sie trotzdem sein: Sie sind die Ursache
+    # hinter verworfenen Laengenverhaeltnissen im Lauf.
+    lang = G.chunk_ueberlaengen(G.chunks_bauen(G.absaetze(text),
+                                               cfg["chunk_words"]),
+                                cfg["chunk_words"])
+    if lang:
+        groesster = max(w for _, w, _ in lang)
+        art = ("WARN" if groesster > cfg["chunk_words"] * 1.8 else "INFO")
+        b.add(art, f"{len(lang)} uebergrosse Chunks",
+              f"ueber {cfg['chunk_words'] * G.UEBERLAENGE:.0f} Woertern, "
+              f"groesster {groesster}. Nicht gekappt — ein Absatz gehoert "
+              f"zusammen. Erwarte dort eher verworfene "
+              f"Laengenverhaeltnisse.")
+    else:
+        b.add("OK", f"Keine uebergrossen Chunks "
+                    f"(ueber {cfg['chunk_words'] * G.UEBERLAENGE:.0f} "
+                    f"Woertern)")
 
     b.add("INFO", "Grundlage",
           f"{n} Chunks à {cfg['chunk_words']} Woerter, "

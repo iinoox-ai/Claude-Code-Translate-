@@ -62,12 +62,15 @@ Gesteuert über ein einziges Skript:
 ```bash
 python3 pipeline.py init      # einmal
 python3 pipeline.py run --hg  # loslaufen, im Hintergrund
-python3 pipeline.py status    # Stand, Chunkzähler, Restzeit
+python3 pipeline.py status    # Stand, Chunkzähler, Restzeit, Kosten
+python3 pipeline.py weiter    # offene Pause freigeben und weiterlaufen
 python3 pipeline.py log -f    # mitlesen
 python3 pipeline.py stop      # anhalten
 ```
 
-`run` macht immer am nächsten offenen Schritt weiter. Bei jedem Abbruch ist
+`run` macht immer am nächsten offenen Schritt weiter. An den beiden Pausen
+gibt `weiter` frei und läuft in einem Zug weiter — genau eine Pause, nie
+einen fehlgeschlagenen Schritt. Bei jedem Abbruch ist
 derselbe Befehl die Antwort. Das einzige Kommando, das Ergebnisse löscht, ist
 `pipeline.py neu`, und es fragt vorher.
 

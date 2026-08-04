@@ -155,10 +155,11 @@ System-Prompts: nur Anweisungen, keine Erläuterungen. Was vor der ersten
 Weiter mit:
 
 ```python
-colab_start.lauf("pipeline.py", "reset", "--ab", "PAUSE_review", "--fertig", code=CODE)
+colab_start.lauf("pipeline.py", "weiter", code=CODE)
 ```
 
-Danach Zelle 1 erneut.
+`weiter` gibt die offene Pause frei und läuft weiter. Es hakt immer nur die
+**nächste** Pause ab und nie einen fehlgeschlagenen Schritt.
 
 ### `PAUSE_pruefung` — nach dem Testlauf
 
@@ -170,7 +171,7 @@ Trägt die Tonlage?
 Angepasste Werte kommen nach `projekt.json`. Weiter mit:
 
 ```python
-colab_start.lauf("pipeline.py", "reset", "--ab", "PAUSE_pruefung", "--fertig", code=CODE)
+colab_start.lauf("pipeline.py", "weiter", code=CODE)
 ```
 
 ---

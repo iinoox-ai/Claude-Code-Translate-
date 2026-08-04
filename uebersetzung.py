@@ -553,6 +553,7 @@ def main():
         ebene_je_chunk.extend([ebene] * len(teil))
 
     n = len(chunks)
+    G.ueberlaengen_melden(chunks, chunk_words)
     glossar = G.lade_json(G.F["glossar"])
     personen = G.lade_json(G.F["personen"])
     figuren = G.lade_json(G.F["figuren"])

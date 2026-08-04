@@ -8,6 +8,7 @@ setzt an der richtigen Stelle fort und loescht nur auf ausdruecklichen Befehl.
     python3 pipeline.py init            Konfiguration anlegen (interaktiv)
     python3 pipeline.py run             weiter am naechsten offenen Schritt
     python3 pipeline.py run --hg        dasselbe, abgekoppelt im Hintergrund
+    python3 pipeline.py weiter          offene Pause freigeben und weiterlaufen
     python3 pipeline.py status          Stand, Chunkzaehler, Restzeit
     python3 pipeline.py log             Log ansehen  (-f = mitlaufen)
     python3 pipeline.py stop            laufenden Hintergrundlauf beenden
@@ -248,8 +249,7 @@ def cmd_status(cfg):
         if cmd is None:
             print(f"\nNaechster Schritt: PAUSE '{name}'")
             print("Nach dem Einspielen der Dateien:")
-            print(f"  python3 pipeline.py reset --ab {name} --fertig")
-            print("  python3 pipeline.py run")
+            print("  python3 pipeline.py weiter")
         else:
             print(f"\nNaechster Schritt: {name}")
             print("  python3 pipeline.py run")
@@ -276,6 +276,34 @@ def naechster_schritt(cfg, m):
         if status_von(m, name) != "fertig":
             return eintrag
     return None
+
+
+def cmd_weiter(cfg, args):
+    """Pause abhaken und weiterlaufen — in einem Befehl.
+
+    Bis hierher standen an jeder Pause zwei Befehle, und der erste hiess
+    'reset'. Ein Kommando, das nach Verwerfen klingt und in Wahrheit
+    freigibt, wird an der falschen Stelle getippt oder aus Vorsicht gar
+    nicht. 'reset' bleibt fuer das, was es wirklich kann: einen bereits
+    gelaufenen Schritt wieder oeffnen.
+
+    Freigegeben wird nur eine Pause, und nur die naechste. Ein
+    fehlgeschlagener Schritt ist keine Pause und wird nicht abgehakt."""
+    m = manifest_lesen()
+    eintrag = naechster_schritt(cfg, m)
+    if eintrag is None:
+        print("Alle Schritte erledigt — es gibt nichts fortzusetzen.")
+        print("  python3 pipeline.py status")
+        return
+    name, beschreibung, cmd, _ = eintrag
+    if cmd is None:
+        setze(m, name, "fertig", hinweis="mit 'weiter' freigegeben")
+        print(f"Pause '{name}' freigegeben: {beschreibung}\n")
+    else:
+        s = status_von(m, name)
+        print(f"Keine Pause offen — der Lauf setzt bei '{name}' fort"
+              + (f" (Status: {s})" if s != "offen" else "") + ".\n")
+    cmd_run(cfg, args)
 
 
 # ==================================================================
@@ -352,9 +380,9 @@ def cmd_run(cfg, args):
                               "anpassen (die Dateien liegen in Drive,")
                         print("   ein Download ist nicht noetig)")
                         print("3. Dann in einer Zelle:")
-                    print(f"     !python3 $CODE/pipeline.py reset "
-                          f"--ab {name} --fertig")
-                    print("   und Zelle 1 erneut ausfuehren.")
+                    print(f"     !python3 $CODE/pipeline.py weiter")
+                    print("   Das gibt die Pause frei; danach Zelle 1 "
+                          "erneut ausfuehren.")
                 else:
                     if name == "PAUSE_review":
                         print("1. Referenzdateien pruefen: Glossar, "
@@ -373,9 +401,7 @@ def cmd_run(cfg, args):
                         print("     python3 pipeline.py config "
                               "projekt_neu.json")
                         print("4. Danach:")
-                    print(f"     python3 pipeline.py reset --ab {name} "
-                          f"--fertig")
-                    print("     python3 pipeline.py run")
+                    print("     python3 pipeline.py weiter")
                 setze(m, name, "wartet")
                 break
 
@@ -696,6 +722,8 @@ def main():
     sub.add_parser("init")
     p = sub.add_parser("run")
     p.add_argument("--hg", action="store_true", help="im Hintergrund")
+    p = sub.add_parser("weiter", help="offene Pause freigeben und weiterlaufen")
+    p.add_argument("--hg", action="store_true", help="im Hintergrund")
     sub.add_parser("status")
     p = sub.add_parser("log")
     p.add_argument("-f", action="store_true")
@@ -742,6 +770,7 @@ def main():
 
     cfg = G.lade_config()
     {"run": lambda: cmd_run(cfg, args),
+     "weiter": lambda: cmd_weiter(cfg, args),
      "status": lambda: cmd_status(cfg),
      "reset": lambda: cmd_reset(cfg, args),
      "schritte": lambda: cmd_schritte(cfg)}[args.kommando]()
