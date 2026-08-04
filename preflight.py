@@ -815,7 +815,14 @@ def selbsttest(cfg, b):
             def worksheet(s, n):
                 return s.blaetter[n]
 
+        # G.lade_json wird gleich ersetzt. RS.G IST das Modul gemeinsam —
+        # die Wiederherstellung muss deshalb das Original von VORHER
+        # zurueckschreiben. 'RS.G.lade_json = G.lade_json' im finally sah
+        # richtig aus und war ein No-op: G.lade_json ist zu dem Zeitpunkt
+        # bereits die Attrappe. Sie blieb danach fuer den ganzen Prozess
+        # stehen und hat jede spaetere Pruefung, die JSON liest, entwertet.
         echt, buch = RS._buch, _Buch()
+        echt_lade = G.lade_json
         try:
             RS._buch = lambda cfg: buch
             RS.G.lade_json = (lambda p, still=False:
@@ -837,7 +844,7 @@ def selbsttest(cfg, b):
                 fehler.append("Erstbefuellung ueberschreibt gefuellte Tabs")
         finally:
             RS._buch = echt
-            RS.G.lade_json = G.lade_json
+            RS.G.lade_json = echt_lade
 
         tab = [t for t in RS.TABS if t[0] == "Anrede"][0]
         anrede, f = RS._pruefen_und_bauen(
@@ -979,6 +986,75 @@ def selbsttest(cfg, b):
             b.add("OK", "Anredebelege erkennt ‘…’, «…» und „…“")
     except Exception as e:
         b.add("FEHLER", "Anredebelege wirft Ausnahme", repr(e))
+
+    # --- Leseausgabe: die Ausrichtung, und dass Fehlpaarung auffaellt ---
+    # Der gefaehrlichste Fehler dort ist keine Ausnahme, sondern ein
+    # Dokument, in dem ab Absatz 40 die falschen Saetze nebeneinander
+    # stehen. Beide Waechter werden deshalb hier scharf gehalten.
+    try:
+        import tempfile
+        import leseausgabe as LA
+        fehler = []
+        quelle = ["Eerste alinea van de bron.",
+                  "Tweede alinea, iets langer, met meer woorden erin.",
+                  "Derde alinea."]
+        deutsch = ["Erster Absatz der Quelle.",
+                   "Zweiter Absatz, etwas laenger, mit mehr Woertern darin.",
+                   "Dritter Absatz."]
+        probe = dict(cfg)
+        probe["chunk_words"] = 8          # erzwingt mehrere Chunks
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alt = os.getcwd()
+            try:
+                os.chdir(tmp)
+                open(G.F["quelle"], "w", encoding="utf-8").write(
+                    "\n\n".join(quelle))
+                _, _, chunks = LA.quellchunks(probe)
+                for i, (qtext, _) in enumerate(chunks):
+                    G.teil_schreiben("uebersetzung", i, "\n\n".join(
+                        deutsch[quelle.index(p)] for p in G.absaetze(qtext)))
+                ganz = G.teile_zusammensetzen("uebersetzung", len(chunks))
+                open(G.F["uebersetzung"], "w", encoding="utf-8").write(ganz)
+                with open("uebersetzung_state.json", "w") as fh:
+                    json.dump({"total": len(chunks)}, fh)
+
+                zeilen, warnung = LA.zeilen_bauen(probe)
+                if warnung:
+                    fehler.append(f"intakter Stand warnt trotzdem: {warnung}")
+                paare = [(z["quelle"], z["uebersetzung"]) for z in zeilen]
+                if paare != list(zip(quelle, deutsch)):
+                    fehler.append(f"Ausrichtung falsch: {paare}")
+
+                # Gegenprobe 1 (Quellseite): die Quelle waechst, die
+                # Chunkfolge passt nicht mehr zu der, die gelaufen ist.
+                open(G.F["quelle"], "a", encoding="utf-8").write(
+                    "\n\nVierde alinea, die er nog niet was, met genoeg "
+                    "woorden om een eigen chunk te vullen.")
+                if not LA.zeilen_bauen(probe)[1]:
+                    fehler.append("geaenderte Quelle wird nicht gemeldet")
+
+                # Gegenprobe 2 (Zielseite): das Manuskript enthaelt einen
+                # Absatz, den die Zielspalte aus teile/ nicht hergibt —
+                # so sieht ein nachtraeglich geaendertes zitate.json aus.
+                open(G.F["quelle"], "w", encoding="utf-8").write(
+                    "\n\n".join(quelle))
+                open(G.F["uebersetzung"], "a", encoding="utf-8").write(
+                    "\n\nEin Absatz, der nur im Manuskript steht.")
+                if not LA.zeilen_bauen(probe)[1]:
+                    fehler.append("abweichendes Manuskript wird nicht "
+                                  "gemeldet")
+            finally:
+                os.chdir(alt)
+
+        if fehler:
+            for f in fehler:
+                b.add("FEHLER", "Leseausgabe", f)
+        else:
+            b.add("OK", "Leseausgabe: Absaetze richtig gepaart, "
+                        "Fehlpaarung wird gemeldet")
+    except Exception as e:
+        b.add("FEHLER", "Leseausgabe wirft Ausnahme", repr(e))
 
     selbsttest_backends(b)
 

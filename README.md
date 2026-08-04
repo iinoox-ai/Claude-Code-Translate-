@@ -98,6 +98,7 @@ Vollständige Anleitung: **`ABLAUFPLAN.md`**
 | `qa.py` | Qualitätsprüfung mit Notbremse, globale Konsistenz |
 | `bewertung.py` | Testläufe auswerten, Exportpakete |
 | `diffview.py` | wortweiser Änderungsbericht, HTML oder Terminal |
+| `leseausgabe.py` | Quelle, Entwurf und lektorierte Fassung nebeneinander |
 | `paket.py` | Ergebnis archivieren |
 
 ### Referenzmaterial (entsteht unterwegs)

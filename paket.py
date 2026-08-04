@@ -4,11 +4,14 @@ Ergebnis paketieren.  Aufraeumen macht 'pipeline.py neu'.
 
     python3 paket.py
 """
-import os, shutil, sys, tarfile
+import os, shutil, subprocess, sys, tarfile
 import gemeinsam as G
 
 ARCHIV, ORDNER = "ergebnis.tar.gz", "ergebnis"
 PFLICHT = [G.F["quelle"], G.F["uebersetzung"]]
+
+# Der Code liegt im Colab-Betrieb nicht im Arbeitsverzeichnis.
+CODE = os.path.dirname(os.path.abspath(__file__))
 
 MITNEHMEN = [
     G.CONFIG, G.ANWEISUNGEN, G.MANIFEST,
@@ -25,7 +28,34 @@ MITNEHMEN = [
     "begruendungen.json", "analysepaket.md",
     "bewertung_uebersetzung.md", "bewertung_lektorat.md",
     "bewertung_varianten.md",
+    # Die Leseausgabe ist das Stueck, mit dem ein Mensch das Buch
+    # tatsaechlich durchgeht — sie wird unten miterzeugt.
+    "leseausgabe.html",
 ]
+
+
+def leseausgabe_bauen():
+    """Erzeugt die Leseausgabe gleich mit.
+
+    Wie bei bericht.html in lektorat.py: Der Schritt, der ausliefert,
+    erzeugt auch das, was ausgeliefert wird — sonst steht am Ende ein
+    Befehl da, den jemand von Hand abtippen soll."""
+    try:
+        r = subprocess.run(
+            [sys.executable, os.path.join(CODE, "leseausgabe.py")],
+            capture_output=True, text=True, timeout=600)
+    except Exception as e:
+        print(f"  WARNUNG: Leseausgabe nicht erzeugt — {e}")
+        return
+    if r.returncode != 0:
+        print(f"  WARNUNG: Leseausgabe nicht erzeugt — "
+              f"{(r.stderr or '').strip()[:300]}")
+        return
+    # Meldet die Leseausgabe eine verschobene Zuordnung, darf das nicht in
+    # der abgefangenen Ausgabe des Unterprozesses verschwinden.
+    for zeile in (r.stdout or "").splitlines():
+        if zeile.startswith("WARNUNG:"):
+            print(f"  Leseausgabe: {zeile}")
 
 
 def main():
@@ -33,6 +63,8 @@ def main():
     fehlt = [p for p in PFLICHT if not os.path.exists(p)]
     if fehlt:
         sys.exit("FEHLER: es fehlen " + ", ".join(fehlt))
+
+    leseausgabe_bauen()
 
     if os.path.isdir(ORDNER):
         shutil.rmtree(ORDNER)
