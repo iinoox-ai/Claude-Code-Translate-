@@ -359,6 +359,71 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Tarifabgleich nicht pruefbar", repr(e))
 
+    # --- Kostenbuchung: je Lauf, Rolle UND Modell ---------------------
+    # Der teuerste Fehler der Buchhaltung: Ein Testlauf mit einem anderen
+    # Modell hat die ganze Rolle auf dieses Modell umetikettiert und die
+    # Buchkosten dadurch um 57 % zu hoch ausgewiesen (109,5 statt 69,7 $).
+    try:
+        import tempfile
+        fehler = []
+        alt_cwd, alt_lauf = os.getcwd(), G.lauf_name()
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                os.chdir(tmp)
+                G.lauf_setzen("")
+                G.usage_buchen("uebersetzung", "claude-opus-5",
+                               {"ein": 100, "aus": 200, "cache_lesen": 300,
+                                "cache_schreiben": 40})
+                G.lauf_setzen("testB/")
+                G.usage_buchen("uebersetzung", "claude-fable-5",
+                               {"ein": 10, "aus": 20})
+                m = json.load(open(G.MANIFEST, encoding="utf-8"))
+            finally:
+                os.chdir(alt_cwd)
+                G.lauf_setzen(alt_lauf)
+
+        posten = G.kosten_posten(m)
+        if len(posten) != 2:
+            fehler.append(f"{len(posten)} Buchungen statt 2 — der Testlauf "
+                          f"hat die Buchproduktion ueberschrieben")
+        else:
+            (l1, r1, mo1, e1), (l2, r2, mo2, e2) = posten
+            if (l1, mo1) != ("voll", "claude-opus-5"):
+                fehler.append(f"Buchproduktion steht nicht zuerst: {l1}/{mo1}")
+            if (l2, mo2) != ("testB", "claude-fable-5"):
+                fehler.append(f"Testlauf falsch gebucht: {l2}/{mo2}")
+            if e1["ein"] != 100 or e1["aus"] != 200:
+                fehler.append(f"Token vermischt: {e1['ein']}/{e1['aus']}")
+            if r1 != "uebersetzung" or r2 != "uebersetzung":
+                fehler.append(f"Rolle verloren: {r1}, {r2}")
+
+        # Die Summe wird je Lauf gebildet, sonst zahlt das Buch den Test mit.
+        _, summen, _ = G.kosten_je_rolle(m)
+        t = G.tarif("claude-opus-5")
+        soll = (100 * t["ein"] + 300 * t["ein"] * G.CACHE_LESE_FAKTOR
+                + 40 * t["ein"] * G.CACHE_SCHREIB_FAKTOR
+                + 200 * t["aus"]) / 1e6
+        if abs(summen.get("voll", 0) - soll) > 1e-9:
+            fehler.append(f"Summe voll {summen.get('voll')} statt {soll}")
+        if "testB" not in summen:
+            fehler.append("Testlauf taucht in den Summen nicht auf")
+
+        # Gegenprobe Altformat: ein Manifest ohne Laufkennung bleibt lesbar
+        # und behauptet nicht, es sei die Buchproduktion gewesen.
+        a = G.kosten_posten({"kosten": {"revision": {
+            "modell": "claude-opus-5", "aufrufe": 1, "ein": 1, "aus": 1,
+            "cache_lesen": 0, "cache_schreiben": 0}}})
+        if len(a) != 1 or a[0][0] != "" or a[0][1] != "revision":
+            fehler.append(f"Altformat falsch gelesen: {a}")
+
+        if fehler:
+            b.add("FEHLER", "Kostenbuchung fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Kosten: je Lauf, Rolle und Modell gebucht, "
+                        "Testlauf getrennt ausgewiesen")
+    except Exception as e:
+        b.add("FEHLER", "Kostenbuchung nicht pruefbar", repr(e))
+
     # --- Paket 9: der Ablaufplan muss zur Schrittliste passen ----------
     # Ein Plan, der einen Schritt nicht kennt, schickt den Leser ins
     # Leere — und das faellt erst auf, wenn jemand danach arbeitet.

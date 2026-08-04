@@ -824,6 +824,45 @@ lauffähig zu sein ist damit weiter gegeben.
 
 ---
 
+## Kosten werden je Lauf, Rolle und Modell gebucht
+
+**Entschieden (August 2026), Widerruf der Buchung je Rolle.** `manifest.json`
+summierte Token unter dem Rollennamen allein und schrieb bei jedem Aufruf das
+zuletzt benutzte Modell in denselben Eintrag. Ein Testlauf mit einem anderen
+Modell hat damit die gesamte Rolle auf dieses Modell umetikettiert — Token aus
+zwei Modellen in einer Zeile, bewertet mit dem Preis des zuletzt benutzten.
+
+Was das gekostet hat: Der Lauf 1919 wies **109,52 $** aus. Die Rollen
+`uebersetzung` und `revision` liefen mit `claude-opus-5`; ein Vergleichslauf am
+Testauszug mit `claude-fable-5` (10 $ / 50 $ statt 5 $ / 25 $) hat beide Zeilen
+umbeschriftet und den Preis verdoppelt. Der wahre Wert liegt bei rund
+**69,7 $**. Die Buchung hat also um 57 % nach oben getäuscht — und zwar in
+genau der Zahl, an der Kalibrierungsentscheidungen hängen.
+
+Der Beleg: Für die Buchproduktion sagt die Buchung mit Opus-Tarif 39,81 $ für
+`uebersetzung` plus `revision`. Das deckt sich mit der Vorabschätzung von 38 $
+in „Gemessen unter Opus 5"; mit Fable-Tarif wären es 79,62 $ — eine Zahl, die
+dort nie stand.
+
+Seither ist der Buchungsschlüssel `lauf/rolle/modell`. Der Lauf kommt aus dem
+Ausgabepräfix (`''`, `test/`, `testB/`), damit die Zuordnung an derselben
+Stelle steht wie die Dateiablage. Testläufe erscheinen in der Übersicht
+getrennt: Sie kosten Geld, aber sie gehören nicht in den Preis des Buches.
+
+Zwei Dinge, die daran hängen und nicht wieder auseinanderlaufen dürfen:
+
+- **Eine Preisformel für alle Auswertungen** (`gemeinsam.kosten_dollar`). Die
+  Variantenkosten in `bewertung.py` rechneten ohne Cache und lagen dadurch zu
+  niedrig — zwei Formeln waren zwei Wahrheiten.
+- **Altes Format bleibt lesbar.** Ein Manifest ohne Laufkennung wird gezeigt,
+  aber unter „Lauf nicht zugeordnet" — es behauptet nicht, die Buchproduktion
+  gewesen zu sein.
+
+Der Selbsttest hält den Fall fest: zwei Buchungen derselben Rolle mit
+verschiedenen Modellen müssen zwei Zeilen ergeben, nicht eine.
+
+---
+
 ## Verworfen — und warum
 
 **API-Frontier-Modell als Primärübersetzer** (zunächst). Die Kostenrechnung

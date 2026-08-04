@@ -538,9 +538,11 @@ def token_faktor(manifest=None):
     Sobald 'kosten' in manifest.json echte Token neben echten Woertern
     stehen hat, gilt das gemessene Verhaeltnis."""
     try:
-        k = (manifest or {}).get("kosten", {})
-        woerter = k.get("_woerter_quelle", 0)
-        ein = sum(r.get("ein", 0) for r in k.values() if isinstance(r, dict))
+        woerter = (manifest or {}).get("kosten", {}).get("_woerter_quelle", 0)
+        # Nur die Buchproduktion: Testlaeufe rechnen auf einem Auszug und
+        # wuerden das Verhaeltnis Token je Quellwort verzerren.
+        ein = sum(e.get("ein", 0) for lauf, _, _, e in kosten_posten(manifest)
+                  if lauf in ("voll", ""))
         if woerter > 500 and ein > 0:
             return round(ein / woerter, 2)
     except Exception:
@@ -548,25 +550,53 @@ def token_faktor(manifest=None):
     return TOKEN_JE_WORT
 
 
-def usage_buchen(rolle, modell, usage):
-    """Summiert Token je Rolle in manifest.json (F: Kosten sind Ergebnis).
+# Laufkontext der Buchung. Ein Testlauf mit einem anderen Modell darf die
+# Buchung der Buchproduktion nicht ueberschreiben — genau das ist beim Lauf
+# 1919 passiert und hat die Kosten um 57 % zu hoch ausgewiesen.
+_LAUF = "voll"
 
-    Schlaegt das fehl, kostet das nur die Statistik — nie den Lauf."""
+
+def lauf_setzen(praefix):
+    """Bucht folgende Aufrufe unter diesem Lauf.
+
+    Aufrufer geben den Ausgabepraefix weiter ('test/', 'testB/', ''), so
+    steht die Zuordnung an derselben Stelle wie die Dateiablage."""
+    global _LAUF
+    _LAUF = (praefix or "").strip("/") or "voll"
+
+
+def lauf_name():
+    return _LAUF
+
+
+def kosten_schluessel(lauf, rolle, modell):
+    """Buchungsschluessel. Drei Teile, damit der Leser sie ohne Doku trennt."""
+    return f"{lauf}/{rolle}/{modell}"
+
+
+def usage_buchen(rolle, modell, usage):
+    """Summiert Token je (Lauf, Rolle, Modell) in manifest.json.
+
+    Nicht je Rolle allein: Wer eine Rolle einmal mit einem anderen Modell
+    probiert, haette sonst die gesamte Rolle auf dieses Modell umetikettiert
+    — Token und Preis waeren danach unvereinbar.
+
+    Schlaegt das Buchen fehl, kostet das nur die Statistik — nie den Lauf."""
     try:
         m = {}
         if os.path.exists(MANIFEST):
             m = json.load(open(MANIFEST, encoding="utf-8"))
         k = m.setdefault("kosten", {})
-        e = k.setdefault(rolle, {"modell": modell, "aufrufe": 0, "ein": 0,
-                                 "aus": 0, "cache_lesen": 0,
-                                 "cache_schreiben": 0})
-        e["modell"] = modell
+        e = k.setdefault(kosten_schluessel(_LAUF, rolle, modell),
+                         {"lauf": _LAUF, "rolle": rolle, "modell": modell,
+                          "aufrufe": 0, "ein": 0, "aus": 0,
+                          "cache_lesen": 0, "cache_schreiben": 0})
         e["aufrufe"] += 1
         for feld in ("ein", "aus", "cache_lesen", "cache_schreiben"):
             e[feld] += int(usage.get(feld, 0) or 0)
         tmp = MANIFEST + ".tmp"
-        json.dump(m, open(tmp, "w", encoding="utf-8"),
-                  ensure_ascii=False, indent=2)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(m, f, ensure_ascii=False, indent=2)
         os.replace(tmp, MANIFEST)
     except Exception:
         pass
@@ -585,46 +615,99 @@ def kosten_schnappschuss():
 def kosten_differenz_schreiben(vorher, pfad):
     """Was dieser Lauf gekostet hat, als eigene Datei neben dem Ergebnis.
 
-    Das Manifest bucht nach Rolle, nicht nach Variante. Die Differenz
+    Das Manifest bucht fortlaufend, nicht je Variante. Die Differenz
     vor/nach dem Lauf ist die einzige ehrliche Zuordnung — ohne sie
     liesse sich 'Kosten je Variante' nur schaetzen."""
     try:
         nachher = kosten_schnappschuss()
         d = {}
-        for rolle, e in nachher.items():
-            alt = vorher.get(rolle, {})
+        for schluessel, e in nachher.items():
+            if not isinstance(e, dict) or schluessel.startswith("_"):
+                continue
+            alt = vorher.get(schluessel, {})
             diff = {f: int(e.get(f, 0)) - int(alt.get(f, 0))
                     for f in ("aufrufe", "ein", "aus", "cache_lesen",
                               "cache_schreiben")}
             if diff["aufrufe"] > 0:
-                diff["modell"] = e.get("modell", "")
-                d[rolle] = diff
-        json.dump(d, open(pfad, "w", encoding="utf-8"),
-                  ensure_ascii=False, indent=2)
+                for f in ("lauf", "rolle", "modell"):
+                    diff[f] = e.get(f, "")
+                d[schluessel] = diff
+        with open(pfad, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
 
 
-def kosten_je_rolle(manifest):
-    """(Zeilen, Summe, unsicher) fuer die Kostenuebersicht."""
-    zeilen, summe, unsicher = [], 0.0, False
-    for rolle, e in sorted((manifest or {}).get("kosten", {}).items()):
-        if not isinstance(e, dict) or rolle.startswith("_"):
+# Cache-Lesen kostet ein Zehntel des Eingabepreises, Cache-Schreiben mehr als
+# das Schreiben ohne Cache. Der Faktor haengt an der Lebensdauer des Eintrags:
+# 1,25 bei fuenf Minuten, 2,0 bei einer Stunde.
+CACHE_LESE_FAKTOR = 0.1
+CACHE_SCHREIB_FAKTOR = 1.25
+
+
+def kosten_dollar(e, t):
+    """Preis einer Buchung. Eine Formel fuer alle Auswertungen.
+
+    Zwei Formeln waren zwei Wahrheiten: die Variantenkosten in
+    bewertung.py liessen den Cache weg und lagen dadurch zu niedrig."""
+    if not t:
+        return None
+    return (int(e.get("ein", 0)) * t["ein"]
+            + int(e.get("cache_lesen", 0)) * t["ein"] * CACHE_LESE_FAKTOR
+            + int(e.get("cache_schreiben", 0)) * t["ein"] * CACHE_SCHREIB_FAKTOR
+            + int(e.get("aus", 0)) * t["aus"]) / 1e6
+
+
+def kosten_posten(manifest):
+    """Buchungen als (lauf, rolle, modell, werte), Buchproduktion zuerst.
+
+    Liest auch das alte Format, in dem der Schluessel nur die Rolle war —
+    dort ist der Lauf unbekannt und bleibt leer, statt 'voll' zu behaupten."""
+    raus = []
+    for schluessel, e in (manifest or {}).get("kosten", {}).items():
+        if not isinstance(e, dict) or schluessel.startswith("_"):
             continue
-        t = tarif(e.get("modell", ""))
-        if t:
-            # Cache-Lesen kostet ein Zehntel, Cache-Schreiben das 1,25-fache.
-            d = (e["ein"] * t["ein"]
-                 + e["cache_lesen"] * t["ein"] * 0.1
-                 + e["cache_schreiben"] * t["ein"] * 1.25
-                 + e["aus"] * t["aus"]) / 1e6
-            summe += d
-            unsicher = unsicher or not t["geprueft"]
-        else:
-            d = None
+        teile = schluessel.split("/")
+        alt = len(teile) != 3
+        raus.append((e.get("lauf", "") if alt else teile[0],
+                     e.get("rolle") or (schluessel if alt else teile[1]),
+                     e.get("modell", "") if alt else teile[2],
+                     e))
+    raus.sort(key=lambda x: (x[0] not in ("voll", ""), x[0], x[1], x[2]))
+    return raus
+
+
+def kosten_stand_rolle(rolle):
+    """Bisher gebuchte Token einer Rolle, ueber alle Modelle und Laeufe.
+
+    Fuer Aufrufer, die nur die Differenz ihres eigenen Aufrufs brauchen."""
+    stand = dict.fromkeys(("ein", "aus", "cache_lesen", "cache_schreiben"), 0)
+    try:
+        m = json.load(open(MANIFEST, encoding="utf-8"))
+    except Exception:
+        return stand
+    for _, r, _, e in kosten_posten(m):
+        if r == rolle:
+            for f in stand:
+                stand[f] += int(e.get(f, 0) or 0)
+    return stand
+
+
+def kosten_je_rolle(manifest):
+    """(Zeilen, Summen je Lauf, unsicher) fuer die Kostenuebersicht.
+
+    Zeile: (lauf, rolle, modell, werte, dollar, tarif)."""
+    zeilen, summen, unsicher = [], {}, False
+    for lauf, rolle, modell, e in kosten_posten(manifest):
+        t = tarif(modell)
+        d = kosten_dollar(e, t)
+        if d is None:
             unsicher = True
-        zeilen.append((rolle, e, d, t))
-    return zeilen, summe, unsicher
+        else:
+            summen[lauf] = summen.get(lauf, 0.0) + d
+            unsicher = unsicher or not t["geprueft"]
+        zeilen.append((lauf, rolle, modell, e, d, t))
+    return zeilen, summen, unsicher
 
 
 # ==================================================================

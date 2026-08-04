@@ -23,7 +23,6 @@ damit nicht.
 """
 
 import argparse
-import json
 import os
 import re
 import sys
@@ -225,13 +224,7 @@ def pruefe_echtlauf(e, cfg, anbieter_rollen, tragen):
 
 
 def _usage_stand():
-    try:
-        m = json.load(open(G.MANIFEST, encoding="utf-8"))
-        e = m.get("kosten", {}).get("verifikation", {})
-        return {k: e.get(k, 0) for k in
-                ("ein", "aus", "cache_lesen", "cache_schreiben")}
-    except Exception:
-        return {}
+    return G.kosten_stand_rolle("verifikation")
 
 
 # ==================================================================

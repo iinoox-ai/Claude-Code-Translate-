@@ -150,20 +150,33 @@ def kostenuebersicht(m):
 
     Ein Schritt, der Modelle ruft und hier nicht auftaucht, erfasst seine
     Usage nicht — das gilt als unfertig, nicht als kostenlos."""
-    zeilen, summe, unsicher = G.kosten_je_rolle(m)
+    zeilen, summen, unsicher = G.kosten_je_rolle(m)
     if not zeilen:
         return
+    # Getrennt nach Lauf: Was das Buch kostet, ist die Zahl, nach der
+    # entschieden wird. Testlaeufe zaehlen dazu, aber nicht hinein.
+    beschriftung = {"voll": "Buchproduktion", "": "Lauf nicht zugeordnet",
+                    "test": "Testlauf"}
+    letzter = object()
     print("\nKosten je Rolle")
     print("-" * 62)
-    for rolle, e, dollar, t in zeilen:
+    for lauf, rolle, modell, e, dollar, t in zeilen:
+        if lauf != letzter:
+            letzter = lauf
+            titel = beschriftung.get(lauf, f"Testlauf {lauf[4:] or lauf}")
+            print(f"  [{titel}]")
         token = f"{e['ein']:>9,} ein / {e['aus']:>8,} aus"
         cache = (f", Cache {e['cache_lesen']:,} gelesen"
                  if e["cache_lesen"] else "")
         preis = f"{dollar:6.2f} $" if dollar is not None else "  kein Tarif"
-        print(f"  {rolle:<14} {e['modell']:<18} {token}{cache}")
+        print(f"  {rolle:<14} {modell:<18} {token}{cache}")
         print(f"  {'':<14} {e['aufrufe']:>4} Aufrufe {'':<12} {preis}")
     print("-" * 62)
-    print(f"  Summe: rund {summe:.2f} $")
+    for lauf in sorted(summen, key=lambda x: (x not in ("voll", ""), x)):
+        titel = beschriftung.get(lauf, f"Testlauf {lauf[4:] or lauf}")
+        print(f"  {titel + ':':<24} rund {summen[lauf]:6.2f} $")
+    if len(summen) > 1:
+        print(f"  {'Alles zusammen:':<24} rund {sum(summen.values()):6.2f} $")
     if unsicher:
         print("  Hinweis: nicht alle Tarife sind gegen die Anbieterdoku "
               "verifiziert\n           (Google-Tarife: Stand 31.07.2026, "
@@ -221,6 +234,11 @@ def cmd_status(cfg):
             zusatz = chunkstand(name)
         print(f" {sym} {name:16s} {beschreibung[:44]:46s}{pause}{zusatz}")
     print(f"\nGeschaetzte Restzeit der Modellschritte: ca. {rest} min")
+
+    # Der Stand kostet nichts und beantwortet die haeufigste Zwischenfrage.
+    # Bis Paket A stand er nur am Ende eines vollstaendigen Laufs — also
+    # genau dann nicht, wenn jemand mitten im Buch wissen will, wo er steht.
+    kostenuebersicht(m)
 
     naechster = naechster_schritt(cfg, m)
     if naechster is None:

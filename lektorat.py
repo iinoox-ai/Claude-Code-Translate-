@@ -373,6 +373,7 @@ def main():
     cfg = G.lade_config()
     R.sicherstellen(cfg)          # No-op ohne sheets_id
     praefix = "test/" if args.test else ""
+    G.lauf_setzen(praefix)
     quelle = praefix + G.F["uebersetzung"]
     ziel_datei = praefix + G.F["lektoriert"]
 

@@ -211,13 +211,13 @@ def kosten_zeile(pfad):
     except Exception:
         return "Kosten nicht lesbar"
     summe, aufrufe, unsicher = 0.0, 0, False
-    for rolle, e in d.items():
-        t = G.tarif(e.get("modell", ""))
+    for _, _, modell, e in G.kosten_posten({"kosten": d}):
         aufrufe += int(e.get("aufrufe", 0))
-        if not t:
+        dollar = G.kosten_dollar(e, G.tarif(modell))
+        if dollar is None:
             unsicher = True
-            continue
-        summe += (e.get("ein", 0) * t["ein"] + e.get("aus", 0) * t["aus"]) / 1e6
+        else:
+            summe += dollar
     return (f"{aufrufe} Aufrufe, {summe:.2f} $"
             + (" (unvollstaendig, Tarif unbekannt)" if unsicher else ""))
 
@@ -343,6 +343,9 @@ def main():
 
     G.kopf("BEWERTUNG")
     cfg = G.lade_config()
+    # Die Bewertung urteilt ausschliesslich ueber die Testauszuege; ihre
+    # Urteilsaufrufe gehoeren damit zur Testrechnung, nicht zum Buch.
+    G.lauf_setzen(TESTDIR)
 
     if args.variantenvergleich:
         variantenvergleich(cfg, kein_modell=args.kein_modell)

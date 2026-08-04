@@ -540,6 +540,7 @@ def main():
                   f"»{cfg['rahmen_marker']}«")
 
     # Chunks je Gruppe; Fugen merken (Kontext dort zuruecksetzen)
+    G.lauf_setzen(praefix)
     perspektive = G.lade_json(G.F["stilprofil"], still=True).get("perspektive")
     ebenen = (G.ebenen_folge(gruppen, cfg["rahmen_marker"], perspektive)
               if not args.test else [""] * len(gruppen))
