@@ -41,6 +41,10 @@ Umlaute in Bezeichnern und Kommentaren werden vermieden (`saeubern`,
 
 ## Backends und Modelle
 
+Ein Buch kann eine abweichende Modellwahl beanspruchen: Die betroffenen
+Schlüssel kommen in `technik_ausnahmen`, dann lässt `pipeline.py technik` sie
+in Ruhe und meldet sie nur.
+
 Die Modellbelegung je Rolle steht in `projekt.json`
 (`modell_uebersetzung`, `modell_revision`, `modell_stil`,
 `modell_korrektorat`, `modell_vorbereitung`, `modell_judge`,
@@ -134,7 +138,9 @@ hätte ein nachträglich ergänzter Tab jede bestehende Einrichtung lahmgelegt.
 ## Zitate: nichts ohne Freigabe
 
 `zitatrecherche` schlägt vor, der Mensch gibt frei
-(`freigegeben = ja` in `zitate_review.md` oder im Tab `ZitateReview`). Der
+(`freigegeben = ja` in `zitate_review.md` oder im Tab `ZitateReview`; bei
+gesetzter `sheets_id` schreibt der Schritt den Tab und liest ihn beim
+nächsten Aufruf zurück). Der
 Schritt füllt `vorschlag_de` und die Quellenangaben, **nie `original_deutsch`**
 — dieses eine Feld setzt nur `freigabe_einlesen()`, und nur nach Freigabe.
 Nicht-niederländische Zitate bleiben im Original (`original_belassen`) und

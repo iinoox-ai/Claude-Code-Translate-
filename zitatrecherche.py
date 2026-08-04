@@ -169,6 +169,22 @@ def review_schreiben(epigraphen):
     open(REVIEW, "w", encoding="utf-8").write("\n".join(L) + "\n")
 
 
+def review_in_tab(cfg, epigraphen):
+    """Schreibt die Freigabeliste in den Tab ZitateReview.
+
+    Die Zeilen erzeugt die Recherche, die Spalte 'freigegeben' setzt der
+    Mensch. Deshalb wird sie hier aus dem aktuellen Stand uebernommen —
+    freigabe_einlesen() hat sie kurz zuvor aus Tab bzw. Datei geholt, ein
+    'ja' geht also nicht verloren.
+
+    Ohne diese Richtung waere der Tab eine leere Tabelle, die niemand
+    fuellt, und die Meldung 'im Spreadsheet zu pflegen' waere unwahr."""
+    blatt = R._buch(cfg).worksheet(TAB)
+    blatt.clear()
+    R._blatt_schreiben(blatt, [SPALTEN] + zeilen(epigraphen))
+    return len(epigraphen)
+
+
 def review_lesen():
     """Freigaben aus der Markdown-Tabelle. Gibt {index: (ja?, wortlaut)}."""
     if not os.path.exists(REVIEW):
@@ -293,7 +309,13 @@ def main():
     print(f"Ohne Freigabe (markierte Luecke): {ohne}")
     print(f"\nReview-Liste: {REVIEW}")
     if R.aktiv(cfg):
-        print(f"Im Spreadsheet zu pflegen: Tab {TAB}")
+        try:
+            n = review_in_tab(cfg, epigraphen)
+            print(f"Im Spreadsheet zu pflegen: Tab {TAB} ({n} Zeilen "
+                  f"geschrieben)")
+        except Exception as e:
+            print(f"WARNUNG: Tab {TAB} nicht beschreibbar — {e}")
+            print(f"  Die Freigabe geht dann ueber {REVIEW}.")
     print("\nFreigabe erteilen: in der Spalte 'freigegeben' ein 'ja' "
           "eintragen,\ndann diesen Schritt mit --uebernehmen erneut "
           "starten.")

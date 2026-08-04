@@ -215,6 +215,21 @@ def selbsttest(cfg, b):
         if G.varianten(dict(probe, varianten=[], chunk_words_variante=800)):
             fehler.append("identische Variante wird nicht verworfen")
 
+        # Ein Buch darf ein anderes Modell waehlen, ohne dass der
+        # Technik-Abgleich es beim naechsten Lauf still zuruecksetzt.
+        pj = {"modell_uebersetzung": "claude-sonnet-5",
+              "modell_stil": "veraltet",
+              "technik_ausnahmen": ["modell_uebersetzung"]}
+        rp = {"modell_uebersetzung": "claude-opus-5",
+              "modell_stil": "claude-opus-5"}
+        ueberschrieben = [k for k, _, _ in G.technik_abweichung(pj, rp)]
+        if "modell_uebersetzung" in ueberschrieben:
+            fehler.append("technik setzt die Modellwahl des Buchs zurueck")
+        if "modell_stil" not in ueberschrieben:
+            fehler.append("technik zieht veraltete Schluessel nicht mehr nach")
+        if not G.technik_beansprucht(pj, rp):
+            fehler.append("beanspruchte Schluessel werden nicht gemeldet")
+
         # Ohne Terminal darf die Rueckfrage nicht mit einem Traceback
         # enden — und erst recht nicht stillschweigend loeschen.
         class _Args:
@@ -570,6 +585,38 @@ def selbsttest(cfg, b):
                                   f"({g} gesetzt, {o} offen)")
             finally:
                 os.chdir(alt)
+
+        # Der Tab, aus dem die Freigabe gelesen wird, muss auch
+        # geschrieben werden. Sonst steht dort eine leere Tabelle, und
+        # die Meldung 'im Spreadsheet zu pflegen' ist unwahr.
+        class _Blatt:
+            def __init__(s):
+                s.werte = []
+
+            def clear(s):
+                s.werte = []
+
+            def update(s, a, bb):
+                if not isinstance(a, list):
+                    raise TypeError("alte gspread-Reihenfolge")
+                s.werte = a
+
+        blatt = _Blatt()
+        import referenz_sync as RS_
+        echt_buch = RS_._buch
+        try:
+            RS_._buch = lambda cfg_: type("B", (), {"worksheet": lambda s, n:
+                                                    blatt})()
+            nl["freigegeben"] = "ja"
+            Z.review_in_tab({"sheets_id": "x" * 30}, [eng, nl])
+        finally:
+            RS_._buch = echt_buch
+        if not blatt.werte or blatt.werte[0] != Z.SPALTEN:
+            fehler.append(f"Tab-Kopfzeile fehlt: {blatt.werte[:1]}")
+        elif len(blatt.werte) != 3:
+            fehler.append(f"{len(blatt.werte)-1} statt 2 Zeilen im Tab")
+        elif blatt.werte[2][-1] != "ja":
+            fehler.append("erteilte Freigabe geht beim Schreiben verloren")
 
         # Der Platzhalter bleibt, solange original_deutsch leer ist.
         marken = {2: {"index": 2, "text": "Alles van waarde…",

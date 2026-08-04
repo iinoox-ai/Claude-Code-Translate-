@@ -117,6 +117,11 @@ STANDARD = {
     # Rueckschau-Reset (Paket 5). Leer = keine Rahmenwechsel im Text.
     "rahmen_marker":             "#",
 
+    # Technische Schluessel, die dieses Buch fuer sich beansprucht. Der
+    # Abgleich 'pipeline.py technik' laesst sie in Ruhe — sonst setzt er
+    # eine bewusste Modellwahl je Projekt still zurueck.
+    "technik_ausnahmen":         [],
+
     "glossar_quelle":            "extern",
     "export_glossar":            True,
     "export_bewertung":          True,
@@ -155,7 +160,7 @@ AENDERBAR = {
     "test_words_erzaehlung", "test_words_dialog",
     "lektorat_ratio_min", "lektorat_ratio_max",
     "export_glossar", "export_bewertung", "glossar_quelle", "sheets_id",
-    "rahmen_marker", "varianten",
+    "rahmen_marker", "varianten", "technik_ausnahmen",
     "timeout_connect", "timeout_read", "max_retries",
     "backend_standard", "max_tokens_api", "timeout_read_api",
 } | {f"modell_{r}" for r in (
@@ -393,15 +398,29 @@ TECHNIK = ({"backend_standard", "max_tokens_api", "timeout_read_api"}
 
 
 def technik_abweichung(projekt_cfg, repo_cfg):
-    """(Schluessel, Projektwert, Repowert) fuer jede technische Abweichung."""
+    """(Schluessel, Projektwert, Repowert) fuer jede technische Abweichung.
+
+    Schluessel in 'technik_ausnahmen' bleiben aussen vor: Sie gehoeren
+    diesem Buch, nicht dem Code. Ohne diese Liste haette der Abgleich
+    eine bewusste Modellwahl je Projekt stillschweigend zurueckgesetzt —
+    und das faellt erst am Kostenbericht auf."""
+    ausnahmen = set(projekt_cfg.get("technik_ausnahmen") or [])
     raus = []
     for k in sorted(TECHNIK):
-        if k not in repo_cfg:
+        if k not in repo_cfg or k in ausnahmen:
             continue
         alt, neu = projekt_cfg.get(k), repo_cfg[k]
         if alt != neu:
             raus.append((k, alt, neu))
     return raus
+
+
+def technik_beansprucht(projekt_cfg, repo_cfg):
+    """Was das Projekt fuer sich beansprucht und was im Repo stuende."""
+    ausnahmen = set(projekt_cfg.get("technik_ausnahmen") or [])
+    return [(k, projekt_cfg.get(k), repo_cfg.get(k))
+            for k in sorted(ausnahmen & TECHNIK)
+            if projekt_cfg.get(k) != repo_cfg.get(k)]
 
 
 def _json_lesen(pfad):
