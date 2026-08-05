@@ -2,8 +2,8 @@
 
 Chunkweise Übersetzung buchlanger literarischer Texte mit einem Sprachmodell.
 Aktuell Niederländisch → Deutsch über API-Backends (Anthropic, Google), Betrieb
-in Google Colab mit Datenhaltung in Google Drive; Ollama bleibt als Rückfallpfad
-erhalten. Ein zweiter Satz für Deutsch → Englisch existiert separat.
+in Google Colab mit Datenhaltung in Google Drive. Ein zweiter Satz für
+Deutsch → Englisch existiert separat.
 
 Einstieg ist immer `pipeline.py`. Die Einzelskripte sind aufrufbar, werden im
 Normalbetrieb aber vom Orchestrator gestartet.
@@ -17,11 +17,11 @@ wichtigsten:
   Verlagsreihenfolge ab und ist Absicht.
 - **`gross` wird zu `groß` korrigiert, `Gross` nicht.** Schreibungsabhängig,
   weil großgeschrieben ein Nachname sein kann.
-- **Verstellbar sind `chunk_words`, `context_words` und `effort_<rolle>`.** Die
-  Temperatur-Schlüssel wirken seit der API-Umstellung nur noch auf dem
-  Ollama-Rückfallpfad — `claude-opus-5` hat `temperature`/`top_p`/`top_k`
-  entfernt und antwortet darauf mit HTTP 400. `repeat_penalty` über 1,0 wäre
-  bei diesem Text ohnehin schädlich.
+- **Verstellbar sind `chunk_words`, `context_words` und `effort_<rolle>`.**
+  Sampling-Parameter gibt es nicht mehr: `claude-opus-5` hat
+  `temperature`/`top_p`/`top_k` entfernt und antwortet darauf mit HTTP 400,
+  Gemini ignoriert sie. Mit dem Rückzug des Ollama-Pfads sind die
+  Temperatur-Schlüssel entfallen.
 - **Die lokale Blindbewertung bleibt trotz methodischer Schwäche.** Sie ist das
   dritte Signal, nicht die Entscheidungsgrundlage.
 - **Der Anredecheck ist ein Näherungsmaß** und produziert Falschmeldungen. Das
@@ -45,11 +45,27 @@ Ein Buch kann eine abweichende Modellwahl beanspruchen: Die betroffenen
 Schlüssel kommen in `technik_ausnahmen`, dann lässt `pipeline.py technik` sie
 in Ruhe und meldet sie nur.
 
-Die Modellbelegung je Rolle steht in `projekt.json`
-(`modell_uebersetzung`, `modell_revision`, `modell_stil`,
-`modell_korrektorat`, `modell_vorbereitung`, `modell_judge`,
-`modell_annotation`, `modell_vergleich`). Das Backend ergibt sich aus dem
-Modellnamen. Bitte keine Modellnamen hartkodieren.
+Die Modellbelegung je Rolle steht in `projekt.json` (`modell_<rolle>`,
+`effort_<rolle>` für alle zehn Rollen in `gemeinsam.ROLLEN`). Das Backend
+ergibt sich aus dem Modellnamen. Bitte keine Modellnamen hartkodieren.
+
+**Die Empfehlung samt Begründung steht in `gemeinsam.EMPFEHLUNG`,
+nebeneinandergestellt von `pipeline.py modelle`.** Wer die Belegung ändert,
+liest die Begründung genau dann, wenn es darauf ankommt — deshalb steht sie
+im Code und nicht in einer Doku. Abweichen ist vorgesehen; damit
+`pipeline.py technik` die Abweichung stehen lässt, gehört der Schlüssel in
+`technik_ausnahmen`. `effort` wirkt nur bei Anthropic-Modellen; die
+Übersicht sagt das dazu, statt jemanden daran drehen zu lassen.
+
+`annotation` war bis August 2026 **eine** Rolle für zwei verschiedene
+Arbeiten. Sie ist getrennt in `begruendung` (Massenware, eine Zeile je
+Änderung) und `screening` (die eigentliche Qualitätsprüfung gegen das
+Original). Ein Modell für beides hieß: entweder zahlt man den Preis der
+Prüfung für die Massenware, oder man prüft mit dem Modell der Massenware.
+
+Ein entfallener Schlüssel bleibt in einer bestehenden `projekt.json` stehen
+und wirkt nicht mehr — `preflight.py` meldet ihn (`ENTFALLEN`), weil das
+sonst niemand bemerkt.
 
 Zwei Eigenheiten, die nicht „repariert" werden dürfen:
 
@@ -61,7 +77,12 @@ Zwei Eigenheiten, die nicht „repariert" werden dürfen:
   `gemeinsam.EFFORT`).
 - **Der System-Prompt trägt einen Cache-Marker** (Anthropic
   `cache_control`). Wer Prompt-Bausteine umsortiert, zerstört unbemerkt die
-  Cache-Trefferquote — identische Präfixe sind Geld.
+  Cache-Trefferquote — identische Präfixe sind Geld. Die Lebensdauer steht in
+  `cache_ttl` (Standard `1h`) und ist eine Versicherung gegen längere Pausen
+  zwischen zwei Chunks, keine Kostenmaßnahme: Die gemessene Trefferquote lag
+  bereits bei 96 %. Schreiben mit einer Stunde kostet doppelt; `kosten_dollar`
+  rechnet die Anteile getrennt. Lehnt der Anbieter die Lebensdauer ab, läuft
+  der Lauf ohne sie weiter, statt abzubrechen.
 
 Judge-Gewichtung in `bewertung.py`: Diff-Statistik → Gemini-3.1-Pro-Urteil →
 Opus-Selbstcheck (nachrangig wegen Selbstpräferenz). Reihenfolge ist
@@ -127,6 +148,13 @@ bevor Modellkosten entstehen. Die JSONs von Hand zu editieren ist im
 Sheets-Betrieb sinnlos — sie werden überschrieben. Ohne `sheets_id` gilt
 das alte JSON-Direktverhalten (Rückfallpfad, nicht entfernen).
 
+**Der Tab `Modelle` ist die eine Ausnahme in der Richtung.** Er wird
+geschrieben (`referenz_sync.py --modelle`) und **nie zurückgelesen**:
+Modellnamen sind Code-Daten, sie wandern mit dem Repo (`gemeinsam.TECHNIK`),
+Referenzdaten wandern mit dem Buch. Ein zurückgelesener Tab machte die
+Modellwahl zur dritten Quelle neben Repo- und Projekt-`projekt.json`.
+Sichtbar im Spreadsheet, geändert in `projekt.json`.
+
 **Zwei Ausnahmen.** `stilprofil.json` hat kein Tab und bekommt keines: Es ist
 kein Datensatz, sondern ein halbes Dutzend benannter Felder plus die
 verschachtelte `perspektive`. In eine Tabelle gepresst wäre es unlesbar und
@@ -170,8 +198,12 @@ dritten Editierpass — und jeder Pass glättet.
 
 ## Kosten sind Teil des Ergebnisses
 
-Jeder API-Aufruf meldet seine Token-Usage; `manifest.json` summiert je
-Rolle, der Preflight schätzt vor dem Volllauf. Die Preise hält `tarife.py`
+Jeder API-Aufruf meldet seine Token-Usage; `manifest.json` bucht je
+**Lauf, Rolle und Modell** — nicht je Rolle allein, sonst etikettiert ein
+Testlauf mit anderem Modell die ganze Rolle um (das hat den Lauf 1919 um 57 %
+zu teuer ausgewiesen). Testläufe erscheinen getrennt vom Buchpreis. Der
+Preis kommt aus genau einer Formel (`gemeinsam.kosten_dollar`); der Preflight
+schätzt vor dem Volllauf. Die Preise hält `tarife.py`
 gegen die Preisseiten — übernommen wird nur ein eindeutiges Paar, sonst bleibt
 der hinterlegte Wert (Begründung in `ENTSCHEIDUNGEN.md`). Neue modellrufende Schritte
 ohne Usage-Erfassung gelten als unfertig.
@@ -217,12 +249,32 @@ Ebenso wenig: API-Schlüssel. Die gehören in eine Umgebungsvariable, nicht in
 
 ## Abhängigkeiten
 
-Basis bleibt `requests` — beide APIs werden direkt angesprochen, bewusst
-ohne litellm (Begründung in `ENTSCHEIDUNGEN.md`). In Colab vorinstallierte
+Basis bleibt `requests`; beide APIs lassen sich damit direkt ansprechen, und
+der Pfad bleibt als Rückfall bestehen. Ollama ist im August 2026 entfernt
+worden — ein Rückfallpfad, den kein Selbsttest prüfen kann, ist keiner. In Colab vorinstallierte
 Bibliotheken (`google.colab`, `gspread`, `google-auth`) dürfen genutzt
 werden, aber nur hinter Laufzeit-Erkennung mit Fallback: Die Pipeline muss
 auf einem nackten VPS mit nur `requests` lauffähig bleiben. Kein
-`pip install` im Normalbetrieb.
+`pip install` im Normalbetrieb — mit genau einer benannten Ausnahme:
+`anthropic`, die SDK des Anbieters, auf Hauptversion festgelegt, in der
+Einrichtungszelle des Runners. Fehlt der Import, trägt der `requests`-Pfad
+weiter. Die Ablehnung von litellm bleibt bestehen (Begründung in
+`ENTSCHEIDUNGEN.md`).
+
+**Strukturierte Ausgaben nur, wo die Form ausdrückbar ist.** `G.chat(...,
+schema=…)` legt ein JSON-Schema in `output_config.format`. Das Subset verlangt
+`additionalProperties: false` und kann damit **keine offenen Abbildungen**
+ausdrücken — genau das sind die Vorbereitungslieferungen (Wort → Wort). Benutzt
+wird es deshalb in `zitatrecherche.py`, wo der Befund feste Schlüssel hat.
+Gemini bekommt nie ein Schema (anderer Dialekt, HTTP 400); `schema_maengel()`
+meldet vor dem Lauf, was der Anbieter ablehnen würde. Der Parser bleibt überall
+— ein Schema ist eine Zusicherung, keine Ersetzung.
+
+**Beide Transportwege teilen sich `payload()` und `antwort_lesen()`.** Zwei
+Wege sind erlaubt, zwei Wahrheiten darüber, was rausgeht, nicht — der
+Selbsttest prüft den Payload genau einmal. `sdk_fehler()` behält den
+Wortlaut `HTTP <code>`, sonst greift der Rückfall der Cache-Lebensdauer auf
+dem SDK-Pfad nicht. `sdk_nutzen: false` erzwingt `requests`.
 
 ## Testen ohne GPU
 
@@ -253,6 +305,16 @@ Selbsttest, dass alle vier weiterhin baubar sind.
 Chunk-Ausgaben liegen einzeln in `teile/`. Resume zählt Dateien statt einer
 Zustandsdatei zu vertrauen. Das ist Absicht — Zustandsdateien lügen nach einem
 Absturz, Verzeichnisinhalte nicht.
+
+`pipeline.py weiter` gibt die nächste offene Pause frei und läuft weiter — ein
+Befehl statt `reset --ab NAME --fertig` plus `run`. Es hakt immer nur eine
+Pause ab und **nie** einen fehlgeschlagenen Schritt; `reset` bleibt für das,
+was es wirklich kann: einen gelaufenen Schritt wieder öffnen.
+
+Übergroße Chunks werden **gezählt, nicht gekappt** (`chunk_ueberlaengen`,
+Marke 1,25 × `chunk_words`). Ein Absatz gehört zusammen, ein geschütztes Zitat
+erst recht. Gemeldet werden sie in der Vorabprüfung und beim Chunkbau, weil sie
+die Ursache hinter verworfenen Längenverhältnissen sind.
 
 `pipeline.py neu` ist das einzige Kommando, das Ergebnisse löscht, und es fragt
 vorher. In Colab läuft jeder Schritt als Unterprozess ohne Terminal; die

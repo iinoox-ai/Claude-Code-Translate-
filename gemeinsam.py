@@ -52,6 +52,16 @@ TEILE = {
 # ==================================================================
 # Konfiguration
 # ==================================================================
+# 'annotation' war bis August 2026 EINE Rolle fuer zwei sehr verschiedene
+# Arbeiten: eine Begruendungszeile je Aenderung (Massenware, zwanzig Stueck
+# je Aufruf) und das Screening des ganzen Buches gegen das Original (die
+# eigentliche Qualitaetspruefung). Ein Modell fuer beides heisst: entweder
+# zahlt man den Preis der Pruefung fuer die Massenware, oder man prueft mit
+# dem Modell der Massenware.
+ROLLEN = ("uebersetzung", "revision", "stil", "korrektorat", "zitat",
+          "vorbereitung", "judge", "begruendung", "screening", "vergleich")
+
+
 STANDARD = {
     "sprachpaar":                "nl-de",
     "varietaet":                 "bundesdeutsch",
@@ -59,13 +69,9 @@ STANDARD = {
     "dash":                      "halbgeviert",
     "eszett":                    True,
 
-    "backend":                   "ollama",
-    "modell":                    "mistral-medium-3.5:128b-q8_0",
-    "ollama_host":               "http://localhost:21434",
-    "num_ctx":                   16384,
-
-    # API-Aera. Die Modellbelegung je Rolle steht in projekt.json; bleibt sie
-    # leer, faellt die Rolle auf 'modell'/'backend' zurueck (Ollama-Rueckfall).
+    # Die Modellbelegung je Rolle steht in projekt.json. Es gibt keinen
+    # Rueckfall mehr: Eine Rolle ohne Modell ist ein Konfigurationsfehler
+    # und wird gemeldet, nicht stillschweigend ersetzt.
     "backend_standard":          "anthropic",
     "modell_uebersetzung":       "",
     "modell_revision":           "",
@@ -74,7 +80,8 @@ STANDARD = {
     "modell_vorbereitung":       "",
     "modell_zitat":              "",
     "modell_judge":              "",
-    "modell_annotation":         "",
+    "modell_begruendung":        "",
+    "modell_screening":          "",
     "modell_vergleich":          "",
     "effort_uebersetzung":       "hoch",
     "effort_revision":           "hoch",
@@ -83,10 +90,18 @@ STANDARD = {
     "effort_vorbereitung":       "hoch",
     "effort_zitat":              "hoch",
     "effort_judge":              "hoch",
-    "effort_annotation":         "niedrig",
+    "effort_begruendung":        "niedrig",
+    "effort_screening":          "hoch",
     "effort_vergleich":          "hoch",
     "max_tokens_api":            32000,
     "timeout_read_api":          600,       # Auftrag Paket 1: hoechstens 10 min
+    # Lebensdauer des Prompt-Caches. '1h' ist eine Versicherung, kein
+    # Sparposten: Das Praefix ueberlebt eine Pause zwischen zwei Chunks.
+    # Leer laesst die Voreinstellung des Anbieters (fuenf Minuten).
+    "cache_ttl":                 "1h",
+    # Anbieter-SDK benutzen, wenn sie installiert ist. 'false' erzwingt den
+    # requests-Pfad — der bleibt der Rueckfall und muss lauffaehig bleiben.
+    "sdk_nutzen":                True,
 
     "chunk_words":               800,
     "chunk_words_variante":      1200,      # Rueckfall, wenn 'varianten' leer ist
@@ -99,10 +114,6 @@ STANDARD = {
          "modell_uebersetzung": "claude-fable-5"},
     ],
     "context_words":             250,
-    "temperature_uebersetzung":  0.35,
-    "temperature_revision":      0.25,
-    "temperature_stil":          0.25,
-    "temperature_korrektorat":   0.10,
     "revision_pass":             True,
 
     "lektorat_passes":           ["det", "stil", "korrektorat", "det"],
@@ -140,7 +151,6 @@ STANDARD = {
     "anrede_vorgabe":            "u=Sie, jij/je=du",
 
     "timeout_connect":           10,
-    "timeout_read":              900,       # 15 min statt 90 — Retry greift schneller
     "max_retries":               3,
 }
 
@@ -151,24 +161,17 @@ GESCHUETZT = {"ratio_min", "ratio_max", "ratio_kalibriert", "sprachpaar"}
 # Nur diese Schluessel darf ein externes Rueckspiel aendern (V4).
 AENDERBAR = {
     "chunk_words", "chunk_words_variante", "context_words",
-    "temperature_uebersetzung", "temperature_revision",
-    "temperature_stil", "temperature_korrektorat",
     "revision_pass", "lektorat_passes",
     "diminutive", "tempus", "anrede_vorgabe",
     "quotes", "eszett", "varietaet", "dash",
-    "num_ctx", "modell", "backend", "ollama_host",
     "test_words_erzaehlung", "test_words_dialog",
     "lektorat_ratio_min", "lektorat_ratio_max",
     "export_glossar", "export_bewertung", "glossar_quelle", "sheets_id",
     "rahmen_marker", "varianten", "technik_ausnahmen",
-    "timeout_connect", "timeout_read", "max_retries",
-    "backend_standard", "max_tokens_api", "timeout_read_api",
-} | {f"modell_{r}" for r in (
-    "uebersetzung", "revision", "stil", "korrektorat",
-    "vorbereitung", "zitat", "judge", "annotation", "vergleich")
-} | {f"effort_{r}" for r in (
-    "uebersetzung", "revision", "stil", "korrektorat",
-    "vorbereitung", "zitat", "judge", "annotation", "vergleich")}
+    "timeout_connect", "max_retries",
+    "backend_standard", "max_tokens_api", "timeout_read_api", "cache_ttl",
+    "sdk_nutzen",
+} | {f"modell_{r}" for r in ROLLEN} | {f"effort_{r}" for r in ROLLEN}
 
 
 def lade_config(pfad=CONFIG, pflicht=True):
@@ -373,9 +376,6 @@ def api_schluessel(anbieter, still=True):
 # ==================================================================
 # Rollen, Modelle, Backends
 # ==================================================================
-ROLLEN = ("uebersetzung", "revision", "stil", "korrektorat", "zitat",
-          "vorbereitung", "judge", "annotation", "vergleich")
-
 # Das Backend ergibt sich aus dem Modellnamen, nicht aus der Konfiguration.
 # 'backend_standard' ist nur der Default fuer Rollen ohne eigenes Modell.
 PRAEFIXE = (("claude-", "anthropic"), ("gemini-", "google"))
@@ -383,6 +383,78 @@ PRAEFIXE = (("claude-", "anthropic"), ("gemini-", "google"))
 # projekt.json haelt die Stufen deutsch, die APIs erwarten englisch.
 EFFORT = {"niedrig": "low", "mittel": "medium", "hoch": "high",
           "sehr_hoch": "xhigh", "maximal": "max"}
+
+# Nur Anthropic-Modelle kennen 'effort'. Gemini bekommt den Schluessel gar
+# nicht erst geschickt — 'effort_screening' zu aendern hat dort keine
+# Wirkung, und das gehoert dazugesagt, statt dass jemand daran dreht.
+EFFORT_WIRKT = ("anthropic",)
+
+
+# ==================================================================
+# Empfehlung je Rolle — die eine Stelle, an der Modell und Tiefe
+# begruendet stehen. Geaendert wird in projekt.json; 'pipeline.py modelle'
+# stellt Ist und Empfehlung nebeneinander.
+#
+# Die Begruendung steht bewusst hier und nicht in einer Doku: Wer die
+# Belegung aendert, liest sie genau in dem Moment, in dem es darauf
+# ankommt. Empfehlung heisst Empfehlung — abweichen ist vorgesehen,
+# 'technik_ausnahmen' haelt die Abweichung fest.
+# ==================================================================
+EMPFEHLUNG = {
+    "uebersetzung": (
+        "claude-opus-5", "hoch",
+        "Der Text selbst. Hier wird nicht gespart — jeder Fehler dieses "
+        "Passes wandert durch alle folgenden."),
+    "revision": (
+        "claude-opus-5", "hoch",
+        "Sieht Quelle und Entwurf nebeneinander und aendert in 99 % der "
+        "Chunks substanziell. Ein schwaecheres Modell hier hiesse: mit "
+        "dem schwaecheren Urteil ueber das staerkere entscheiden."),
+    "stil": (
+        "claude-opus-5", "hoch",
+        "Wort und Wendung, 86 % der Lektoratsaenderungen. Das ist "
+        "Sprachgefuehl, nicht Regelanwendung."),
+    "korrektorat": (
+        "claude-sonnet-5", "mittel",
+        "Regelanwendung: Rechtschreibung, Zeichensetzung, Kongruenz. "
+        "Dafuer braucht es kein Spitzenmodell, und der Pass laeuft ueber "
+        "das ganze Buch. Wird der Diff duenn oder greift er daneben, "
+        "zurueck auf claude-opus-5 — die Messung steht aus."),
+    "vorbereitung": (
+        "claude-fable-5", "sehr_hoch",
+        "Einmalig, wenige Aufrufe, und alles Spaetere haengt daran: "
+        "Glossar, Figurenblatt, Anrede, Leitmotive, Stilprofil. Ein "
+        "Fehler hier steht in jedem Chunk des Buches. Der Aufpreis faellt "
+        "bei neun Aufrufen nicht ins Gewicht."),
+    "zitat": (
+        "claude-opus-5", "hoch",
+        "Recherche mit Websuche. Ein erfundener Wortlaut waere schlimmer "
+        "als eine markierte Luecke — das Modell muss wissen, wann es "
+        "nichts weiss."),
+    "judge": (
+        "gemini-3.1-pro-preview", "hoch",
+        "Fremdurteil. Bewusst nicht von Anthropic: Ein Modell, das seine "
+        "eigene Ausgabe bewertet, bevorzugt sie."),
+    "begruendung": (
+        "gemini-3.6-flash", "niedrig",
+        "Massenware: eine Zeile je Aenderung, zwanzig Stueck je Aufruf, "
+        "rein berichtend. Der Leser ueberfliegt sie."),
+    "screening": (
+        "gemini-3.1-pro-preview", "hoch",
+        "Liest das ganze Buch gegen das Original und sucht, was vier "
+        "Anthropic-Durchgaenge uebersehen haben. Als Fremdurteil nur "
+        "brauchbar, wenn es von einem anderen Anbieter kommt — und nur "
+        "mit einem Modell, das genau hinsieht."),
+    "vergleich": (
+        "claude-fable-5", "hoch",
+        "Einmaliger Vergleichslauf. Wird von keinem Schritt gerufen; der "
+        "Ping vor dem Lauf prueft den Namen trotzdem mit."),
+}
+
+
+def empfehlung(rolle):
+    """(Modell, Effort, Begruendung) — oder Leeres fuer unbekannte Rollen."""
+    return EMPFEHLUNG.get(rolle, ("", "", ""))
 
 
 # Schluessel, die technische Entscheidungen tragen und deshalb mit dem
@@ -392,7 +464,8 @@ EFFORT = {"niedrig": "low", "mittel": "medium", "hoch": "high",
 #
 # Der Ueberschreibschutz der projekt.json bleibt: erkannt wird die
 # Abweichung, uebernommen wird sie nur auf ausdrueckliche Ansage.
-TECHNIK = ({"backend_standard", "max_tokens_api", "timeout_read_api"}
+TECHNIK = ({"backend_standard", "max_tokens_api", "timeout_read_api",
+            "cache_ttl", "sdk_nutzen"}
            | {f"modell_{r}" for r in ROLLEN}
            | {f"effort_{r}" for r in ROLLEN})
 
@@ -456,16 +529,27 @@ def technik_schreiben(projekt_pfad, repo_pfad):
 
 
 def modell_fuer(cfg, rolle):
-    """Modellname der Rolle. Leer oder unbekannt -> 'modell' (Rueckfallpfad)."""
-    return (cfg.get(f"modell_{rolle}") or "").strip() or cfg.get(
-        "modell", STANDARD["modell"])
+    """Modellname der Rolle.
+
+    Ohne Eintrag ist Schluss: Seit dem Wegfall des Ollama-Pfads gibt es
+    kein Modell mehr, auf das sich zurueckfallen liesse. Ein stiller
+    Ersatz waere die teuerste Art, das zu bemerken — naemlich am
+    Kostenbericht."""
+    modell = (cfg.get(f"modell_{rolle}") or "").strip()
+    if not modell:
+        sys.exit(f"FEHLER: 'modell_{rolle}' ist nicht gesetzt.\n"
+                 f"  Belegung ansehen und ergaenzen: "
+                 f"python3 pipeline.py modelle")
+    return modell
 
 
 def backend_name(modell):
     for praefix, name in PRAEFIXE:
         if modell.startswith(praefix):
             return name
-    return "ollama"
+    sys.exit(f"FEHLER: zu '{modell}' gehoert kein bekannter Anbieter.\n"
+             f"  Erkannt werden Praefixe: "
+             f"{', '.join(p for p, _ in PRAEFIXE)}")
 
 
 def effort_fuer(cfg, rolle):
@@ -539,9 +623,11 @@ def token_faktor(manifest=None):
     Sobald 'kosten' in manifest.json echte Token neben echten Woertern
     stehen hat, gilt das gemessene Verhaeltnis."""
     try:
-        k = (manifest or {}).get("kosten", {})
-        woerter = k.get("_woerter_quelle", 0)
-        ein = sum(r.get("ein", 0) for r in k.values() if isinstance(r, dict))
+        woerter = (manifest or {}).get("kosten", {}).get("_woerter_quelle", 0)
+        # Nur die Buchproduktion: Testlaeufe rechnen auf einem Auszug und
+        # wuerden das Verhaeltnis Token je Quellwort verzerren.
+        ein = sum(e.get("ein", 0) for lauf, _, _, e in kosten_posten(manifest)
+                  if lauf in ("voll", ""))
         if woerter > 500 and ein > 0:
             return round(ein / woerter, 2)
     except Exception:
@@ -549,25 +635,59 @@ def token_faktor(manifest=None):
     return TOKEN_JE_WORT
 
 
-def usage_buchen(rolle, modell, usage):
-    """Summiert Token je Rolle in manifest.json (F: Kosten sind Ergebnis).
+# Alle gebuchten Tokenarten an einer Stelle. Wer eine ergaenzt, ergaenzt sie
+# damit zugleich in Buchung, Differenz und Rollenstand.
+USAGE_FELDER = ("ein", "aus", "cache_lesen", "cache_schreiben",
+                "cache_schreiben_1h")
 
-    Schlaegt das fehl, kostet das nur die Statistik — nie den Lauf."""
+
+# Laufkontext der Buchung. Ein Testlauf mit einem anderen Modell darf die
+# Buchung der Buchproduktion nicht ueberschreiben — genau das ist beim Lauf
+# 1919 passiert und hat die Kosten um 57 % zu hoch ausgewiesen.
+_LAUF = "voll"
+
+
+def lauf_setzen(praefix):
+    """Bucht folgende Aufrufe unter diesem Lauf.
+
+    Aufrufer geben den Ausgabepraefix weiter ('test/', 'testB/', ''), so
+    steht die Zuordnung an derselben Stelle wie die Dateiablage."""
+    global _LAUF
+    _LAUF = (praefix or "").strip("/") or "voll"
+
+
+def lauf_name():
+    return _LAUF
+
+
+def kosten_schluessel(lauf, rolle, modell):
+    """Buchungsschluessel. Drei Teile, damit der Leser sie ohne Doku trennt."""
+    return f"{lauf}/{rolle}/{modell}"
+
+
+def usage_buchen(rolle, modell, usage):
+    """Summiert Token je (Lauf, Rolle, Modell) in manifest.json.
+
+    Nicht je Rolle allein: Wer eine Rolle einmal mit einem anderen Modell
+    probiert, haette sonst die gesamte Rolle auf dieses Modell umetikettiert
+    — Token und Preis waeren danach unvereinbar.
+
+    Schlaegt das Buchen fehl, kostet das nur die Statistik — nie den Lauf."""
     try:
         m = {}
         if os.path.exists(MANIFEST):
             m = json.load(open(MANIFEST, encoding="utf-8"))
         k = m.setdefault("kosten", {})
-        e = k.setdefault(rolle, {"modell": modell, "aufrufe": 0, "ein": 0,
-                                 "aus": 0, "cache_lesen": 0,
-                                 "cache_schreiben": 0})
-        e["modell"] = modell
+        e = k.setdefault(kosten_schluessel(_LAUF, rolle, modell),
+                         dict({"lauf": _LAUF, "rolle": rolle,
+                               "modell": modell, "aufrufe": 0},
+                              **dict.fromkeys(USAGE_FELDER, 0)))
         e["aufrufe"] += 1
-        for feld in ("ein", "aus", "cache_lesen", "cache_schreiben"):
-            e[feld] += int(usage.get(feld, 0) or 0)
+        for feld in USAGE_FELDER:
+            e[feld] = int(e.get(feld, 0)) + int(usage.get(feld, 0) or 0)
         tmp = MANIFEST + ".tmp"
-        json.dump(m, open(tmp, "w", encoding="utf-8"),
-                  ensure_ascii=False, indent=2)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(m, f, ensure_ascii=False, indent=2)
         os.replace(tmp, MANIFEST)
     except Exception:
         pass
@@ -586,46 +706,103 @@ def kosten_schnappschuss():
 def kosten_differenz_schreiben(vorher, pfad):
     """Was dieser Lauf gekostet hat, als eigene Datei neben dem Ergebnis.
 
-    Das Manifest bucht nach Rolle, nicht nach Variante. Die Differenz
+    Das Manifest bucht fortlaufend, nicht je Variante. Die Differenz
     vor/nach dem Lauf ist die einzige ehrliche Zuordnung — ohne sie
     liesse sich 'Kosten je Variante' nur schaetzen."""
     try:
         nachher = kosten_schnappschuss()
         d = {}
-        for rolle, e in nachher.items():
-            alt = vorher.get(rolle, {})
+        for schluessel, e in nachher.items():
+            if not isinstance(e, dict) or schluessel.startswith("_"):
+                continue
+            alt = vorher.get(schluessel, {})
             diff = {f: int(e.get(f, 0)) - int(alt.get(f, 0))
-                    for f in ("aufrufe", "ein", "aus", "cache_lesen",
-                              "cache_schreiben")}
+                    for f in ("aufrufe",) + USAGE_FELDER}
             if diff["aufrufe"] > 0:
-                diff["modell"] = e.get("modell", "")
-                d[rolle] = diff
-        json.dump(d, open(pfad, "w", encoding="utf-8"),
-                  ensure_ascii=False, indent=2)
+                for f in ("lauf", "rolle", "modell"):
+                    diff[f] = e.get(f, "")
+                d[schluessel] = diff
+        with open(pfad, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
 
 
-def kosten_je_rolle(manifest):
-    """(Zeilen, Summe, unsicher) fuer die Kostenuebersicht."""
-    zeilen, summe, unsicher = [], 0.0, False
-    for rolle, e in sorted((manifest or {}).get("kosten", {}).items()):
-        if not isinstance(e, dict) or rolle.startswith("_"):
+# Cache-Lesen kostet ein Zehntel des Eingabepreises, Cache-Schreiben mehr als
+# das Schreiben ohne Cache. Der Faktor haengt an der Lebensdauer des Eintrags:
+# 1,25 bei fuenf Minuten, 2,0 bei einer Stunde.
+CACHE_LESE_FAKTOR = 0.1
+CACHE_SCHREIB_FAKTOR = 1.25
+CACHE_SCHREIB_FAKTOR_1H = 2.0
+
+def kosten_dollar(e, t):
+    """Preis einer Buchung. Eine Formel fuer alle Auswertungen.
+
+    Zwei Formeln waren zwei Wahrheiten: die Variantenkosten in
+    bewertung.py liessen den Cache weg und lagen dadurch zu niedrig."""
+    if not t:
+        return None
+    # 'cache_schreiben' ist die Gesamtzahl; der Anteil mit einer Stunde
+    # Lebensdauer steht daneben und kostet mehr.
+    lang = int(e.get("cache_schreiben_1h", 0))
+    kurz = max(0, int(e.get("cache_schreiben", 0)) - lang)
+    return (int(e.get("ein", 0)) * t["ein"]
+            + int(e.get("cache_lesen", 0)) * t["ein"] * CACHE_LESE_FAKTOR
+            + kurz * t["ein"] * CACHE_SCHREIB_FAKTOR
+            + lang * t["ein"] * CACHE_SCHREIB_FAKTOR_1H
+            + int(e.get("aus", 0)) * t["aus"]) / 1e6
+
+
+def kosten_posten(manifest):
+    """Buchungen als (lauf, rolle, modell, werte), Buchproduktion zuerst.
+
+    Liest auch das alte Format, in dem der Schluessel nur die Rolle war —
+    dort ist der Lauf unbekannt und bleibt leer, statt 'voll' zu behaupten."""
+    raus = []
+    for schluessel, e in (manifest or {}).get("kosten", {}).items():
+        if not isinstance(e, dict) or schluessel.startswith("_"):
             continue
-        t = tarif(e.get("modell", ""))
-        if t:
-            # Cache-Lesen kostet ein Zehntel, Cache-Schreiben das 1,25-fache.
-            d = (e["ein"] * t["ein"]
-                 + e["cache_lesen"] * t["ein"] * 0.1
-                 + e["cache_schreiben"] * t["ein"] * 1.25
-                 + e["aus"] * t["aus"]) / 1e6
-            summe += d
-            unsicher = unsicher or not t["geprueft"]
-        else:
-            d = None
+        teile = schluessel.split("/")
+        alt = len(teile) != 3
+        raus.append((e.get("lauf", "") if alt else teile[0],
+                     e.get("rolle") or (schluessel if alt else teile[1]),
+                     e.get("modell", "") if alt else teile[2],
+                     e))
+    raus.sort(key=lambda x: (x[0] not in ("voll", ""), x[0], x[1], x[2]))
+    return raus
+
+
+def kosten_stand_rolle(rolle):
+    """Bisher gebuchte Token einer Rolle, ueber alle Modelle und Laeufe.
+
+    Fuer Aufrufer, die nur die Differenz ihres eigenen Aufrufs brauchen."""
+    stand = dict.fromkeys(USAGE_FELDER, 0)
+    try:
+        m = json.load(open(MANIFEST, encoding="utf-8"))
+    except Exception:
+        return stand
+    for _, r, _, e in kosten_posten(m):
+        if r == rolle:
+            for f in stand:
+                stand[f] += int(e.get(f, 0) or 0)
+    return stand
+
+
+def kosten_je_rolle(manifest):
+    """(Zeilen, Summen je Lauf, unsicher) fuer die Kostenuebersicht.
+
+    Zeile: (lauf, rolle, modell, werte, dollar, tarif)."""
+    zeilen, summen, unsicher = [], {}, False
+    for lauf, rolle, modell, e in kosten_posten(manifest):
+        t = tarif(modell)
+        d = kosten_dollar(e, t)
+        if d is None:
             unsicher = True
-        zeilen.append((rolle, e, d, t))
-    return zeilen, summe, unsicher
+        else:
+            summen[lauf] = summen.get(lauf, 0.0) + d
+            unsicher = unsicher or not t["geprueft"]
+        zeilen.append((lauf, rolle, modell, e, d, t))
+    return zeilen, summen, unsicher
 
 
 # ==================================================================
@@ -634,9 +811,18 @@ def kosten_je_rolle(manifest):
 class Backend:
     """Basisklasse. Ein weiterer Anbieter heisst: eine Unterklasse."""
 
-    def chat(self, cfg, system, user, temperature, num_ctx=None,
-             rolle="uebersetzung", modell="", roh=False):
+    def chat(self, cfg, system, user, rolle="uebersetzung", modell="",
+             roh=False, werkzeuge=None, schema=None):
         raise NotImplementedError
+
+    def zaehle_tokens(self, cfg, system, user, modell=""):
+        """Exakte Eingabetoken beim Anbieter, oder None.
+
+        Kostenlos bei beiden Anbietern und unabhaengig vom Tokenizer, den
+        das Modell gerade benutzt. 'None' heisst: nicht ermittelbar (kein
+        Schluessel, kein Netz, Endpunkt geaendert) — dann greift die
+        Schaetzung, statt dass ein Bericht ausfaellt."""
+        return None
 
     def verfuegbare_modelle(self, cfg):
         return []
@@ -690,48 +876,91 @@ def sende(post, max_retries, schlafen=time.sleep):
     raise letzter or ApiFehler("Anfrage fehlgeschlagen")
 
 
-class OllamaBackend(Backend):
-    _think = True
+# Lebensdauer des Cache-Eintrags. Wird sie vom Anbieter abgelehnt, faellt
+# der Lauf hierueber auf die Voreinstellung zurueck, statt abzubrechen.
+_TTL_ABGELEHNT = False
 
-    def chat(self, cfg, system, user, temperature, num_ctx=None,
-             rolle="uebersetzung", modell="", roh=False):
-        host = cfg["ollama_host"]
-        timeout = (cfg["timeout_connect"], cfg["timeout_read"])
 
-        def post(mit_think):
-            p = {
-                "model": modell or cfg["modell"],
-                "messages": [{"role": "system", "content": system},
-                             {"role": "user", "content": user}],
-                "stream": False, "keep_alive": "60m",
-                "options": {"num_ctx": num_ctx or cfg["num_ctx"],
-                            "num_predict": -1, "temperature": temperature,
-                            "top_p": 1.0, "repeat_penalty": 1.0,
-                            "presence_penalty": 0.0},
-            }
-            if mit_think:
-                p["think"] = False
-            return requests.post(f"{host}/api/chat", json=p, timeout=timeout)
+def cache_ttl(cfg):
+    """Gewuenschte Cache-Lebensdauer, oder '' fuer die Voreinstellung.
 
-        r = post(self._think)
-        if r.status_code == 400 and self._think:
-            OllamaBackend._think = False
-            r = post(False)
-        r.raise_for_status()
-        d = r.json()
-        if d.get("done_reason") == "length":
-            print("    WARNUNG: Ausgabe am Limit abgeschnitten.")
-        inhalt = d.get("message", {}).get("content", "")
-        return inhalt if roh else saeubern(inhalt)
+    'Versicherung, keine Kostenersparnis': Bei einer Stunde ueberlebt das
+    Praefix eine Pause zwischen zwei Chunks — eine getrennte Colab-Sitzung,
+    einen Blick in den Bericht, einen langsamen Chunk. Bezahlt wird das mit
+    einem hoeheren Schreibpreis; das lohnt erst, wenn ohne TTL geschrieben
+    werden muesste."""
+    if _TTL_ABGELEHNT:
+        return ""
+    t = str(cfg.get("cache_ttl", "") or "").strip()
+    return t if t in ("5m", "1h") else ""
 
-    def verfuegbare_modelle(self, cfg):
-        r = requests.get(f"{cfg['ollama_host']}/api/tags", timeout=10)
-        r.raise_for_status()
-        return [m["name"] for m in r.json().get("models", [])]
+
+# Die Anbieter-SDK, wenn sie installiert ist. Sie bringt Streaming ohne
+# handgeschriebenen SSE-Parser, exakte Tokenzaehlung und den Stapel-Adapter.
+# Fehlt sie, laeuft der requests-Pfad unveraendert weiter — die Pipeline muss
+# auf einem nackten VPS mit nur 'requests' lauffaehig bleiben.
+_SDK = None          # None: noch nicht versucht. False: nicht vorhanden.
+_KLIENTEN = {}
+
+
+def anthropic_sdk():
+    """Das Modul 'anthropic', oder False. Einmal versucht, dann gemerkt."""
+    global _SDK
+    if _SDK is None:
+        try:
+            import anthropic
+            _SDK = anthropic
+        except Exception:
+            _SDK = False
+    return _SDK
+
+
+def sdk_antwort(klient, payload):
+    """Ein Aufruf ueber die SDK, als dasselbe dict wie der requests-Pfad.
+
+    'model_dump' gibt genau die Struktur zurueck, die auch ueber die Leitung
+    kaeme. Damit bleibt 'antwort_lesen' der einzige Ort, der Antworten
+    versteht — sonst driften die beiden Wege auseinander und nur einer wird
+    getestet."""
+    sdk = anthropic_sdk()
+    try:
+        return klient.messages.create(**payload).model_dump()
+    except Exception as e:
+        raise sdk_fehler(sdk, e) from e
+
+
+def sdk_fehler(sdk, e):
+    """SDK-Ausnahme -> ApiFehler im Wortlaut des requests-Pfads.
+
+    Der Wortlaut ist nicht Kosmetik: 'ttl_abgelehnt' und die Fehlersuche im
+    Log lesen 'HTTP <code>'. Ein SDK-Pfad mit eigenem Wortlaut haette den
+    Rueckfall der Cache-Lebensdauer still ausgehebelt."""
+    code = getattr(e, "status_code", None)
+    if code is None and sdk and isinstance(e, getattr(
+            sdk, "APIConnectionError", ())):
+        return ApiFehler(f"Netzwerkfehler: {e}")
+    if code is None:
+        return ApiFehler(str(e))
+    koerper = getattr(e, "body", None) or getattr(e, "message", "") or str(e)
+    if code in (401, 403):
+        return ApiFehler(
+            f"HTTP {code} — Schluessel fehlt, ist abgelaufen oder hat keine "
+            f"Berechtigung fuer dieses Modell.\n{str(koerper)[:300]}")
+    return ApiFehler(f"HTTP {code}: {str(koerper)[:300]}")
+
+
+def ttl_abgelehnt(fehler):
+    """Ist dieser Fehler die Ablehnung der Cache-Lebensdauer?
+
+    Eng gefasst: nur HTTP 400, und nur wenn die Meldung den Marker selbst
+    benennt. Ein zu weiter Fang wuerde echte Payloadfehler verschlucken und
+    still ein zweites Mal Geld ausgeben."""
+    t = str(fehler)
+    return t.startswith("HTTP 400") and "ttl" in t.lower()
 
 
 class AnthropicBackend(Backend):
-    """Messages-API. Zwei Eigenheiten sind Absicht, nicht Versehen:
+    """Messages-API. Drei Eigenheiten sind Absicht, nicht Versehen:
 
     - Der System-Prompt traegt einen Cache-Marker. Er ist ueber alle Chunks
       byteweise identisch; wer Bausteine umsortiert, zerstoert die
@@ -739,21 +968,34 @@ class AnthropicBackend(Backend):
     - Es gehen KEINE Sampling-Parameter raus. claude-opus-5 hat
       temperature/top_p/top_k entfernt und antwortet darauf mit HTTP 400.
       Die Tiefe steuert 'effort'. Begruendung in ENTSCHEIDUNGEN.md.
+    - Die Cache-Lebensdauer ist eine Versicherung, kein Sparposten. Lehnt
+      der Anbieter sie ab, laeuft der Lauf ohne sie weiter.
     """
 
     URL     = "https://api.anthropic.com/v1/messages"
     VERSION = "2023-06-01"
 
-    def payload(self, cfg, system, user, rolle, modell, werkzeuge=None):
+    def payload(self, cfg, system, user, rolle, modell, werkzeuge=None,
+                schema=None):
+        marker = {"type": "ephemeral"}
+        ttl = cache_ttl(cfg)
+        if ttl:
+            marker["ttl"] = ttl
         p = {
             "model": modell,
             "max_tokens": int(cfg.get("max_tokens_api", 32000)),
             # Liste statt String: nur ein Block kann den Cache-Marker tragen.
             "system": [{"type": "text", "text": system,
-                        "cache_control": {"type": "ephemeral"}}],
+                        "cache_control": marker}],
             "messages": [{"role": "user", "content": user}],
             "output_config": {"effort": effort_fuer(cfg, rolle)},
         }
+        if schema:
+            # Strukturierte Ausgabe: Der Anbieter erzwingt die Form, statt
+            # dass ein Parser sie aus Prosa fischt. 'format' steht neben
+            # 'effort' im selben Block.
+            p["output_config"]["format"] = {"type": "json_schema",
+                                            "schema": schema}
         if werkzeuge:
             p["tools"] = werkzeuge
         return p
@@ -768,30 +1010,102 @@ class AnthropicBackend(Backend):
         text = "".join(b.get("text", "") for b in d.get("content", [])
                        if b.get("type") == "text")
         u = d.get("usage") or {}
+        # Die Aufschluesselung entscheidet ueber den Preis: ein Eintrag mit
+        # einer Stunde Lebensdauer kostet beim Schreiben doppelt, einer mit
+        # fuenf Minuten das 1,25-fache. Ohne sie waere jede Kostenzeile eine
+        # Schaetzung.
+        c = u.get("cache_creation") or {}
         usage = {"ein": u.get("input_tokens", 0),
                  "aus": u.get("output_tokens", 0),
                  "cache_lesen": u.get("cache_read_input_tokens", 0),
-                 "cache_schreiben": u.get("cache_creation_input_tokens", 0)}
+                 "cache_schreiben": u.get("cache_creation_input_tokens", 0),
+                 "cache_schreiben_1h": c.get("ephemeral_1h_input_tokens", 0)}
         if d.get("stop_reason") == "max_tokens":
             print("    WARNUNG: Ausgabe am max_tokens-Limit abgeschnitten.")
         return (text if roh else saeubern(text)), usage
 
-    def chat(self, cfg, system, user, temperature, num_ctx=None,
-             rolle="uebersetzung", modell="", roh=False, werkzeuge=None):
+    ZAEHLER = "https://api.anthropic.com/v1/messages/count_tokens"
+
+    def klient(self, cfg):
+        """Der SDK-Klient, oder None. Einmal gebaut, dann behalten.
+
+        Je Aufruf einen neuen zu bauen wuerde den Verbindungspool
+        wegwerfen — bei 600 Aufrufen je Buch ist das keine Kleinigkeit."""
+        sdk = anthropic_sdk()
+        if not sdk or not cfg.get("sdk_nutzen", True):
+            return None
+        schluessel = api_schluessel("anthropic")
+        if not schluessel:
+            return None
+        if schluessel not in _KLIENTEN:
+            _KLIENTEN[schluessel] = sdk.Anthropic(
+                api_key=schluessel,
+                timeout=float(cfg.get("timeout_read_api", 600)),
+                max_retries=int(cfg.get("max_retries", 3)))
+        return _KLIENTEN[schluessel]
+
+    def zaehle_tokens(self, cfg, system, user, modell=""):
+        schluessel = api_schluessel("anthropic")
+        if not schluessel:
+            return None
+        anfrage = {"model": modell,
+                   "system": [{"type": "text", "text": system}],
+                   "messages": [{"role": "user", "content": user}]}
+        k = self.klient(cfg)
+        try:
+            if k is not None:
+                return int(k.messages.count_tokens(**anfrage).input_tokens)
+            r = requests.post(
+                self.ZAEHLER, json=anfrage,
+                headers={"x-api-key": schluessel,
+                         "anthropic-version": self.VERSION,
+                         "content-type": "application/json"},
+                timeout=(cfg.get("timeout_connect", 10), 60))
+            return int(r.json()["input_tokens"]) if r.status_code == 200 \
+                else None
+        except Exception:
+            return None
+
+    def chat(self, cfg, system, user, rolle="uebersetzung", modell="",
+             roh=False, werkzeuge=None, schema=None):
         schluessel = api_schluessel("anthropic")
         if not schluessel:
             sys.exit("FEHLER: ANTHROPIC_API_KEY fehlt.\n"
                      "  Colab:  im Secrets-Reiter hinterlegen\n"
                      "  sonst:  export ANTHROPIC_API_KEY=...")
-        p = self.payload(cfg, system, user, rolle, modell, werkzeuge)
         kopfzeilen = {"x-api-key": schluessel,
                       "anthropic-version": self.VERSION,
                       "content-type": "application/json"}
         timeout = (cfg["timeout_connect"], cfg.get("timeout_read_api", 600))
-        r = sende(lambda: requests.post(self.URL, json=p, headers=kopfzeilen,
-                                        timeout=timeout),
-                  cfg["max_retries"])
-        text, usage = self.antwort_lesen(r.json(), roh)
+        k = self.klient(cfg)
+
+        # Ein Payloadbauer, ein Antwortleser, zwei Transportwege. Wer die
+        # SDK an 'payload' vorbei aufruft, hat zwei Wahrheiten darueber,
+        # was wirklich rausgeht — und der Selbsttest prueft nur eine.
+        def einmal():
+            p = self.payload(cfg, system, user, rolle, modell, werkzeuge,
+                             schema)
+            if k is not None:
+                return sdk_antwort(k, p)
+            return sende(lambda: requests.post(self.URL, json=p,
+                                               headers=kopfzeilen,
+                                               timeout=timeout),
+                         cfg["max_retries"]).json()
+        try:
+            r = einmal()
+        except ApiFehler as e:
+            # Die Lebensdauer ist eine Versicherung. Kennt der Anbieter sie
+            # nicht, waere ein Abbruch mitten im Buch der teurere Fehler:
+            # einmal melden, ohne sie weiterlaufen.
+            if not (cache_ttl(cfg) and ttl_abgelehnt(e)):
+                raise
+            globals()["_TTL_ABGELEHNT"] = True
+            print(f"    WARNUNG: Cache-Lebensdauer '{cfg.get('cache_ttl')}' "
+                  f"wird abgelehnt — der Lauf geht ohne sie weiter.\n"
+                  f"             'cache_ttl' in projekt.json leeren, dann "
+                  f"verschwindet diese Meldung.")
+            r = einmal()
+        text, usage = self.antwort_lesen(r, roh)
         usage_buchen(rolle, modell, usage)
         return text
 
@@ -857,8 +1171,27 @@ class GeminiBackend(Backend):
                      if weiter else None)
         return sorted(namen)
 
-    def chat(self, cfg, system, user, temperature, num_ctx=None,
-             rolle="annotation", modell="", roh=False):
+    def zaehle_tokens(self, cfg, system, user, modell=""):
+        schluessel = api_schluessel("google")
+        if not schluessel:
+            return None
+        try:
+            r = requests.post(
+                f"{self.BASIS}/{modell}:countTokens",
+                json=self.payload(cfg, system, user, "begruendung", modell),
+                headers={"x-goog-api-key": schluessel,
+                         "content-type": "application/json"},
+                timeout=(cfg.get("timeout_connect", 10), 60))
+            return int(r.json()["totalTokens"]) if r.status_code == 200 \
+                else None
+        except Exception:
+            return None
+
+    def chat(self, cfg, system, user, rolle="begruendung", modell="",
+             roh=False, werkzeuge=None, schema=None):
+        # 'schema' wird angenommen und NICHT gesendet: Gemini spricht einen
+        # anderen Schema-Dialekt (OpenAPI-Subset, kein JSON Schema). Ein
+        # durchgereichtes Schema waere hier ein HTTP 400. Der Parser traegt.
         schluessel = api_schluessel("google")
         if not schluessel:
             sys.exit("FEHLER: GEMINI_API_KEY fehlt.\n"
@@ -877,26 +1210,26 @@ class GeminiBackend(Backend):
         return text
 
 
-BACKENDS = {"ollama": OllamaBackend(), "anthropic": AnthropicBackend(),
-            "google": GeminiBackend()}
+BACKENDS = {"anthropic": AnthropicBackend(), "google": GeminiBackend()}
 
 
-def backend(cfg, modell=None):
-    """Backend zum Modellnamen. Ohne Modell gilt der alte Konfigurationsweg."""
-    name = backend_name(modell) if modell else cfg.get("backend", "ollama")
-    b = BACKENDS.get(name)
+def backend(modell):
+    """Backend zum Modellnamen."""
+    b = BACKENDS.get(backend_name(modell))
     if b is None:
-        sys.exit(f"FEHLER: unbekanntes Backend '{name}'. "
+        sys.exit(f"FEHLER: kein Backend fuer '{modell}'. "
                  f"Verfuegbar: {', '.join(BACKENDS)}")
     return b
 
 
-def chat(cfg, system, user, temperature, num_ctx=None, rolle="uebersetzung",
-         roh=False, werkzeuge=None):
+def chat(cfg, system, user, rolle="uebersetzung", roh=False, werkzeuge=None,
+         schema=None):
     """Der einzige Modellaufruf des Projekts.
 
-    Die Rolle loest Modell, Backend und Effort auf. Fehlt 'modell_<rolle>',
-    greift der Ollama-Rueckfallpfad — unveraendertes Altverhalten.
+    Die Rolle loest Modell, Backend und Effort auf. Es gehen keine
+    Sampling-Parameter hinaus: claude-opus-5 hat temperature/top_p/top_k
+    entfernt und antwortet darauf mit HTTP 400, Gemini ignoriert sie. Die
+    Tiefe steuert 'effort_<rolle>'.
 
     'roh=True' schaltet saeubern() ab. Noetig, wenn die Antwort selbst
     Codebloecke enthaelt: saeubern schneidet den aeusseren Zaun ab und
@@ -904,37 +1237,63 @@ def chat(cfg, system, user, temperature, num_ctx=None, rolle="uebersetzung",
     bleibt saeubern richtig — es entfernt genau die Vorreden und Zaeune,
     die ein Modell unaufgefordert um Prosa legt."""
     modell = modell_fuer(cfg, rolle)
-    b = backend(cfg, modell)
+    b = backend(modell)
     if werkzeuge and not isinstance(b, AnthropicBackend):
         # Serverseitige Werkzeuge gibt es nur auf dem Anthropic-Pfad. Lieber
         # ohne laufen als mit einer Payload, die der Anbieter ablehnt.
         print(f"    HINWEIS: {modell} kennt keine Werkzeuge — "
               f"Aufruf ohne Websuche")
         werkzeuge = None
-    zusatz = {"werkzeuge": werkzeuge} if werkzeuge else {}
-    return b.chat(cfg, system, user, temperature, num_ctx=num_ctx,
-                  rolle=rolle, modell=modell, roh=roh, **zusatz)
+    if schema and not isinstance(b, AnthropicBackend):
+        # Dieselbe Haltung wie bei den Werkzeugen: lieber ohne laufen als
+        # mit einer Payload, die der Anbieter ablehnt. Gemini kennt einen
+        # anderen Schema-Dialekt; dort traegt der Parser weiter.
+        print(f"    HINWEIS: {modell} kennt keine strukturierte Ausgabe — "
+              f"Antwort wird gelesen statt erzwungen")
+        schema = None
+    zusatz = {}
+    if werkzeuge:
+        zusatz["werkzeuge"] = werkzeuge
+    if schema:
+        zusatz["schema"] = schema
+    return b.chat(cfg, system, user, rolle=rolle, modell=modell, roh=roh,
+                  **zusatz)
 
 
-def modelle_vorhanden(cfg):
-    return backend(cfg).verfuegbare_modelle(cfg)
+def tokens_zaehlen(cfg, rolle, system, user):
+    """Exakte Eingabetoken fuer diese Rolle, oder None.
+
+    Der Schaetzfaktor TOKEN_JE_WORT war bewusst hoch gesetzt, weil eine zu
+    niedrige Schaetzung vor einem fuenfstuendigen Lauf der teurere Fehler
+    ist. Wo der Anbieter zaehlt, wird nicht mehr geschaetzt."""
+    modell = modell_fuer(cfg, rolle)
+    return backend(modell).zaehle_tokens(cfg, system, user, modell)
 
 
 def aktive_rollen(cfg):
     """Rollen, die dieser Lauf tatsaechlich aufruft.
 
-    'annotation' und 'vergleich' gehoeren zu spaeteren Paketen und rufen
-    noch kein Modell — sie stehen deshalb nicht drin."""
+    Die Liste ist die Grundlage der Kostenschaetzung und des Pings vor dem
+    Lauf. Eine fehlende Rolle heisst dort: kostenlos und ungeprueft — und
+    genau so sind 'zitat' und 'screening' durchgerutscht, nachdem ihre
+    Schritte gebaut waren. Wer einen modellrufenden Schritt ergaenzt,
+    ergaenzt ihn hier."""
     rollen = ["uebersetzung"]
     if cfg.get("revision_pass"):
         rollen.append("revision")
     for stufe in cfg.get("lektorat_passes", []):
         if stufe in ("stil", "korrektorat") and stufe not in rollen:
             rollen.append(stufe)
-    if cfg.get("glossar_quelle") == "lokal":
-        rollen.append("vorbereitung")
+    # vorbereitung.py ist ein fester Pipelineschritt; konkordanz.py ruft
+    # dieselbe Rolle zusaetzlich, wenn das Glossar lokal entsteht.
+    rollen.append("vorbereitung")
+    rollen.append("zitat")            # zitatrecherche.py
+    rollen.append("begruendung")      # annotation.py, Teil 1
+    rollen.append("screening")        # annotation.py, Teil 2
     if cfg.get("export_bewertung"):
         rollen.append("judge")
+    # 'vergleich' bleibt draussen: konfiguriert, aber von keinem Schritt
+    # gerufen. Der Ping in verifikation.py prueft es trotzdem mit.
     return rollen
 
 
@@ -955,6 +1314,50 @@ def saeubern(text):
     t = re.sub(r"^```[a-z]*\s*", "", t.strip())
     t = re.sub(r"\s*```$", "", t)
     return PREAMBEL.sub("", t.strip()).strip()
+
+
+def schema_maengel(schema, pfad="$"):
+    """Was der Anbieter an diesem Schema ablehnen wuerde, als Liste.
+
+    Das unterstuetzte Subset ist enger, als es aussieht. Zwei Regeln
+    kosten sonst einen ganzen Schritt, und zwar erst im Lauf:
+
+    - Jedes Objekt braucht 'additionalProperties': false und 'required'.
+    - Offene Abbildungen (beliebige Schluessel) lassen sich damit nicht
+      ausdruecken. Genau daran scheitern die Vorbereitungslieferungen —
+      Glossar, Personen, Kapitel sind Wort-zu-Wort-Abbildungen, und die
+      haben keine feste Schluesselliste. Sie behalten deshalb den Parser
+      und ihre Formpruefung.
+
+    Ebenfalls nicht im Subset: rekursive Schemata sowie Zahl- und
+    Laengengrenzen ('minimum', 'maxLength' …). Die werden hier gemeldet,
+    nicht stillschweigend entfernt."""
+    m = []
+    if not isinstance(schema, dict):
+        return [f"{pfad}: kein Objekt"]
+    typ = schema.get("type")
+    if typ == "object":
+        if schema.get("additionalProperties") is not False:
+            m.append(f"{pfad}: 'additionalProperties': false fehlt "
+                     f"(offene Abbildungen sind nicht ausdrueckbar)")
+        if "properties" not in schema:
+            m.append(f"{pfad}: 'properties' fehlt")
+        if "required" not in schema:
+            m.append(f"{pfad}: 'required' fehlt")
+        for name, teil in (schema.get("properties") or {}).items():
+            m += schema_maengel(teil, f"{pfad}.{name}")
+    elif typ == "array":
+        if "items" not in schema:
+            m.append(f"{pfad}: 'items' fehlt")
+        else:
+            m += schema_maengel(schema["items"], f"{pfad}[]")
+    for verboten in ("minimum", "maximum", "multipleOf",
+                     "minLength", "maxLength", "pattern"):
+        if verboten in schema:
+            m.append(f"{pfad}: '{verboten}' gehoert nicht zum Subset")
+    if "$ref" in schema and "$defs" not in schema:
+        m.append(f"{pfad}: '$ref' ohne '$defs' — rekursiv wird abgelehnt")
+    return m
 
 
 def json_aus_antwort(raw):
@@ -1162,6 +1565,44 @@ def chunks_bauen(paras, ziel, ausnahmen=None):
     if buf:
         chunks.append(("\n\n".join(buf), False))
     return chunks
+
+
+# Ab wann ein Chunk als uebergross gilt. Nicht 1,0: Die Chunkbildung haelt
+# Absatzgrenzen ein, und ein Absatz endet selten genau auf der Zielmarke.
+UEBERLAENGE = 1.25
+
+
+def chunk_ueberlaengen(chunks, ziel, faktor=UEBERLAENGE):
+    """(Nummer, Woerter, geschuetzt) je Chunk ueber der Marke.
+
+    Gekappt wird bewusst nicht: Ein Absatz gehoert zusammen, und ein
+    geschuetztes Zitat erst recht. Gezaehlt wird trotzdem, denn Ueberlaenge
+    ist die Ursache hinter zwei Befunden, die sonst raetselhaft bleiben —
+    verworfene Laengenverhaeltnisse und verschobene Absatzzahlen."""
+    grenze = ziel * faktor
+    raus = []
+    for i, (text, geschuetzt) in enumerate(chunks, 1):
+        w = len(text.split())
+        if w > grenze:
+            raus.append((i, w, geschuetzt))
+    return raus
+
+
+def ueberlaengen_melden(chunks, ziel, drucken=print):
+    """Eine Zeile, wenn es Ueberlaengen gibt — sonst schweigen."""
+    lang = chunk_ueberlaengen(chunks, ziel)
+    if not lang:
+        return lang
+    groesster = max(w for _, w, _ in lang)
+    geschuetzt = sum(1 for _, _, g in lang if g)
+    drucken(f"Ueberlange Chunks:  {len(lang)} von {len(chunks)} ueber "
+            f"{ziel * UEBERLAENGE:.0f} Woertern, groesster {groesster}"
+            + (f", davon {geschuetzt} geschuetzt (Zitate)"
+               if geschuetzt else ""))
+    drucken("                    Nicht gekappt — Absatzgrenzen haben "
+            "Vorrang. Erwarte dort eher\n"
+            "                    verworfene Laengenverhaeltnisse.")
+    return lang
 
 
 def schlusswoerter(text, n):

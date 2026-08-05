@@ -283,7 +283,7 @@ def main():
     erzeugt, vorschlaege = [], []
     for name, datei, auftrag, pruef in offen:
         print(f"\n{name} …", flush=True)
-        antwort = G.chat(cfg, system, auftrag, 0.0, rolle="vorbereitung",
+        antwort = G.chat(cfg, system, auftrag, rolle="vorbereitung",
                          roh=True)
         try:
             daten = json_lesen(antwort)
@@ -303,7 +303,7 @@ def main():
 
     if mit_anweisungen:
         print("\nanweisungen …", flush=True)
-        antwort = G.chat(cfg, system, ANWEISUNGS_AUFTRAG, 0.0,
+        antwort = G.chat(cfg, system, ANWEISUNGS_AUFTRAG,
                          rolle="vorbereitung", roh=True)
         ziel = VORSCHLAG if gefuellt else G.ANWEISUNGEN
         schreiben(ziel, antwort.rstrip() + "\n")

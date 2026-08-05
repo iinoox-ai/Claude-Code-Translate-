@@ -59,6 +59,32 @@ SYSTEM = (
     "Erlaubte Werte fuer 'status': 'gefunden', 'original_belassen', "
     "'nicht_gefunden'.")
 
+# Strukturierte Ausgabe. Der Befund hat feste Schluessel, also kann der
+# Anbieter die Form erzwingen, statt dass antwort_lesen() sie aus Prosa
+# fischt. Das ist genau hier am meisten wert: Eine unlesbare Antwort hiess
+# bisher, dass das Zitat uebersprungen wird — und ein uebersprungenes Zitat
+# ist eine Luecke, die spaeter jemand von Hand suchen muss.
+#
+# Der Parser bleibt trotzdem: Ohne Schluessel, auf einem anderen Anbieter
+# oder wenn das Modell die Form kuenftig nicht mehr erzwingt, traegt er.
+BEFUND_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "sprache":      {"type": "string"},
+        "status":       {"type": "string",
+                         "enum": ["gefunden", "original_belassen",
+                                  "nicht_gefunden"]},
+        "vorschlag_de": {"type": "string"},
+        "uebersetzer":  {"type": "string"},
+        "quelle":       {"type": "string"},
+        "konfidenz":    {"type": "number"},
+        "begruendung":  {"type": "string"},
+    },
+    "required": ["sprache", "status", "vorschlag_de", "uebersetzer",
+                 "quelle", "konfidenz", "begruendung"],
+    "additionalProperties": False,
+}
+
 SPALTEN = ["index", "sprache", "original", "vorschlag_de", "uebersetzer",
            "quelle", "konfidenz", "freigegeben"]
 
@@ -97,8 +123,8 @@ def recherchieren(cfg, z):
     frage = (f"Zitat:\n{z['text']}\n\n"
              f"Attributionszeile im Buch: {z.get('attribution', '')}\n\n"
              f"Bestimme die Sprache und liefere den Befund als JSON.")
-    antwort = G.chat(cfg, SYSTEM, frage, 0.0, rolle="zitat", roh=True,
-                     werkzeuge=WERKZEUGE)
+    antwort = G.chat(cfg, SYSTEM, frage, rolle="zitat", roh=True,
+                     werkzeuge=WERKZEUGE, schema=BEFUND_SCHEMA)
     return antwort_lesen(antwort)
 
 

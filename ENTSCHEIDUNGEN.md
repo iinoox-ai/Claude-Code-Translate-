@@ -620,9 +620,9 @@ HTTP 400 — dieselbe Eigenschaft, die für Gemini schon dokumentiert war. Damit
 schrumpfen die vier verstellbaren Parameter im API-Betrieb auf zwei, und die
 Steuerung der Denktiefe wandert vollständig zu `effort`.
 
-Die Temperatur-Schlüssel bleiben trotzdem in der Konfiguration. Sie sind kein
-toter Code, sondern der Ollama-Rückfallpfad, und wer sie entfernt, nimmt dem
-VPS-Betrieb seine einzige Stellschraube für die Streuung.
+Die Temperatur-Schlüssel blieben zunächst in der Konfiguration, weil sie den
+Ollama-Rückfallpfad bedienten. → Mit dem Rückzug dieses Pfads (August 2026)
+sind sie entfallen; siehe „Ollama-Rückfallpfad zurückgezogen".
 
 Der Widerspruch wurde gemeldet und vor der Umsetzung entschieden, nicht still
 aufgelöst.
@@ -771,6 +771,281 @@ Dialogvergleich ist seit August 2026 eingebaut, lief aber für diese Messung
 noch nicht mit. Bei NL→DE liegt die Schwäche im Dialog — wer 1600 Wörter
 ernsthaft erwägt, misst dort nach.
 
+## Ollama-Rückfallpfad zurückgezogen
+
+**Entschieden (August 2026):** `OllamaBackend`, die Schlüssel `backend`,
+`modell`, `ollama_host`, `num_ctx`, `timeout_read` und die vier
+`temperature_*` sind entfernt. `chat()` nimmt keine Sampling-Parameter mehr
+entgegen. Eine Rolle ohne `modell_<rolle>` bricht ab, statt still zu ersetzen.
+
+Der Pfad war als Versicherung gedacht: identischer Code auf einem nackten VPS,
+falls Colab oder die APIs ausfallen. Nach einem Jahr ist die Bilanz eine
+andere. **Er wurde nie ausgeführt und nie geprüft** — kein Selbsttestfall
+konnte ihn abdecken, weil er einen laufenden Ollama-Server braucht. Ein
+Rückfallpfad, den niemand prüft, ist keine Versicherung, sondern eine
+Behauptung.
+
+Dazu kam, was er kostete: acht Konfigurationsschlüssel, die in `projekt.json`
+ganz oben standen und einem Leser als Erstes einen Mistral-Namen auf einem
+lokalen Port zeigten — während in Wahrheit Opus 5 lief. Ein Parameter
+(`temperature`) in jeder der zehn `chat()`-Aufrufstellen, der auf beiden
+tatsächlich genutzten APIs wirkungslos ist. Zwei Preflight-Prüfungen für eine
+GPU, die es nicht gibt.
+
+**Der stille Ersatz war das eigentliche Argument.** `modell_fuer()` fiel bei
+fehlendem Rolleneintrag auf `cfg["modell"]` zurück. Eine vergessene Zeile in
+`projekt.json` hätte damit nicht zu einem Abbruch geführt, sondern zu einem
+Lauf gegen ein anderes Modell — bemerkbar erst am Kostenbericht. Genau diese
+Fehlerklasse hat bei der Auswertung des 1919-Laufs schon einmal zwei Stunden
+gekostet.
+
+Der VPS-Betrieb bleibt möglich: derselbe Code, dieselben API-Schlüssel als
+Umgebungsvariablen, ohne Colab. Was entfällt, ist der Betrieb *ohne* API.
+
+## Ein Paket darf installiert werden
+
+**Entschieden (August 2026):** Die Regel „Kein `pip install` im Normalbetrieb"
+gilt weiterhin — mit genau einer benannten Ausnahme: `anthropic`, die SDK des
+Anbieters, auf Hauptversion festgelegt, in der Einrichtungszelle des Runners.
+
+Die Regel entstand gegen litellm, und diese Ablehnung bleibt bestehen: eine
+große, schnell drehende Abhängigkeit mit eigenem Abhängigkeitsbaum, bei der
+jeder Start die Hoffnung mitbringt, dass die aktuelle Version sich wie erwartet
+verhält. Die Hersteller-SDK ist etwas anderes — ein Paket, vom Anbieter
+gepflegt, mit dem die API selbst dokumentiert wird.
+
+Was sie bringt, ist nicht Bequemlichkeit: Streaming ohne handgeschriebenen
+SSE-Parser, exakte Tokenzählung statt eines Schätzfaktors, strukturierte
+Ausgaben statt fünf handgeschriebener JSON-Parser, und den Stapel-Adapter.
+
+Die Bedingung, um die es der Regel eigentlich ging, bleibt gewahrt: Fehlt der
+Import, läuft der `requests`-Pfad unverändert weiter. Ohne jede Installation
+lauffähig zu sein ist damit weiter gegeben.
+
+---
+
+## Kosten werden je Lauf, Rolle und Modell gebucht
+
+**Entschieden (August 2026), Widerruf der Buchung je Rolle.** `manifest.json`
+summierte Token unter dem Rollennamen allein und schrieb bei jedem Aufruf das
+zuletzt benutzte Modell in denselben Eintrag. Ein Testlauf mit einem anderen
+Modell hat damit die gesamte Rolle auf dieses Modell umetikettiert — Token aus
+zwei Modellen in einer Zeile, bewertet mit dem Preis des zuletzt benutzten.
+
+Was das gekostet hat: Der Lauf 1919 wies **109,52 $** aus. Die Rollen
+`uebersetzung` und `revision` liefen mit `claude-opus-5`; ein Vergleichslauf am
+Testauszug mit `claude-fable-5` (10 $ / 50 $ statt 5 $ / 25 $) hat beide Zeilen
+umbeschriftet und den Preis verdoppelt. Der wahre Wert liegt bei rund
+**69,7 $**. Die Buchung hat also um 57 % nach oben getäuscht — und zwar in
+genau der Zahl, an der Kalibrierungsentscheidungen hängen.
+
+Der Beleg: Für die Buchproduktion sagt die Buchung mit Opus-Tarif 39,81 $ für
+`uebersetzung` plus `revision`. Das deckt sich mit der Vorabschätzung von 38 $
+in „Gemessen unter Opus 5"; mit Fable-Tarif wären es 79,62 $ — eine Zahl, die
+dort nie stand.
+
+Seither ist der Buchungsschlüssel `lauf/rolle/modell`. Der Lauf kommt aus dem
+Ausgabepräfix (`''`, `test/`, `testB/`), damit die Zuordnung an derselben
+Stelle steht wie die Dateiablage. Testläufe erscheinen in der Übersicht
+getrennt: Sie kosten Geld, aber sie gehören nicht in den Preis des Buches.
+
+Zwei Dinge, die daran hängen und nicht wieder auseinanderlaufen dürfen:
+
+- **Eine Preisformel für alle Auswertungen** (`gemeinsam.kosten_dollar`). Die
+  Variantenkosten in `bewertung.py` rechneten ohne Cache und lagen dadurch zu
+  niedrig — zwei Formeln waren zwei Wahrheiten.
+- **Altes Format bleibt lesbar.** Ein Manifest ohne Laufkennung wird gezeigt,
+  aber unter „Lauf nicht zugeordnet" — es behauptet nicht, die Buchproduktion
+  gewesen zu sein.
+
+Der Selbsttest hält den Fall fest: zwei Buchungen derselben Rolle mit
+verschiedenen Modellen müssen zwei Zeilen ergeben, nicht eine.
+
+---
+
+## Cache-Lebensdauer eine Stunde — als Versicherung, nicht als Ersparnis
+
+**Entschieden (August 2026).** `cache_ttl: "1h"` in `projekt.json`.
+
+Zuerst die Zahl, die *gegen* die naheliegende Begründung spricht. Die
+Vermutung war, die Trefferquote des Prompt-Caches sei niedrig und eine längere
+Lebensdauer bringe Geld. Der Lauf 1919 sagt etwas anderes:
+
+| Rolle | gelesen | geschrieben | Trefferquote |
+|---|---|---|---|
+| `uebersetzung` | 901 965 | 36 131 | 96 % |
+| `revision` | 677 380 | 28 001 | 96 % |
+
+Bei 154 beziehungsweise 147 Aufrufen sind das rund sechs Neuschreibungen je
+Rolle — genau die Zahl der Colab-Sitzungen, in denen das Buch entstanden ist.
+Der Cache ist also nicht abgelaufen, er wurde kalt gestartet. Die Ersparnis
+liegt bereits bei 13,10 $, rund 16 % der Rechnung. **Als Kostenmaßnahme ist
+die Stunde damit verworfen.**
+
+Was bleibt, ist der Grund, aus dem sie trotzdem gesetzt wird: Sie ist eine
+Versicherung gegen alles, was den Abstand zwischen zwei Chunks über fünf
+Minuten treibt — größere Chunks, ein langsamer Durchgang, ein Blick in den
+Zwischenbericht, eine Wartezeit im Stapelbetrieb. Tritt das nicht ein, kostet
+sie fast nichts; tritt es ein, spart sie das Neuschreiben des ganzen Präfixes.
+
+Der Preis ist bekannt und wird jetzt auch richtig abgerechnet: Schreiben mit
+einer Stunde Lebensdauer kostet das Doppelte des Eingabepreises statt des
+1,25-fachen. Die Antwort liefert die Aufschlüsselung (`cache_creation`), und
+`kosten_dollar` rechnet beide Anteile getrennt — geschätzt wird nichts.
+
+**Sie darf keinen Lauf abbrechen.** Lehnt der Anbieter die Lebensdauer ab
+(HTTP 400 mit `ttl` in der Meldung), meldet der Lauf das einmal und läuft ohne
+sie weiter. Die Erkennung ist bewusst eng gefasst: Ein zu weiter Fang würde
+echte Payloadfehler verschlucken und still ein zweites Mal Geld ausgeben. Der
+Selbsttest hält drei Gegenproben dagegen (`temperature`-Fehler, 429, 500).
+
+---
+
+## Die Modellwahl bekommt eine Stelle: `EMPFEHLUNG` und `pipeline.py modelle`
+
+**Entschieden (August 2026).** Modell und Denktiefe stehen je Rolle in
+`projekt.json`; die **Empfehlung samt Begründung** steht in
+`gemeinsam.EMPFEHLUNG`, und `pipeline.py modelle` stellt beides
+nebeneinander — dazu, was die Rolle im letzten Lauf wirklich gekostet hat.
+
+Die Begründung steht bewusst im Code und nicht in einer Doku. Wer die
+Belegung ändert, liest sie genau in dem Moment, in dem es darauf ankommt.
+Eine Empfehlung ohne Begründung ist eine Zahl, die man entweder befolgt oder
+ignoriert; mit Begründung ist sie eine Entscheidung, die man nachvollziehen
+und begründet verwerfen kann. Abweichen ist vorgesehen —
+`technik_ausnahmen` hält die Abweichung fest, damit `pipeline.py technik`
+sie stehen lässt.
+
+Der Befehl schreibt nichts. Ein Kommando, das die Modellwahl eines
+laufenden Buchs verstellen kann, wird irgendwann versehentlich getippt.
+
+**`effort` wirkt nur bei Anthropic-Modellen.** Gemini bekommt den Schlüssel
+gar nicht erst geschickt. `effort_screening` zu ändern hat dort keine
+Wirkung, und das gehört dazugesagt (`EFFORT_WIRKT`), statt dass jemand
+daran dreht und auf eine Änderung wartet.
+
+### Drei geänderte Voreinstellungen
+
+| Rolle | vorher | jetzt | Grund |
+|---|---|---|---|
+| `korrektorat` | `claude-opus-5` / `hoch` | `claude-sonnet-5` / `mittel` | Regelanwendung, kein Sprachgefühl — und der Pass läuft über das ganze Buch |
+| `vorbereitung` | `claude-opus-5` / `hoch` | `claude-fable-5` / `sehr_hoch` | Neun Aufrufe, an denen alles Spätere hängt; der Aufpreis fällt nicht ins Gewicht, ein Fehler dort steht in jedem Chunk |
+| `screening` | (war `annotation`) | `gemini-3.1-pro-preview` / `hoch` | Fremdurteil ist nur eines, wenn es von einem anderen Anbieter kommt |
+
+Für `korrektorat` steht die Messung **aus**. Wird der Diff dünn oder greift
+er daneben, zurück auf `claude-opus-5` — das ist der eine Wert dieser Liste,
+der auf einer Vermutung beruht statt auf einer Zahl.
+
+---
+
+## `annotation` war eine Rolle für zwei Arbeiten
+
+**Entschieden (August 2026), Widerruf der gemeinsamen Rolle.** Der Schritt
+`annotation.py` liefert zwei Berichte, und sie haben nichts miteinander zu
+tun außer dem Zeitpunkt:
+
+- **Begründungen** — eine Zeile je Lektoratsänderung, zwanzig Stück je
+  Aufruf, rein berichtend. Der Leser überfliegt sie.
+- **Screening** — liest das ganze Buch gegen das Original und sucht, was
+  vier Durchgänge übersehen haben. Das ist die eigentliche
+  Qualitätsprüfung.
+
+Unter einer Rolle gab es nur zwei Möglichkeiten, und beide sind falsch: den
+Preis der Prüfung für die Massenware zahlen, oder mit dem Modell der
+Massenware prüfen. Der Lauf 1919 hat das Zweite getan — 61 Aufrufe
+`gemini-3.6-flash` für beides.
+
+Seither sind es `begruendung` und `screening`, mit eigenem Modell und
+eigener Tiefe. Der Selbsttest prüft, dass sie wirklich getrennt routen;
+sonst wäre die Trennung Kosmetik.
+
+**Ein entfallener Schlüssel bleibt stehen.** `projekt.json` wird nie
+überschrieben, also wirkt `modell_annotation` in einem laufenden Projekt
+einfach nicht mehr — ohne dass etwas kaputtgeht und ohne dass es auffällt.
+`preflight.ENTFALLEN` sammelt diese Schlüssel und meldet sie mit dem Namen
+ihres Nachfolgers. Dieselbe Liste trägt die Reste des Ollama-Rückzugs und
+die Temperatur-Schlüssel.
+
+---
+
+## Strukturierte Ausgaben: nur die Zitatrecherche, und das ist kein Versehen
+
+**Entschieden (August 2026).** `output_config.format` mit JSON-Schema wird an
+genau einer Stelle benutzt: `zitatrecherche.py`. Der Mechanismus ist allgemein
+gebaut (`G.chat(..., schema=…)`), angewendet wird er dort — und die Begründung
+für das *Nicht*-Anwenden ist der eigentliche Inhalt dieser Entscheidung.
+
+**Das unterstützte Schema-Subset verlangt `additionalProperties: false`.** Damit
+lassen sich nur Objekte mit **fester Schlüsselliste** ausdrücken. Sieben der
+acht Vorbereitungslieferungen sind aber offene Abbildungen:
+
+| Lieferung | Form | ausdrückbar? |
+|---|---|---|
+| `glossar` | niederländisches Wort → deutsches Wort | nein |
+| `personen` | Figurenname → Pronomen | nein |
+| `kapitel` | Überschrift im Quellwortlaut → Zusammenfassung | nein |
+| `figurenblatt`, `anrede`, `leitmotive` | Name/Wendung → Objekt | nein |
+| `stilprofil` | feste Schlüssel — aber `perspektive` ist wieder offen | nein |
+| Zitatbefund | `sprache`, `status`, `vorschlag_de`, … | **ja** |
+
+Die naheliegende Reaktion wäre, die Lieferungen als Listen von
+`{schluessel, wert}`-Objekten zu modellieren. Das ist verworfen: Die JSONs
+werden von Menschen gelesen und im Spreadsheet gepflegt, und eine Abbildung, die
+als Liste von Paaren daherkommt, ist an beiden Stellen schlechter. Der Gewinn
+wäre auch klein — die **Formprüfung je Lieferung** fängt eine falsche Form
+bereits ab, und zwar bevor geschrieben wird. Ein Schema würde sie nicht
+ersetzen: Es garantiert die Form, nicht den Inhalt.
+
+Warum gerade die Zitatrecherche: Dort ist eine unlesbare Antwort am teuersten.
+Sie hieß bisher, dass das Zitat übersprungen wird — und ein übersprungenes Zitat
+ist eine Lücke, die später jemand von Hand sucht. Feste Schlüssel hat der Befund
+ohnehin.
+
+**Gemini bekommt kein Schema.** Der Anbieter spricht einen anderen Dialekt
+(OpenAPI-Subset statt JSON Schema); ein durchgereichtes Schema wäre dort ein
+HTTP 400. `G.chat` meldet das einmal und läuft ohne — dieselbe Haltung wie bei
+den serverseitigen Werkzeugen. Der Selbsttest prüft beide Richtungen.
+
+**Der Parser bleibt überall.** Ohne Schlüssel, auf einem anderen Anbieter oder
+wenn ein Modell die Form künftig nicht mehr erzwingt, trägt er weiter. Ein
+Schema ist eine Zusicherung, keine Ersetzung.
+
+`gemeinsam.schema_maengel()` hält das Subset fest und meldet, was der Anbieter
+ablehnen würde — offene Abbildungen, fehlendes `required`, Zahl- und
+Längengrenzen. Ein Schema, das erst im Lauf abgelehnt wird, kostet den Schritt
+**nach** dem Bezahlen.
+
+---
+
+## Der Tab `Modelle` wird geschrieben und nie gelesen
+
+**Entschieden (August 2026).** `referenz_sync.py --modelle` spiegelt die
+Modellbelegung ins Spreadsheet — Rolle, Ist-Modell, Tiefe, Empfehlung,
+Begründung und was die Rolle im letzten Lauf gekostet hat. Zurückgelesen wird
+der Tab **nicht**.
+
+Der naheliegende Wunsch ist, ihn editierbar zu machen: Referenzdaten werden im
+Spreadsheet gepflegt, warum nicht auch die Modellwahl? Weil die beiden nicht
+dasselbe sind. **Modellnamen sind Code-Daten** — sie stehen in
+`gemeinsam.TECHNIK` und wandern mit dem Repo, damit eine Umbenennung beim
+Anbieter alle Bücher erreicht. **Referenzdaten sind Projektdaten** und wandern
+mit dem Buch.
+
+Ein zurückgelesener Tab machte daraus eine **dritte Quelle** neben
+Repo-`projekt.json` und Projekt-`projekt.json`. Bei drei Quellen weiß niemand
+mehr, welcher Wert gilt — und `pipeline.py technik` könnte einen im Repo
+korrigierten Modellnamen nicht mehr nachziehen, weil der Tab ihn beim nächsten
+Sync wieder überschreibt.
+
+Die Sichtbarkeit, um die es ging, bleibt: Die Belegung steht im Spreadsheet
+neben Glossar und Figurenblatt, und die letzte Zeile des Tabs sagt, dass
+Änderungen dort nicht wirken. Geändert wird in `projekt.json`; `pipeline.py
+modelle` zeigt dasselbe im Terminal.
+
+Der Selbsttest hält drei Dinge fest: `Modelle` steht nicht in `TABS` (sonst
+läse `sync` ihn zurück), nicht in `OPTIONAL`, und ohne `sheets_id` schreibt der
+Schritt gar nichts — der Rückfallpfad bleibt unberührt.
+
 ---
 
 ## Verworfen — und warum
@@ -779,6 +1054,10 @@ ernsthaft erwägt, misst dort nach.
 sprach dafür, die Entscheidung fiel trotzdem für lokales Hosting. Beim Wechsel
 gilt: Die `chat()`-Abstraktion ist dafür gebaut, der Eingriff ist klein.
 → Juli 2026 umgesetzt; siehe „API-Backends statt lokalem Hosting".
+
+**Ollama als Rückfallpfad.** → August 2026 zurückgezogen; siehe oben. Die
+Begründung von damals (Vertraulichkeit, Unabhängigkeit von der API) war
+bereits mit `export_glossar: true` hinfällig geworden.
 
 **Parallelisierung der Lektoratspässe.** Der Vorschlag war, als Kontext den
 *unbearbeiteten* Vorgänger-Chunk zu nehmen, weil der von Anfang an vorliegt.

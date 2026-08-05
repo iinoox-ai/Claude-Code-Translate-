@@ -39,6 +39,17 @@ DE_MARKER = [r"\bder\b", r"\bdie\b", r"\bdas\b", r"\bund\b", r"\bnicht\b",
 # ==================================================================
 # Selbsttest — haette den \u-Fehler und die ss/ß-Kollision gefunden
 # ==================================================================
+# Der Code liegt im Colab-Betrieb NICHT im Arbeitsverzeichnis. Wer hier
+# eine Quelldatei relativ oeffnet, bekommt dort einen FileNotFoundError —
+# und der Selbsttest meldet 'nicht pruefbar' statt zu pruefen. Genau das
+# ist der Judge-Pruefung passiert.
+CODE = os.path.dirname(os.path.abspath(__file__))
+
+
+def quelltext(name):
+    """Eine Datei aus dem CODE-Verzeichnis, nie relativ zum Arbeitsordner."""
+    return open(os.path.join(CODE, name), encoding="utf-8").read()
+
 def selbsttest(cfg, b):
     import inspect
     b.abschnitt("Selbsttest")
@@ -359,14 +370,421 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Tarifabgleich nicht pruefbar", repr(e))
 
+    # --- Kostenbuchung: je Lauf, Rolle UND Modell ---------------------
+    # Der teuerste Fehler der Buchhaltung: Ein Testlauf mit einem anderen
+    # Modell hat die ganze Rolle auf dieses Modell umetikettiert und die
+    # Buchkosten dadurch um 57 % zu hoch ausgewiesen (109,5 statt 69,7 $).
+    try:
+        import tempfile
+        fehler = []
+        alt_cwd, alt_lauf = os.getcwd(), G.lauf_name()
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                os.chdir(tmp)
+                G.lauf_setzen("")
+                G.usage_buchen("uebersetzung", "claude-opus-5",
+                               {"ein": 100, "aus": 200, "cache_lesen": 300,
+                                "cache_schreiben": 40})
+                G.lauf_setzen("testB/")
+                G.usage_buchen("uebersetzung", "claude-fable-5",
+                               {"ein": 10, "aus": 20})
+                m = json.load(open(G.MANIFEST, encoding="utf-8"))
+            finally:
+                os.chdir(alt_cwd)
+                G.lauf_setzen(alt_lauf)
+
+        posten = G.kosten_posten(m)
+        if len(posten) != 2:
+            fehler.append(f"{len(posten)} Buchungen statt 2 — der Testlauf "
+                          f"hat die Buchproduktion ueberschrieben")
+        else:
+            (l1, r1, mo1, e1), (l2, r2, mo2, e2) = posten
+            if (l1, mo1) != ("voll", "claude-opus-5"):
+                fehler.append(f"Buchproduktion steht nicht zuerst: {l1}/{mo1}")
+            if (l2, mo2) != ("testB", "claude-fable-5"):
+                fehler.append(f"Testlauf falsch gebucht: {l2}/{mo2}")
+            if e1["ein"] != 100 or e1["aus"] != 200:
+                fehler.append(f"Token vermischt: {e1['ein']}/{e1['aus']}")
+            if r1 != "uebersetzung" or r2 != "uebersetzung":
+                fehler.append(f"Rolle verloren: {r1}, {r2}")
+
+        # Die Summe wird je Lauf gebildet, sonst zahlt das Buch den Test mit.
+        _, summen, _ = G.kosten_je_rolle(m)
+        t = G.tarif("claude-opus-5")
+        soll = (100 * t["ein"] + 300 * t["ein"] * G.CACHE_LESE_FAKTOR
+                + 40 * t["ein"] * G.CACHE_SCHREIB_FAKTOR
+                + 200 * t["aus"]) / 1e6
+        if abs(summen.get("voll", 0) - soll) > 1e-9:
+            fehler.append(f"Summe voll {summen.get('voll')} statt {soll}")
+        if "testB" not in summen:
+            fehler.append("Testlauf taucht in den Summen nicht auf")
+
+        # Gegenprobe Altformat: ein Manifest ohne Laufkennung bleibt lesbar
+        # und behauptet nicht, es sei die Buchproduktion gewesen.
+        a = G.kosten_posten({"kosten": {"revision": {
+            "modell": "claude-opus-5", "aufrufe": 1, "ein": 1, "aus": 1,
+            "cache_lesen": 0, "cache_schreiben": 0}}})
+        if len(a) != 1 or a[0][0] != "" or a[0][1] != "revision":
+            fehler.append(f"Altformat falsch gelesen: {a}")
+
+        if fehler:
+            b.add("FEHLER", "Kostenbuchung fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Kosten: je Lauf, Rolle und Modell gebucht, "
+                        "Testlauf getrennt ausgewiesen")
+    except Exception as e:
+        b.add("FEHLER", "Kostenbuchung nicht pruefbar", repr(e))
+
+    # --- Strukturierte Ausgabe: nur wo sie ausdrueckbar ist ------------
+    # Das unterstuetzte Schema-Subset verlangt 'additionalProperties':
+    # false und kann damit keine offenen Abbildungen ausdruecken. Genau
+    # das sind die Vorbereitungslieferungen (Wort -> Wort). Ein Schema,
+    # das der Anbieter ablehnt, faellt sonst erst im Lauf auf — und dann
+    # nach dem Bezahlen.
+    try:
+        import zitatrecherche as Z
+        fehler = []
+        maengel = G.schema_maengel(Z.BEFUND_SCHEMA)
+        if maengel:
+            fehler.append(f"Zitatschema abgelehnt: {'; '.join(maengel)}")
+
+        # Gegenproben: der Pruefer muss beide Fallen fangen.
+        offen = {"type": "object", "properties": {},
+                 "required": []}                       # ohne additionalProps
+        if not G.schema_maengel(offen):
+            fehler.append("offene Abbildung wird nicht beanstandet")
+        grenzen = {"type": "object", "additionalProperties": False,
+                   "required": ["n"],
+                   "properties": {"n": {"type": "number", "minimum": 0}}}
+        if not G.schema_maengel(grenzen):
+            fehler.append("Zahlgrenze wird nicht beanstandet")
+
+        # Das Schema muss im Payload ankommen — neben 'effort', nicht
+        # statt seiner.
+        p = G.AnthropicBackend().payload(cfg, "S", "U", "zitat",
+                                         "claude-opus-5",
+                                         schema=Z.BEFUND_SCHEMA)
+        oc = p.get("output_config", {})
+        if oc.get("format", {}).get("type") != "json_schema":
+            fehler.append(f"Schema fehlt im Payload: {oc}")
+        if not oc.get("effort"):
+            fehler.append("Schema verdraengt den Effort")
+        ohne = G.AnthropicBackend().payload(cfg, "S", "U", "zitat",
+                                            "claude-opus-5")
+        if "format" in ohne.get("output_config", {}):
+            fehler.append("Payload traegt ein Schema, das keiner bestellt hat")
+
+        # Gemini spricht einen anderen Dialekt: Das Schema darf dort NICHT
+        # ankommen, sonst ist der Aufruf ein HTTP 400.
+        g = G.GeminiBackend().payload(cfg, "S", "U", "begruendung",
+                                      "gemini-3.6-flash")
+        if "json_schema" in json.dumps(g):
+            fehler.append("Gemini-Payload traegt ein JSON-Schema")
+
+        if fehler:
+            b.add("FEHLER", "Strukturierte Ausgabe fehlerhaft",
+                  "; ".join(fehler))
+        else:
+            b.add("OK", "Strukturierte Ausgabe: Schema im Anthropic-Payload "
+                        "neben dem Effort, Gemini bleibt unberuehrt")
+    except Exception as e:
+        b.add("FEHLER", "Strukturierte Ausgabe nicht pruefbar", repr(e))
+
+    # --- Quelldateien nur ueber CODE lesen -----------------------------
+    # Im Colab-Betrieb ist das Arbeitsverzeichnis der Drive-Ordner, nicht
+    # das Repo. Ein relativ geoeffnetes 'bewertung.py' wirft dort einen
+    # FileNotFoundError, und die Pruefung meldet 'nicht pruefbar' statt zu
+    # pruefen — sie war monatelang wirkungslos, ohne dass es auffiel.
+    try:
+        fehler = []
+        for datei in ("bewertung.py", "annotation.py", "ABLAUFPLAN.md"):
+            if not quelltext(datei):
+                fehler.append(f"{datei} nicht ueber CODE lesbar")
+        eigen = quelltext(os.path.basename(os.path.abspath(__file__)))
+        # Der Fehler ist ein Muster, keine Einzelstelle: relativ
+        # geoeffnete Projektdateien im Selbsttest.
+        offen = re.findall(r'open\("(\w+\.(?:py|md))"', eigen)
+        if offen:
+            fehler.append(f"relativ geoeffnet statt ueber CODE: "
+                          f"{', '.join(sorted(set(offen)))}")
+        if fehler:
+            b.add("FEHLER", "Quelldateizugriff fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Selbsttest liest Quelldateien ueber CODE — laeuft "
+                        "auch aus einem fremden Arbeitsverzeichnis")
+    except Exception as e:
+        b.add("FEHLER", "Quelldateizugriff nicht pruefbar", repr(e))
+
+    # --- Empfehlung, Rollen und entfallene Schluessel ------------------
+    # Die Empfehlungstabelle ist die Stelle, an der die Modellwahl
+    # begruendet steht. Sie ist nur so viel wert, wie sie vollstaendig
+    # ist: Eine Rolle ohne Eintrag erscheint in 'pipeline.py modelle' mit
+    # leerer Empfehlung — und wer sie dann setzt, raet.
+    try:
+        import tempfile
+        fehler = []
+        ohne = [r for r in G.ROLLEN if not G.EMPFEHLUNG.get(r, ("",))[0]]
+        if ohne:
+            fehler.append(f"ohne Empfehlung: {', '.join(ohne)}")
+        fremd = [r for r in G.EMPFEHLUNG if r not in G.ROLLEN]
+        if fremd:
+            fehler.append(f"Empfehlung fuer unbekannte Rolle: "
+                          f"{', '.join(fremd)}")
+        for r, (m, e, warum) in G.EMPFEHLUNG.items():
+            if e not in G.EFFORT:
+                fehler.append(f"{r}: Tiefe '{e}' gibt es nicht")
+            if len(warum) < 40:
+                fehler.append(f"{r}: Begruendung zu duenn")
+
+        # Die beiden Annotationsarbeiten muessen getrennt routen — sonst
+        # war die Trennung Kosmetik.
+        probe = dict(G.STANDARD, modell_begruendung="gemini-3.6-flash",
+                     modell_screening="gemini-3.1-pro-preview")
+        if G.modell_fuer(probe, "begruendung") == \
+                G.modell_fuer(probe, "screening"):
+            fehler.append("begruendung und screening routen aufs selbe "
+                          "Modell")
+        quelle = quelltext("annotation.py")
+        for soll in ('rolle="begruendung"', 'rolle="screening"'):
+            if soll not in quelle:
+                fehler.append(f"annotation.py ruft nicht {soll}")
+        if 'rolle="annotation"' in quelle:
+            fehler.append("annotation.py ruft noch die alte Rolle")
+
+        # Entfallene Schluessel muessen auffallen, saubere nicht.
+        class _B:
+            def __init__(self): self.meldungen = []
+
+            def add(self, art, thema, text=""):
+                self.meldungen.append((art, thema))
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "projekt.json")
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump({"modell_annotation": "x", "temperature_stil": 1}, f)
+            bb = _B()
+            pruefe_entfallene_schluessel(bb, p)
+            if not any(a == "WARN" for a, _ in bb.meldungen):
+                fehler.append("entfallene Schluessel werden nicht gemeldet")
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump({"modell_uebersetzung": "claude-opus-5"}, f)
+            bb = _B()
+            pruefe_entfallene_schluessel(bb, p)
+            if bb.meldungen:
+                fehler.append("saubere projekt.json wird beanstandet")
+
+        if fehler:
+            b.add("FEHLER", "Empfehlung oder Rollentrennung fehlerhaft",
+                  "; ".join(fehler))
+        else:
+            b.add("OK", f"Empfehlung fuer alle {len(G.ROLLEN)} Rollen, "
+                        f"Begruendung und Screening getrennt geroutet")
+    except Exception as e:
+        b.add("FEHLER", "Empfehlung nicht pruefbar", repr(e))
+
+    # --- SDK-Pfad: derselbe Payload, dieselbe Antwort ------------------
+    # Zwei Transportwege sind erlaubt, zwei Wahrheiten nicht. Der Selbsttest
+    # prueft den Payload genau einmal; geht die SDK an 'payload' vorbei
+    # oder liest sie Antworten selbst, prueft er den Weg, den niemand
+    # benutzt. Und die Fehlermeldung muss 'HTTP <code>' behalten, sonst
+    # greift der Rueckfall der Cache-Lebensdauer auf dem SDK-Pfad nicht.
+    try:
+        fehler = []
+        b_a = G.AnthropicBackend()
+        soll = b_a.payload(cfg, "SYSTEM", "USER", "uebersetzung",
+                           "claude-opus-5")
+
+        class _Nachrichten:
+            def __init__(self): self.gesehen = None
+
+            def create(self, **kw):
+                self.gesehen = kw
+                return _Antwort()
+
+        class _Antwort:
+            def model_dump(self):
+                return {"content": [{"type": "text", "text": "Hallo."}],
+                        "stop_reason": "end_turn",
+                        "usage": {"input_tokens": 7, "output_tokens": 3,
+                                  "cache_read_input_tokens": 11,
+                                  "cache_creation_input_tokens": 0}}
+
+        class _Klient:
+            def __init__(self): self.messages = _Nachrichten()
+
+        klient = _Klient()
+        d = G.sdk_antwort(klient, soll)
+        if klient.messages.gesehen != soll:
+            fehler.append("SDK bekommt einen anderen Payload als requests")
+        text, usage = b_a.antwort_lesen(d)
+        if text != "Hallo." or usage["cache_lesen"] != 11:
+            fehler.append(f"SDK-Antwort falsch gelesen: {text!r}, {usage}")
+
+        # Fehlerabbildung: Status bleibt lesbar, TTL-Rueckfall greift.
+        class _Status(Exception):
+            status_code = 400
+            body = {"error": {"message": "ttl: unsupported value"}}
+        umgesetzt = G.sdk_fehler(G.anthropic_sdk(), _Status("kaputt"))
+        if not isinstance(umgesetzt, G.ApiFehler):
+            fehler.append("SDK-Fehler wird nicht zu ApiFehler")
+        if not G.ttl_abgelehnt(umgesetzt):
+            fehler.append(f"TTL-Rueckfall greift auf dem SDK-Pfad nicht: "
+                          f"{umgesetzt}")
+
+        class _Auth(Exception):
+            status_code = 401
+            body = "no key"
+        if "401" not in str(G.sdk_fehler(G.anthropic_sdk(), _Auth("x"))):
+            fehler.append("Statuscode geht in der Uebersetzung verloren")
+
+        # Der requests-Pfad bleibt der Rueckfall: abgeschaltete oder
+        # fehlende SDK darf keinen Klienten liefern.
+        if b_a.klient(dict(cfg, sdk_nutzen=False)) is not None:
+            fehler.append("'sdk_nutzen: false' wird nicht beachtet")
+
+        if fehler:
+            b.add("FEHLER", "SDK-Pfad fehlerhaft", "; ".join(fehler))
+        else:
+            vorhanden = "vorhanden" if G.anthropic_sdk() else "nicht \
+installiert, requests-Pfad"
+            b.add("OK", f"SDK-Pfad: derselbe Payload, derselbe Antwortleser, "
+                        f"Statuscodes erhalten ({vorhanden})")
+    except Exception as e:
+        b.add("FEHLER", "SDK-Pfad nicht pruefbar", repr(e))
+
+    # --- Ueberlaengen: gezaehlt, nicht gekappt -------------------------
+    # Kappen waere die naheliegende Reaktion und die falsche: Ein Absatz
+    # gehoert zusammen, ein geschuetztes Zitat erst recht. Was bleibt, ist
+    # zaehlen — und dabei darf weder ein normaler Chunk als uebergross noch
+    # ein wirklich uebergrosser als normal durchgehen.
+    try:
+        fehler = []
+        chunks = [("wort " * 800, False),          # genau Ziel
+                  ("wort " * 1001, False),         # ueber 1,25×
+                  ("wort " * 999, False),          # knapp darunter
+                  ("wort " * 3000, True)]          # geschuetztes Zitat
+        lang = G.chunk_ueberlaengen(chunks, 800)
+        if [i for i, _, _ in lang] != [2, 4]:
+            fehler.append(f"falsche Auswahl: {[i for i, _, _ in lang]}")
+        if not any(g for _, _, g in lang):
+            fehler.append("geschuetzter Chunk nicht als solcher gemeldet")
+        if G.chunk_ueberlaengen([("wort " * 800, False)], 800):
+            fehler.append("Chunk auf der Zielmarke gilt als uebergross")
+        if fehler:
+            b.add("FEHLER", "Ueberlaengenzaehler fehlerhaft",
+                  "; ".join(fehler))
+        else:
+            b.add("OK", "Ueberlaengen werden gezaehlt und benannt, "
+                        "geschuetzte Chunks getrennt ausgewiesen")
+    except Exception as e:
+        b.add("FEHLER", "Ueberlaengenzaehler nicht pruefbar", repr(e))
+
+    # --- 'weiter' gibt Pausen frei, sonst nichts -----------------------
+    # Der Befehl hakt einen Schritt als erledigt ab, ohne ihn laufen zu
+    # lassen. Das ist bei einer Pause genau richtig und bei allem anderen
+    # genau falsch: Ein fehlgeschlagener Volllauf, den 'weiter' abhakt,
+    # waere ein halbes Buch, das als fertig gilt.
+    try:
+        import tempfile
+        import pipeline as PL
+        fehler = []
+        gelaufen = []
+        echt_run, alt_cwd = PL.cmd_run, os.getcwd()
+        # Der Befehl redet; im Selbsttestbericht hat das nichts zu suchen.
+        import contextlib, io
+        with tempfile.TemporaryDirectory() as tmp, \
+                contextlib.redirect_stdout(io.StringIO()):
+            try:
+                os.chdir(tmp)
+                PL.cmd_run = lambda cfg, args: gelaufen.append(True)
+
+                def stand(bis_zu, status="fertig"):
+                    """Manifest, in dem alles vor 'bis_zu' erledigt ist."""
+                    s = {}
+                    for n in PL.NAMEN[:PL.NAMEN.index(bis_zu)]:
+                        s[n] = {"status": "fertig"}
+                    s[bis_zu] = {"status": status}
+                    with open(G.MANIFEST, "w", encoding="utf-8") as f:
+                        json.dump({"schritte": s}, f)
+
+                # Pause: wird freigegeben, danach laeuft es weiter.
+                stand("PAUSE_review", "wartet")
+                PL.cmd_weiter(cfg, argparse.Namespace(hg=False))
+                m = json.load(open(G.MANIFEST, encoding="utf-8"))
+                if m["schritte"]["PAUSE_review"]["status"] != "fertig":
+                    fehler.append("Pause wird nicht freigegeben")
+                if not gelaufen:
+                    fehler.append("nach der Freigabe laeuft nichts weiter")
+                # Die naechste Pause bleibt zu — freigegeben wird eine.
+                if m["schritte"].get("PAUSE_pruefung", {}).get("status") \
+                        == "fertig":
+                    fehler.append("gibt mehr als eine Pause frei")
+
+                # Gegenprobe: ein fehlgeschlagener Schritt ist keine Pause.
+                stand("voll", "fehler")
+                gelaufen.clear()
+                PL.cmd_weiter(cfg, argparse.Namespace(hg=False))
+                m = json.load(open(G.MANIFEST, encoding="utf-8"))
+                if m["schritte"]["voll"]["status"] == "fertig":
+                    fehler.append("hakt einen fehlgeschlagenen Schritt ab")
+                if not gelaufen:
+                    fehler.append("laeuft nicht weiter, wenn keine Pause "
+                                  "offen ist")
+            finally:
+                PL.cmd_run = echt_run
+                os.chdir(alt_cwd)
+
+        if fehler:
+            b.add("FEHLER", "'weiter' fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "'weiter' gibt genau eine Pause frei und hakt "
+                        "keinen gescheiterten Schritt ab")
+    except Exception as e:
+        b.add("FEHLER", "'weiter' nicht pruefbar", repr(e))
+
+    # --- Aktive Rollen gegen die Wirklichkeit -------------------------
+    # 'aktive_rollen' ist die Grundlage der Kostenschaetzung und des Pings
+    # vor dem Lauf. Eine dort fehlende Rolle heisst: kostenlos und
+    # ungeprueft. Genau so sind 'zitat' und 'screening' durchgerutscht,
+    # nachdem ihre Schritte laengst gebaut waren.
+    try:
+        import glob as _glob
+        fehler = []
+        gerufen = set()
+        for pfad in _glob.glob(os.path.join(CODE, "*.py")):
+            if os.path.basename(pfad) in ("gemeinsam.py", "preflight.py",
+                                          "verifikation.py"):
+                continue
+            quelle = open(pfad, encoding="utf-8").read()
+            for m in re.finditer(r'rolle=["\'](\w+)["\']', quelle):
+                if m.group(1) in G.ROLLEN:
+                    gerufen.add(m.group(1))
+        # Gefunden werden nur woertlich hingeschriebene Rollen; 'stil' und
+        # 'korrektorat' kommen in lektorat.py aus einer Variablen. Das ist
+        # kein Loch, sondern die Grenze: Die Luecken lagen bisher immer
+        # dort, wo ein neuer Schritt seine Rolle woertlich nannte.
+        aktiv = set(G.aktive_rollen(G.lade_config(pflicht=False)))
+        fehlt = gerufen - aktiv
+        if fehlt:
+            fehler.append(f"wird gerufen, gilt aber als inaktiv: "
+                          f"{', '.join(sorted(fehlt))}")
+        # Gegenprobe: keine erfundene Rolle in der Liste.
+        erfunden = aktiv - set(G.ROLLEN)
+        if erfunden:
+            fehler.append(f"unbekannte Rolle: {', '.join(sorted(erfunden))}")
+        if fehler:
+            b.add("FEHLER", "Aktive Rollen unvollstaendig", "; ".join(fehler))
+        else:
+            b.add("OK", f"Aktive Rollen decken alle {len(gerufen)} wirklich "
+                        f"gerufenen Rollen ab")
+    except Exception as e:
+        b.add("FEHLER", "Aktive Rollen nicht pruefbar", repr(e))
+
     # --- Paket 9: der Ablaufplan muss zur Schrittliste passen ----------
     # Ein Plan, der einen Schritt nicht kennt, schickt den Leser ins
     # Leere — und das faellt erst auf, wenn jemand danach arbeitet.
     try:
         import pipeline as PL
-        pfad = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                            "ABLAUFPLAN.md")
-        plan = open(pfad, encoding="utf-8").read()
+        plan = quelltext("ABLAUFPLAN.md")
         fehler = []
         fehlend = [n for n in [s[0] for s in PL.SCHRITTE]
                    if f"`{n}`" not in plan]
@@ -494,7 +912,7 @@ def selbsttest(cfg, b):
             if wort not in BW.GEWICHTUNG:
                 fehler.append(f"Gewichtungshinweis nennt '{wort}' nicht")
         # Die alten Etiketten duerfen nirgends mehr stehen.
-        quelle = open("bewertung.py", encoding="utf-8").read()
+        quelle = quelltext("bewertung.py")
         for alt in ("lokalen Modells", "Selbstbewertung ist schwach"):
             if alt in quelle.replace("Frueher stand hier", ""):
                 fehler.append(f"altes Etikett '{alt}' steht noch im Bericht")
@@ -846,6 +1264,49 @@ def selbsttest(cfg, b):
             RS._buch = echt
             RS.G.lade_json = echt_lade
 
+        # Der Tab 'Modelle' wird geschrieben und NIE gelesen. Steht er in
+        # TABS, liest ihn 'sync' zurueck und die Modellwahl waere die
+        # dritte Quelle neben Repo- und Projekt-projekt.json.
+        if any(t[0] == "Modelle" for t in RS.TABS):
+            fehler.append("'Modelle' steht in TABS und wird damit gelesen")
+        if RS.TAB_MODELLE[0] in RS.OPTIONAL:
+            fehler.append("'Modelle' ist als Lesetab markiert")
+
+        class _BuchM:
+            def __init__(s): s.blaetter, s.neu = {}, []
+
+            def worksheet(s, n):
+                if n not in s.blaetter:
+                    raise KeyError(n)
+                return s.blaetter[n]
+
+            def add_worksheet(s, title, rows, cols):
+                s.neu.append(title)
+                s.blaetter[title] = _Blatt(title, [])
+                return s.blaetter[title]
+
+        bm = _BuchM()
+        echt_buch, alt_cwd2 = RS._buch, os.getcwd()
+        try:
+            RS._buch = lambda cfg: bm
+            os.chdir(tempfile.mkdtemp())
+            RS.modelle_schreiben(dict(cfg, sheets_id="x" * 30), still=True)
+        finally:
+            RS._buch = echt_buch
+            os.chdir(alt_cwd2)
+        geschrieben = bm.blaetter["Modelle"].werte
+        if geschrieben[0] != list(RS.TAB_MODELLE[1]):
+            fehler.append(f"Kopfzeile falsch: {geschrieben[:1]}")
+        rollen_im_tab = {z[0].split("  ")[0] for z in geschrieben[1:] if z}
+        if not set(G.ROLLEN) <= rollen_im_tab:
+            fehler.append(f"Rollen fehlen im Tab: "
+                          f"{sorted(set(G.ROLLEN) - rollen_im_tab)}")
+        if not any("nicht gelesen" in " ".join(z) for z in geschrieben if z):
+            fehler.append("der Tab sagt nicht, dass er nicht gelesen wird")
+        # Ohne sheets_id ein No-op — der Rueckfallpfad bleibt unberuehrt.
+        if RS.modelle_schreiben(dict(cfg, sheets_id=""), still=True):
+            fehler.append("schreibt trotz leerer sheets_id")
+
         tab = [t for t in RS.TABS if t[0] == "Anrede"][0]
         anrede, f = RS._pruefen_und_bauen(
             "Anrede",
@@ -1098,21 +1559,31 @@ class _Antwort:
 def selbsttest_backends(b):
     cfg = dict(G.STANDARD)
     cfg.update({"modell_uebersetzung": "claude-opus-5",
-                "modell_annotation":   "gemini-3.6-flash",
+                "modell_begruendung":  "gemini-3.6-flash",
                 "effort_uebersetzung": "hoch",
-                "effort_annotation":   "niedrig"})
+                "effort_begruendung":  "niedrig"})
 
-    # --- Routing: Rolle -> Modell -> Backend, inklusive Rueckfallpfad ----
+    # --- Routing: Rolle -> Modell -> Backend ----------------------------
     try:
         fehler = []
         if G.backend_name(G.modell_fuer(cfg, "uebersetzung")) != "anthropic":
             fehler.append("uebersetzung landet nicht bei Anthropic")
-        if G.backend_name(G.modell_fuer(cfg, "annotation")) != "google":
-            fehler.append("annotation landet nicht bei Google")
-        # Leerer Schluessel muss auf Ollama zurueckfallen (VPS-Rueckfallpfad).
-        if G.backend_name(G.modell_fuer(dict(G.STANDARD), "stil")) != "ollama":
-            fehler.append("leeres modell_stil faellt nicht auf Ollama zurueck")
-        if G.effort_fuer(cfg, "annotation") != "low":
+        if G.backend_name(G.modell_fuer(cfg, "begruendung")) != "google":
+            fehler.append("begruendung landet nicht bei Google")
+        # Eine Rolle ohne Modell muss abbrechen statt still zu ersetzen.
+        leer = dict(G.STANDARD)
+        leer["modell_stil"] = ""
+        try:
+            G.modell_fuer(leer, "stil")
+            fehler.append("leeres modell_stil wird nicht gemeldet")
+        except SystemExit:
+            pass
+        try:
+            G.backend_name("mistral-medium-3.5:128b-q8_0")
+            fehler.append("unbekannter Anbieter wird nicht gemeldet")
+        except SystemExit:
+            pass
+        if G.effort_fuer(cfg, "begruendung") != "low":
             fehler.append("Effort 'niedrig' wird nicht auf 'low' abgebildet")
         if fehler:
             b.add("FEHLER", "Rollen-Routing falsch", "; ".join(fehler))
@@ -1141,18 +1612,81 @@ def selbsttest_backends(b):
             fehler.append("System-Prompt ist keine Blockliste")
         elif system[-1].get("cache_control", {}).get("type") != "ephemeral":
             fehler.append("Cache-Marker fehlt auf dem letzten System-Block")
+
+        # Cache-Lebensdauer: gesetzt wenn konfiguriert, weg wenn nicht.
+        # Ein 'ttl' im Payload, das keiner bestellt hat, kostet beim
+        # Schreiben doppelt — das faellt sonst nur auf der Rechnung auf.
+        marker = (system or [{}])[-1].get("cache_control", {})
+        if marker.get("ttl") != "1h":
+            fehler.append(f"cache_ttl '1h' kommt nicht im Payload an: "
+                          f"{marker.get('ttl')!r}")
+        ohne = dict(cfg, cache_ttl="")
+        m2 = G.AnthropicBackend().payload(ohne, "S", "U", "uebersetzung",
+                                          "claude-opus-5")
+        if "ttl" in m2["system"][-1].get("cache_control", {}):
+            fehler.append("leeres cache_ttl setzt trotzdem eine Lebensdauer")
+
         if fehler:
             b.add("FEHLER", "Anthropic-Payload fehlerhaft", "; ".join(fehler))
         else:
-            b.add("OK", "Anthropic-Payload: Cache-Marker und Effort gesetzt, "
-                        "keine Sampling-Parameter")
+            b.add("OK", "Anthropic-Payload: Cache-Marker mit Lebensdauer und "
+                        "Effort gesetzt, keine Sampling-Parameter")
     except Exception as e:
         b.add("FEHLER", "Anthropic-Payload wirft Ausnahme", repr(e))
+
+    # --- Cache-Lebensdauer: Preis und Rueckfall -------------------------
+    # Sie ist eine Versicherung, kein Sparposten. Zwei Dinge muessen
+    # stimmen: Sie darf einen Lauf nicht abbrechen, und sie muss richtig
+    # bepreist werden — eine Stunde kostet beim Schreiben doppelt.
+    try:
+        fehler = []
+        if not G.ttl_abgelehnt(G.ApiFehler(
+                "HTTP 400: {'error': {'message': 'ttl: unsupported value'}}")):
+            fehler.append("Ablehnung der Lebensdauer wird nicht erkannt")
+        # Gegenproben: kein zweiter, bezahlter Versuch bei echten Fehlern.
+        for text in ("HTTP 400: temperature is not supported",
+                     "HTTP 429: rate limit, ttl exceeded",
+                     "HTTP 500: interner Fehler"):
+            if G.ttl_abgelehnt(G.ApiFehler(text)):
+                fehler.append(f"faengt zu weit: {text[:24]}")
+
+        t = G.tarif("claude-opus-5")
+        lang = G.kosten_dollar({"cache_schreiben": 1000,
+                                "cache_schreiben_1h": 1000}, t)
+        kurz = G.kosten_dollar({"cache_schreiben": 1000}, t)
+        if abs(lang - 1000 * t["ein"] * 2.0 / 1e6) > 1e-12:
+            fehler.append(f"Stunden-Cache falsch bepreist: {lang}")
+        if abs(kurz - 1000 * t["ein"] * 1.25 / 1e6) > 1e-12:
+            fehler.append(f"Fuenf-Minuten-Cache falsch bepreist: {kurz}")
+        # Gemischt: der Rest der Gesamtzahl zaehlt als kurzlebig.
+        gemischt = G.kosten_dollar({"cache_schreiben": 1000,
+                                    "cache_schreiben_1h": 400}, t)
+        soll = (400 * 2.0 + 600 * 1.25) * t["ein"] / 1e6
+        if abs(gemischt - soll) > 1e-12:
+            fehler.append(f"Mischung falsch bepreist: {gemischt} statt {soll}")
+
+        # Die Aufschluesselung muss aus der Antwort kommen, nicht geraten.
+        _, u = G.AnthropicBackend().antwort_lesen(
+            {"content": [{"type": "text", "text": "x"}],
+             "usage": {"input_tokens": 1, "output_tokens": 2,
+                       "cache_read_input_tokens": 3,
+                       "cache_creation_input_tokens": 40,
+                       "cache_creation": {"ephemeral_1h_input_tokens": 40}}})
+        if u.get("cache_schreiben_1h") != 40:
+            fehler.append(f"Cache-Aufschluesselung nicht gelesen: {u}")
+
+        if fehler:
+            b.add("FEHLER", "Cache-Lebensdauer fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Cache-Lebensdauer: Ablehnung eng erkannt, "
+                        "Schreibpreis nach Lebensdauer getrennt")
+    except Exception as e:
+        b.add("FEHLER", "Cache-Lebensdauer nicht pruefbar", repr(e))
 
     # --- Gemini-Payload -------------------------------------------------
     try:
         p = G.GeminiBackend().payload(cfg, "SYSTEM", "USER",
-                                      "annotation", "gemini-3.6-flash")
+                                      "begruendung", "gemini-3.6-flash")
         schluessel = set(_schluessel_tief(p))
         fehler = []
         drin = schluessel & set(SAMPLING)
@@ -1262,17 +1796,18 @@ def selbsttest_backends(b):
     except Exception as e:
         b.add("FEHLER", "Rohausgabe wirft Ausnahme", repr(e))
 
-    # --- Anzeige darf nicht den Rueckfallschluessel nennen ---------------
+    # --- Der Rueckfallschluessel ist weg, niemand darf ihn noch lesen ---
     # uebersetzung.py meldete im Kopf 'cfg["modell"]' — den Ollama-Namen —
     # obwohl ueber die Rolle laengst Opus 5 lief. Der Lauf war richtig, die
-    # Anzeige log. Payloadtests finden so etwas nicht, ein Blick in die
-    # Quelle schon.
+    # Anzeige log. Seit dem Wegfall des Ollama-Pfads gibt es den Schluessel
+    # gar nicht mehr: derselbe Zugriff waere jetzt ein KeyError mitten im
+    # Lauf. Payloadtests finden so etwas nicht, ein Blick in die Quelle
+    # schon.
     try:
-        hier = os.path.dirname(os.path.abspath(__file__))
         schuldig = []
         for datei in ("uebersetzung.py", "lektorat.py", "konkordanz.py",
                       "bewertung.py", "qa.py"):
-            pfad = os.path.join(hier, datei)
+            pfad = os.path.join(CODE, datei)
             if not os.path.exists(pfad):
                 continue
             for nr, zeile in enumerate(open(pfad, encoding="utf-8"), 1):
@@ -1281,13 +1816,13 @@ def selbsttest_backends(b):
                 if "cfg['modell']" in zeile or 'cfg["modell"]' in zeile:
                     schuldig.append(f"{datei}:{nr}")
         if schuldig:
-            b.add("FEHLER", "Anzeige nennt den Ollama-Rueckfallschluessel",
+            b.add("FEHLER", "Zugriff auf den entfallenen Schluessel 'modell'",
                   f"{', '.join(schuldig)}\n"
-                  f"           Im API-Betrieb stimmt cfg['modell'] nie. "
+                  f"           Den gibt es nicht mehr. "
                   f"G.modell_fuer(cfg, rolle) benutzen.")
         else:
-            b.add("OK", "Kein Skript zeigt cfg['modell'] statt des "
-                        "Rollenmodells an")
+            b.add("OK", "Kein Skript liest den entfallenen Schluessel "
+                        "cfg['modell']")
     except Exception as e:
         b.add("WARN", "Anzeigepruefung nicht durchfuehrbar", repr(e))
 
@@ -1339,9 +1874,8 @@ def pruefe_belegung(cfg, b):
     for rolle in G.aktive_rollen(cfg):
         modell = G.modell_fuer(cfg, rolle)
         anbieter = G.backend_name(modell)
-        zusatz = (f", Effort {G.effort_fuer(cfg, rolle)}"
-                  if anbieter != "ollama" else "")
-        b.add("INFO", f"  {rolle}", f"{modell} ({anbieter}{zusatz})")
+        b.add("INFO", f"  {rolle}",
+              f"{modell} ({anbieter}, Effort {G.effort_fuer(cfg, rolle)})")
 
 
 def pruefe_api(cfg, b, backends, ping):
@@ -1372,7 +1906,7 @@ def pruefe_api(cfg, b, backends, ping):
         probe["max_tokens_api"] = 1
         try:
             G.BACKENDS[anbieter].chat(probe, "Antworte mit OK.", "OK",
-                                      0.0, rolle=rolle, modell=modell)
+                                      rolle=rolle, modell=modell)
             b.add("OK", f"{modell} antwortet")
         except SystemExit:
             raise
@@ -1392,42 +1926,175 @@ def pruefe_api(cfg, b, backends, ping):
     return ok
 
 
-def pruefe_kosten(cfg, b, woerter):
-    """Schaetzung vor dem Volllauf. Lieber zu hoch als zu niedrig."""
+# Rollen, die das Buch chunkweise durcharbeiten: je Chunk ein Aufruf mit
+# demselben System-Prompt. Alle anderen rufen einmal oder wenige Male.
+CHUNKROLLEN = ("uebersetzung", "revision", "stil", "korrektorat")
+
+# Gemessen am Lauf 1919 (Opus 5, effort 'hoch'): 4110 Ausgabetoken je Chunk
+# bei rund 1450 Token deutschem Text. Knapp zwei Drittel der Ausgabe sind
+# Denkschritte — und die stehen auf derselben Rechnung wie der Text. Wer
+# das weglaesst, schaetzt die Ausgabe um den Faktor drei zu niedrig.
+DENKFAKTOR = 2.8
+
+# Referenzbloecke und Rueckschau im User-Prompt, wenn sich der Kopf nicht
+# bauen laesst (die JSONs entstehen erst in der Vorbereitung). Gemessen:
+# rund 2100 Token je Chunk bei 800 Quellwoertern.
+KOPF_TOKEN = 2100
+
+
+def _kosten_grundlagen(cfg, text):
+    """(Chunkzahl, System-Token je Rolle, Token eines Chunks, gezaehlt?).
+
+    Wo der Anbieter zaehlt, wird nicht geschaetzt: 'count_tokens' ist
+    kostenlos und kennt den Tokenizer, den das Modell wirklich benutzt."""
+    import uebersetzung as U
+    import lektorat as L
+
+    chunks = G.chunks_bauen(G.absaetze(text), cfg["chunk_words"])
+    n = max(1, len(chunks))
+    probe = chunks[0][0] if chunks else text[:4000]
+
+    p_ueb, p_rev = U.prompts(cfg)
+    p_stil, p_korr = L.prompts(cfg)
+    system = {"uebersetzung": p_ueb, "revision": p_rev,
+              "stil": p_stil, "korrektorat": p_korr}
+
+    faktor = G.token_faktor(G.lade_json(G.MANIFEST, still=True))
+    gezaehlt = True
+
+    # Getrennt zaehlen statt subtrahieren: einmal der System-Prompt mit
+    # einem Alibi-Nutzertext, einmal der Chunk ohne System-Prompt. Die
+    # Handvoll Token Nachrichtenruestung faellt gegen 800 Woerter nicht ins
+    # Gewicht — eine Differenz aus zwei Schaetzungen dagegen schon.
+    z = G.tokens_zaehlen(cfg, "uebersetzung", "-", probe)
+    if z is None:
+        gezaehlt, chunk_token = False, len(probe.split()) * faktor
+    else:
+        chunk_token = z
+
+    st = {}
+    for rolle, s in system.items():
+        z = G.tokens_zaehlen(cfg, rolle, s, "-")
+        if z is None:
+            gezaehlt = False
+            st[rolle] = len(s.split()) * faktor
+        else:
+            st[rolle] = z
+    return n, st, chunk_token, gezaehlt, faktor
+
+
+def pruefe_kosten(cfg, b, text):
+    """Schaetzung vor dem Volllauf. Lieber zu hoch als zu niedrig.
+
+    Drei Dinge, die die frueheren Schaetzungen zu niedrig gemacht haben und
+    hier deshalb einzeln stehen: Der System-Prompt geht in JEDEN Chunk (er
+    ist zwischengespeichert, aber nicht kostenlos), die Denkschritte machen
+    den groesseren Teil der Ausgabe aus, und die Rollen 'zitat' und
+    'screening' tauchten gar nicht auf."""
     b.abschnitt("Kostenschaetzung")
-    faktor = G.token_faktor()
-    b.add("INFO", "Annahme", f"{faktor} Token je Quellwort (konservativ; "
-                             f"wird nach dem ersten Lauf an der gemessenen "
-                             f"Usage kalibriert)")
-    # Nicht jede Rolle sieht das ganze Buch: Judge und Vorbereitung arbeiten
-    # am Testauszug beziehungsweise an Konkordanzen, nicht am Volltext.
-    auszug = cfg["test_words_erzaehlung"] + cfg["test_words_dialog"]
-    umfang = {"judge": auszug, "vorbereitung": min(woerter, 20000)}
+    woerter = len(text.split())
+    try:
+        n, system_token, chunk_token, gezaehlt, faktor = \
+            _kosten_grundlagen(cfg, text)
+    except Exception as e:
+        b.add("WARN", "Kostenschaetzung nicht moeglich", repr(e))
+        return
+
+    # Uebergrosse Chunks werden bewusst nicht gekappt (Absatzgrenzen haben
+    # Vorrang). Sichtbar muessen sie trotzdem sein: Sie sind die Ursache
+    # hinter verworfenen Laengenverhaeltnissen im Lauf.
+    lang = G.chunk_ueberlaengen(G.chunks_bauen(G.absaetze(text),
+                                               cfg["chunk_words"]),
+                                cfg["chunk_words"])
+    if lang:
+        groesster = max(w for _, w, _ in lang)
+        art = ("WARN" if groesster > cfg["chunk_words"] * 1.8 else "INFO")
+        b.add(art, f"{len(lang)} uebergrosse Chunks",
+              f"ueber {cfg['chunk_words'] * G.UEBERLAENGE:.0f} Woertern, "
+              f"groesster {groesster}. Nicht gekappt — ein Absatz gehoert "
+              f"zusammen. Erwarte dort eher verworfene "
+              f"Laengenverhaeltnisse.")
+    else:
+        b.add("OK", f"Keine uebergrossen Chunks "
+                    f"(ueber {cfg['chunk_words'] * G.UEBERLAENGE:.0f} "
+                    f"Woertern)")
+
+    b.add("INFO", "Grundlage",
+          f"{n} Chunks à {cfg['chunk_words']} Woerter, "
+          + ("Tokenzahlen beim Anbieter gezaehlt"
+             if gezaehlt else f"{faktor} Token je Wort geschaetzt "
+                              f"(kein Schluessel oder Zaehler nicht "
+                              f"erreichbar)"))
+    b.add("INFO", "Denkanteil",
+          f"Ausgabe = {DENKFAKTOR}× Text. Gemessen am Lauf 1919 unter "
+          f"Opus 5 bei effort 'hoch'; fuer andere Stufen ist der Wert "
+          f"nicht gemessen.")
+
+    # Nicht jede Rolle sieht das ganze Buch, und bei keiner von ihnen haengt
+    # die Ausgabelaenge an der Eingabelaenge: Ein Glossar aus 20 000 Woertern
+    # Analysepaket ist zwei Seiten lang, nicht zwanzig. Deshalb stehen
+    # Eingabe und Ausgabe hier getrennt.
+    # (Aufrufe, Kopf im System-Prompt, Eingabe je Aufruf, Ausgabe je Aufruf)
+    # — alles in Quellwoertern, abgelesen am Lauf 1919 und aufgerundet.
+    einmalig = {
+        # Acht Lieferungen plus Anweisungsentwurf; die Befunde stehen im
+        # System-Prompt und sind ab dem zweiten Aufruf zwischengespeichert.
+        "vorbereitung": (9, min(woerter, 20000), 400, 1500),
+        "zitat":        (1, 0, min(woerter, 4000), 1500),
+        # Je 20 Aenderungen ein Aufruf; grob ein Buendel je zwei Chunks.
+        "begruendung":  (max(1, n // 2), 0, 400, 300),
+        # Vier Chunkpaare je Aufruf, Quelle und Ziel nebeneinander.
+        "screening":    (max(1, n // 4), 0, 8 * cfg["chunk_words"], 200),
+        # Vier Absatzpaare je Auszug, zwei Auszuege.
+        "judge":        (8, 0, 800, 250),
+    }
 
     summe, unsicher, ohne_tarif = 0.0, False, []
     for rolle in G.aktive_rollen(cfg):
         modell = G.modell_fuer(cfg, rolle)
-        if G.backend_name(modell) == "ollama":
-            continue
         t = G.tarif(modell)
         if not t:
             ohne_tarif.append(modell)
             continue
-        n = umfang.get(rolle, woerter)
-        # Je Pass geht der Quelltext einmal rein und einmal (bearbeitet) raus;
-        # Kontextrueckschau und Prompt-Kopf schlagen grob als Aufschlag zu.
-        ein = n * faktor * 1.4
-        aus = n * faktor
-        d = (ein * t["ein"] + aus * t["aus"]) / 1e6
+        if rolle in CHUNKROLLEN:
+            s = system_token.get(rolle, 0)
+            # Der System-Prompt wird einmal geschrieben und n−1 mal gelesen.
+            ein = (chunk_token + KOPF_TOKEN + 2 * cfg["context_words"] * faktor) * n
+            schreiben, lesen = s, s * (n - 1)
+            aus = chunk_token * n * DENKFAKTOR
+            zusatz = f"{n} Chunks, System-Prompt {s:,.0f} Token"
+        else:
+            rufe, kopf, w_ein, w_aus = einmalig[rolle]
+            ein = rufe * w_ein * faktor
+            schreiben = kopf * faktor
+            lesen = kopf * faktor * max(0, rufe - 1)
+            aus = rufe * w_aus * faktor * DENKFAKTOR
+            zusatz = (f"{rufe} Aufrufe à rund {w_ein} Woerter ein, "
+                      f"{w_aus} aus")
+        d = G.kosten_dollar({"ein": ein, "aus": aus, "cache_lesen": lesen,
+                             "cache_schreiben": schreiben,
+                             "cache_schreiben_1h": schreiben
+                             if G.cache_ttl(cfg) == "1h" else 0}, t)
         summe += d
         unsicher = unsicher or not t["geprueft"]
-        b.add("INFO", f"  {rolle}", f"{modell}: rund {d:.2f} $ "
-                                    f"({n} Woerter)")
+        b.add("INFO", f"  {rolle}", f"{modell}: rund {d:.2f} $  ({zusatz})")
+
     if ohne_tarif:
         b.add("WARN", "Kein hinterlegter Tarif",
               f"{', '.join(sorted(set(ohne_tarif)))} — Schaetzung "
               f"unvollstaendig. Tarif in gemeinsam.TARIFE ergaenzen.")
-    b.add("INFO", "Summe (grob)", f"rund {summe:.2f} $ fuer {woerter} Woerter")
+    b.add("INFO", "Summe (grob)",
+          f"rund {summe:.2f} $ fuer {woerter} Woerter "
+          f"({summe / max(1, woerter) * 1000:.2f} $ je 1000 Woerter)")
+    # Die Richtung des Fehlers gehoert dazu, sonst liest jemand die Zahl
+    # als Punktschaetzung. Nachgerechnet an 1919: die Schaetzung lag rund
+    # 20 % ueber der gemessenen Uebersetzung und Revision, im Lektorat
+    # mehr, weil dort weder Denkanteil noch Ausgabelaenge gemessen sind.
+    b.add("INFO", "Richtung des Fehlers",
+          "Die Schaetzung faellt bewusst zu hoch aus. Am Buch 1919 lag "
+          "sie fuer Uebersetzung und Revision rund 20 % ueber dem "
+          "gemessenen Wert, im Lektorat deutlicher. Was der Lauf "
+          "wirklich kostet, steht danach in 'pipeline.py status'.")
     if unsicher:
         b.add("WARN", "Teil der Tarife ist nicht verifiziert",
               "Google-Tarife stehen mit Datum 31.07.2026 vorgemerkt und "
@@ -1435,91 +2102,6 @@ def pruefe_kosten(cfg, b, woerter):
 
 
 # ==================================================================
-def pruefe_ollama(cfg, b):
-    b.abschnitt("Backend und Modell")
-    b.add("INFO", "Backend", cfg.get("backend", "ollama"))
-    try:
-        modelle = G.modelle_vorhanden(cfg)
-    except requests.HTTPError as e:
-        code = e.response.status_code if e.response is not None else "?"
-        if code == 401:
-            b.add("FEHLER", f"Port {cfg['ollama_host']} liefert 401",
-                  "Davor sitzt der vast.ai-Proxy, nicht Ollama.\n"
-                  "           ss -tlnp | grep ollama  — Port in "
-                  "projekt.json eintragen.")
-        else:
-            b.add("FEHLER", f"Backend antwortet mit HTTP {code}")
-        return False
-    except Exception as e:
-        b.add("FEHLER", f"Backend nicht erreichbar ({cfg['ollama_host']})",
-              f"{e}\n           ss -tlnp | grep ollama")
-        return False
-
-    b.add("OK", f"Backend erreichbar ({cfg['ollama_host']})")
-    if cfg["modell"] not in modelle:
-        fam = [m for m in modelle
-               if m.split(":")[0] == cfg["modell"].split(":")[0]]
-        if len(fam) == 1:
-            b.add("WARN", f"'{cfg['modell']}' nicht vorhanden",
-                  f"Benutze '{fam[0]}'.")
-            cfg["modell"] = fam[0]
-        else:
-            b.add("FEHLER", f"Modell '{cfg['modell']}' fehlt",
-                  f"Vorhanden: {', '.join(modelle) or 'keines'}\n"
-                  f"           ollama pull {cfg['modell']}")
-            return False
-    else:
-        b.add("OK", f"Modell vorhanden: {cfg['modell']}")
-    return True
-
-
-def pruefe_gpu(cfg, b):
-    b.abschnitt("GPU-Belegung")
-    print("  Lade Modell zur Pruefung (kann einige Minuten dauern) ...")
-    try:
-        requests.post(f"{cfg['ollama_host']}/api/chat", timeout=(10, 1200),
-                      json={"model": cfg["modell"],
-                            "messages": [{"role": "user", "content": "Hallo"}],
-                            "stream": False, "keep_alive": "60m",
-                            "options": {"num_ctx": cfg["num_ctx"],
-                                        "num_predict": 4}}).raise_for_status()
-    except Exception as e:
-        b.add("FEHLER", "Testanfrage fehlgeschlagen", str(e))
-        return
-    try:
-        ps = subprocess.run(["ollama", "ps"], capture_output=True,
-                            text=True, timeout=30).stdout
-    except Exception as e:
-        b.add("WARN", "'ollama ps' nicht ausfuehrbar", str(e))
-        return
-
-    zeile = next((l for l in ps.splitlines()
-                  if cfg["modell"].split(":")[0] in l), "")
-    if not zeile:
-        b.add("WARN", "Modell nach der Testanfrage nicht in 'ollama ps'")
-    elif "100% GPU" in zeile:
-        b.add("OK", "Modell vollstaendig im VRAM (100% GPU)")
-    elif "CPU" in zeile:
-        m = re.search(r"(\d+)%/(\d+)%\s*CPU/GPU", zeile)
-        b.add("FEHLER", "Modell nicht vollstaendig im VRAM "
-                        f"({m.group(1)+'% CPU' if m else 'teilweise CPU'})",
-              "Der Lauf waere um Groessenordnungen langsamer.\n"
-              "           'num_ctx' senken, kleinere Quantisierung oder "
-              "groessere Instanz.")
-    else:
-        b.add("WARN", "GPU-Anteil unklar", zeile.strip())
-
-    try:
-        smi = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,memory.total,memory.used",
-             "--format=csv,noheader"], capture_output=True, text=True,
-            timeout=20).stdout.strip()
-        for l in smi.splitlines():
-            b.add("INFO", "GPU", l.strip())
-    except Exception:
-        pass
-
-
 def pruefe_umgebung(b):
     b.abschnitt("Umgebung")
     try:
@@ -1750,10 +2332,6 @@ def pruefe_config(cfg, b):
     b.add("INFO", "Chunkgroesse",
           f"{cfg['chunk_words']} (Vergleichsvariante "
           f"{cfg['chunk_words_variante']})")
-    if "ollama" in G.benutzte_backends(cfg) \
-            and cfg["chunk_words"] * 4 > cfg["num_ctx"]:
-        b.add("WARN", "num_ctx knapp fuer die Chunkgroesse",
-              f"Revisionspass braucht etwa {cfg['chunk_words']*4} Token.")
     unbekannt = [p for p in cfg["lektorat_passes"]
                  if p not in ("det", "stil", "korrektorat")]
     if unbekannt:
@@ -1766,7 +2344,46 @@ def pruefe_config(cfg, b):
     else:
         b.add("INFO", "Prueffgrenzen noch nicht kalibriert",
               "Werden nach dem Testlauf aus den Messwerten gesetzt.")
+    pruefe_entfallene_schluessel(b)
     b.add("INFO", "Konfigurationsfingerabdruck", G.config_hash(cfg))
+
+
+# Schluessel, die es einmal gab und die heute anders heissen. Eine
+# projekt.json wird nie ueberschrieben — der alte Schluessel bleibt also
+# stehen und wirkt nicht mehr. Ohne diese Meldung merkt das niemand.
+ENTFALLEN = {
+    "modell_annotation": "modell_begruendung und modell_screening",
+    "effort_annotation": "effort_begruendung und effort_screening",
+    "backend":           "der Modellname (das Backend ergibt sich daraus)",
+    "modell":            "modell_<rolle>",
+    "ollama_host":       "entfallen — Ollama ist zurueckgezogen",
+    "num_ctx":           "entfallen — Ollama ist zurueckgezogen",
+    "timeout_read":      "timeout_read_api",
+}
+
+
+def pruefe_entfallene_schluessel(b, pfad=None):
+    """Meldet Schluessel, die in projekt.json stehen und nichts mehr tun."""
+    pfad = pfad or G.CONFIG
+    try:
+        roh = json.load(open(pfad, encoding="utf-8"))
+    except Exception:
+        return
+    tot = [k for k in ENTFALLEN if k in roh]
+    tot += [k for k in roh
+            if k.startswith("temperature_") and k not in ENTFALLEN]
+    if not tot:
+        return
+    zeilen = []
+    for k in sorted(tot):
+        ziel = ENTFALLEN.get(k, "entfallen — es gehen keine "
+                                "Sampling-Parameter mehr raus")
+        zeilen.append(f"{k}  ->  {ziel}")
+    b.add("WARN", f"{len(tot)} entfallene(r) Schluessel in {pfad}",
+          "\n".join(zeilen)
+          + f"\n\nSie werden nicht mehr gelesen und aendern nichts. Aus "
+            f"{pfad}\nentfernen; die Belegung zeigt "
+            f"'python3 pipeline.py modelle'.")
 
 
 # ==================================================================
@@ -1800,16 +2417,9 @@ def main():
     import referenz_sync as R
     R.sicherstellen(cfg)
 
-    # Die Pruefungen richten sich nach den tatsaechlich benutzten Anbietern:
-    # ohne Ollama-Rolle gibt es weder GPU- noch VRAM-Frage.
     backends = G.benutzte_backends(cfg)
     pruefe_belegung(cfg, b)
 
-    if "ollama" in backends:
-        if not pruefe_ollama(cfg, b):
-            b.schreiben(REPORT)
-            sys.exit(1)
-        pruefe_gpu(cfg, b)
     if backends & {"anthropic", "google"}:
         if not pruefe_api(cfg, b, backends, ping=not args.quick):
             b.schreiben(REPORT)
@@ -1822,7 +2432,7 @@ def main():
         text = pruefe_text(cfg, b)
         if text:
             finde_zitate(text, b)
-            pruefe_kosten(cfg, b, len(text.split()))
+            pruefe_kosten(cfg, b, text)
 
     G.speichere_config(cfg)
     ok = b.schreiben(REPORT)

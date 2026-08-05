@@ -71,6 +71,25 @@ def repo_aktualisieren(code=CODE):
     return zweig, commit, hinweis
 
 
+def sdk_sicherstellen():
+    """Installiert die Anbieter-SDK, wenn sie fehlt. Genau dieses eine Paket.
+
+    Die Regel 'kein pip install im Normalbetrieb' entstand gegen litellm
+    und bleibt. Die Hersteller-SDK ist die eine benannte Ausnahme
+    (ENTSCHEIDUNGEN.md), auf Hauptversion festgelegt, und der Lauf haengt
+    nicht daran: Scheitert die Installation, laeuft der requests-Pfad
+    unveraendert weiter."""
+    if G.anthropic_sdk():
+        return "SDK 'anthropic': vorhanden"
+    r = _lauf([sys.executable, "-m", "pip", "install", "-q",
+               "anthropic>=0.40,<1"])
+    G._SDK = None                      # naechster Versuch soll neu laden
+    if r.returncode == 0 and G.anthropic_sdk():
+        return "SDK 'anthropic': nachinstalliert"
+    return ("SDK 'anthropic': nicht installierbar — der Lauf benutzt den "
+            "requests-Pfad (kein Streaming, keine Stapelverarbeitung)")
+
+
 def secrets_laden():
     """Colab-Secrets in die Umgebung. Werte werden nie ausgegeben."""
     stand = {}
@@ -249,6 +268,7 @@ def vorbereiten(projekt=PROJEKT_STANDARD, code=CODE, still=False):
     frisch = drive_mounten()
     zweig, commit, git_hinweis = repo_aktualisieren(code)
     meldungen = projektordner_richten(projekt, code)
+    meldungen.append(sdk_sicherstellen())
     schluessel = secrets_laden()
     os.chdir(projekt)
 

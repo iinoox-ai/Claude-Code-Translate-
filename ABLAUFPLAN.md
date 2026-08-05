@@ -155,10 +155,11 @@ System-Prompts: nur Anweisungen, keine Erläuterungen. Was vor der ersten
 Weiter mit:
 
 ```python
-colab_start.lauf("pipeline.py", "reset", "--ab", "PAUSE_review", "--fertig", code=CODE)
+colab_start.lauf("pipeline.py", "weiter", code=CODE)
 ```
 
-Danach Zelle 1 erneut.
+`weiter` gibt die offene Pause frei und läuft weiter. Es hakt immer nur die
+**nächste** Pause ab und nie einen fehlgeschlagenen Schritt.
 
 ### `PAUSE_pruefung` — nach dem Testlauf
 
@@ -170,7 +171,7 @@ Trägt die Tonlage?
 Angepasste Werte kommen nach `projekt.json`. Weiter mit:
 
 ```python
-colab_start.lauf("pipeline.py", "reset", "--ab", "PAUSE_pruefung", "--fertig", code=CODE)
+colab_start.lauf("pipeline.py", "weiter", code=CODE)
 ```
 
 ---
@@ -320,6 +321,8 @@ Für den Sheets-Zugriff braucht es dann ein Dienstkonto in
 Referenz-JSONs werden direkt gepflegt — der Rückfallpfad ist vollwertig und
 wird nicht entfernt.
 
-Der Ollama-Rückfall existiert weiter: Bleibt `modell_<rolle>` leer, greift
-`backend`/`modell` aus `projekt.json`. Gedacht ist er für den Fall, dass eine
-API ausfällt, nicht für den Normalbetrieb.
+**Einen Betrieb ohne API gibt es nicht mehr.** Der Ollama-Rückfall ist im
+August 2026 entfernt worden — er wurde nie ausgeführt und konnte von keinem
+Selbsttest geprüft werden. Bleibt `modell_<rolle>` leer, bricht der Schritt
+jetzt mit einer Meldung ab, statt still auf ein anderes Modell auszuweichen.
+Begründung in `ENTSCHEIDUNGEN.md`.

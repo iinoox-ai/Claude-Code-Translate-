@@ -8,6 +8,7 @@ setzt an der richtigen Stelle fort und loescht nur auf ausdruecklichen Befehl.
     python3 pipeline.py init            Konfiguration anlegen (interaktiv)
     python3 pipeline.py run             weiter am naechsten offenen Schritt
     python3 pipeline.py run --hg        dasselbe, abgekoppelt im Hintergrund
+    python3 pipeline.py weiter          offene Pause freigeben und weiterlaufen
     python3 pipeline.py status          Stand, Chunkzaehler, Restzeit
     python3 pipeline.py log             Log ansehen  (-f = mitlaufen)
     python3 pipeline.py stop            laufenden Hintergrundlauf beenden
@@ -16,6 +17,7 @@ setzt an der richtigen Stelle fort und loescht nur auf ausdruecklichen Befehl.
     python3 pipeline.py neu             ALLES verwerfen (mit Rueckfrage)
     python3 pipeline.py schritte        Liste der Schritte
     python3 pipeline.py technik         technische Einstellungen abgleichen
+    python3 pipeline.py modelle         Modell und Tiefe je Rolle, mit Empfehlung
 
 Das einzige Kommando, das Ergebnisse loescht, ist 'neu'. 'reset' oeffnet nur
 Schritte wieder; die Dateien bleiben, bis der Schritt sie neu schreibt.
@@ -28,6 +30,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import textwrap
 import time
 
 import gemeinsam as G
@@ -150,24 +153,108 @@ def kostenuebersicht(m):
 
     Ein Schritt, der Modelle ruft und hier nicht auftaucht, erfasst seine
     Usage nicht — das gilt als unfertig, nicht als kostenlos."""
-    zeilen, summe, unsicher = G.kosten_je_rolle(m)
+    zeilen, summen, unsicher = G.kosten_je_rolle(m)
     if not zeilen:
         return
+    # Getrennt nach Lauf: Was das Buch kostet, ist die Zahl, nach der
+    # entschieden wird. Testlaeufe zaehlen dazu, aber nicht hinein.
+    beschriftung = {"voll": "Buchproduktion", "": "Lauf nicht zugeordnet",
+                    "test": "Testlauf"}
+    letzter = object()
     print("\nKosten je Rolle")
     print("-" * 62)
-    for rolle, e, dollar, t in zeilen:
+    for lauf, rolle, modell, e, dollar, t in zeilen:
+        if lauf != letzter:
+            letzter = lauf
+            titel = beschriftung.get(lauf, f"Testlauf {lauf[4:] or lauf}")
+            print(f"  [{titel}]")
         token = f"{e['ein']:>9,} ein / {e['aus']:>8,} aus"
         cache = (f", Cache {e['cache_lesen']:,} gelesen"
                  if e["cache_lesen"] else "")
         preis = f"{dollar:6.2f} $" if dollar is not None else "  kein Tarif"
-        print(f"  {rolle:<14} {e['modell']:<18} {token}{cache}")
+        print(f"  {rolle:<14} {modell:<18} {token}{cache}")
         print(f"  {'':<14} {e['aufrufe']:>4} Aufrufe {'':<12} {preis}")
     print("-" * 62)
-    print(f"  Summe: rund {summe:.2f} $")
+    for lauf in sorted(summen, key=lambda x: (x not in ("voll", ""), x)):
+        titel = beschriftung.get(lauf, f"Testlauf {lauf[4:] or lauf}")
+        print(f"  {titel + ':':<24} rund {summen[lauf]:6.2f} $")
+    if len(summen) > 1:
+        print(f"  {'Alles zusammen:':<24} rund {sum(summen.values()):6.2f} $")
     if unsicher:
         print("  Hinweis: nicht alle Tarife sind gegen die Anbieterdoku "
               "verifiziert\n           (Google-Tarife: Stand 31.07.2026, "
               "Verifikation in Paket 2).")
+
+
+def cmd_modelle(cfg):
+    """Ist und Empfehlung nebeneinander, je Rolle, mit Begruendung.
+
+    Die eine Stelle, an der die Belegung nachgesehen wird. Geaendert wird
+    sie in projekt.json — dieser Befehl schreibt nichts, damit niemand aus
+    Versehen die Modellwahl eines laufenden Buchs verstellt."""
+    G.kopf("MODELLE")
+    m = manifest_lesen()
+    # Was die Rolle im letzten Lauf wirklich gekostet hat, aus der
+    # Buchproduktion. Eine Empfehlung ohne Preis daneben ist eine Meinung.
+    kosten = {}
+    for lauf, rolle, _, e in G.kosten_posten(m):
+        if lauf in ("voll", ""):
+            d = G.kosten_dollar(e, G.tarif(e.get("modell", "")))
+            if d is not None:
+                kosten[rolle] = kosten.get(rolle, 0.0) + d
+
+    aktiv = set(G.aktive_rollen(cfg))
+    # backend_name() bricht bei unbekannten Praefixen ab; hier soll die
+    # Uebersicht trotzdem stehen, also wird vorher zugeordnet.
+    modell_anbieter = {}
+    for rolle in G.ROLLEN:
+        name = (cfg.get(f"modell_{rolle}") or "").strip()
+        for praefix, anbieter in G.PRAEFIXE:
+            if name.startswith(praefix):
+                modell_anbieter[name] = anbieter
+    abweichend = []
+    print(f"{'Rolle':<14} {'Modell':<24} {'Tiefe':<10} {'letzter Lauf':>12}")
+    print("-" * 64)
+    for rolle in G.ROLLEN:
+        ist_m = (cfg.get(f"modell_{rolle}") or "").strip() or "— nicht gesetzt"
+        ist_e = (cfg.get(f"effort_{rolle}") or "").strip()
+        soll_m, soll_e, warum = G.empfehlung(rolle)
+        preis = f"{kosten[rolle]:.2f} $" if rolle in kosten else "—"
+        marke = " " if rolle in aktiv else "·"
+        print(f"{marke}{rolle:<13} {ist_m:<24} {ist_e:<10} {preis:>12}")
+
+        if ist_m in modell_anbieter and \
+                modell_anbieter[ist_m] not in G.EFFORT_WIRKT:
+            print(f"{'':<14} Tiefe wirkt hier nicht — nur Anthropic-Modelle "
+                  f"kennen 'effort'.")
+        if (ist_m, ist_e) != (soll_m, soll_e):
+            abweichend.append((rolle, ist_m, ist_e, soll_m, soll_e, warum))
+    print("-" * 64)
+    print("· = wird in diesem Lauf nicht gerufen")
+
+    if not abweichend:
+        print("\nAlle Rollen stehen auf der Empfehlung.")
+    else:
+        print(f"\n{len(abweichend)} Abweichung(en) von der Empfehlung:\n")
+        for rolle, im_, ie, sm, se, warum in abweichend:
+            print(f"  {rolle}")
+            print(f"    ist:       {im_}  /  {ie}")
+            print(f"    empfohlen: {sm}  /  {se}")
+            for zeile in textwrap.wrap(warum, 64):
+                print(f"      {zeile}")
+            print()
+        print("Abweichen ist vorgesehen. Geaendert wird in "
+              f"{G.CONFIG}:\n"
+              "    \"modell_<rolle>\": \"...\",  \"effort_<rolle>\": \"...\"\n"
+              "Damit 'pipeline.py technik' die Abweichung stehen laesst, "
+              "den Schluessel\nin 'technik_ausnahmen' eintragen.")
+
+    stufen = ", ".join(G.EFFORT)
+    print(f"\nTiefenstufen: {stufen}")
+    ausnahmen = [k for k in cfg.get("technik_ausnahmen", [])
+                 if k.startswith(("modell_", "effort_"))]
+    if ausnahmen:
+        print(f"Als Projektentscheidung festgehalten: {', '.join(ausnahmen)}")
 
 
 def uebersprungen(cfg, name):
@@ -222,6 +309,11 @@ def cmd_status(cfg):
         print(f" {sym} {name:16s} {beschreibung[:44]:46s}{pause}{zusatz}")
     print(f"\nGeschaetzte Restzeit der Modellschritte: ca. {rest} min")
 
+    # Der Stand kostet nichts und beantwortet die haeufigste Zwischenfrage.
+    # Bis Paket A stand er nur am Ende eines vollstaendigen Laufs — also
+    # genau dann nicht, wenn jemand mitten im Buch wissen will, wo er steht.
+    kostenuebersicht(m)
+
     naechster = naechster_schritt(cfg, m)
     if naechster is None:
         print("\nAlle Schritte erledigt.")
@@ -230,8 +322,7 @@ def cmd_status(cfg):
         if cmd is None:
             print(f"\nNaechster Schritt: PAUSE '{name}'")
             print("Nach dem Einspielen der Dateien:")
-            print(f"  python3 pipeline.py reset --ab {name} --fertig")
-            print("  python3 pipeline.py run")
+            print("  python3 pipeline.py weiter")
         else:
             print(f"\nNaechster Schritt: {name}")
             print("  python3 pipeline.py run")
@@ -258,6 +349,34 @@ def naechster_schritt(cfg, m):
         if status_von(m, name) != "fertig":
             return eintrag
     return None
+
+
+def cmd_weiter(cfg, args):
+    """Pause abhaken und weiterlaufen — in einem Befehl.
+
+    Bis hierher standen an jeder Pause zwei Befehle, und der erste hiess
+    'reset'. Ein Kommando, das nach Verwerfen klingt und in Wahrheit
+    freigibt, wird an der falschen Stelle getippt oder aus Vorsicht gar
+    nicht. 'reset' bleibt fuer das, was es wirklich kann: einen bereits
+    gelaufenen Schritt wieder oeffnen.
+
+    Freigegeben wird nur eine Pause, und nur die naechste. Ein
+    fehlgeschlagener Schritt ist keine Pause und wird nicht abgehakt."""
+    m = manifest_lesen()
+    eintrag = naechster_schritt(cfg, m)
+    if eintrag is None:
+        print("Alle Schritte erledigt — es gibt nichts fortzusetzen.")
+        print("  python3 pipeline.py status")
+        return
+    name, beschreibung, cmd, _ = eintrag
+    if cmd is None:
+        setze(m, name, "fertig", hinweis="mit 'weiter' freigegeben")
+        print(f"Pause '{name}' freigegeben: {beschreibung}\n")
+    else:
+        s = status_von(m, name)
+        print(f"Keine Pause offen — der Lauf setzt bei '{name}' fort"
+              + (f" (Status: {s})" if s != "offen" else "") + ".\n")
+    cmd_run(cfg, args)
 
 
 # ==================================================================
@@ -334,9 +453,9 @@ def cmd_run(cfg, args):
                               "anpassen (die Dateien liegen in Drive,")
                         print("   ein Download ist nicht noetig)")
                         print("3. Dann in einer Zelle:")
-                    print(f"     !python3 $CODE/pipeline.py reset "
-                          f"--ab {name} --fertig")
-                    print("   und Zelle 1 erneut ausfuehren.")
+                    print(f"     !python3 $CODE/pipeline.py weiter")
+                    print("   Das gibt die Pause frei; danach Zelle 1 "
+                          "erneut ausfuehren.")
                 else:
                     if name == "PAUSE_review":
                         print("1. Referenzdateien pruefen: Glossar, "
@@ -355,9 +474,7 @@ def cmd_run(cfg, args):
                         print("     python3 pipeline.py config "
                               "projekt_neu.json")
                         print("4. Danach:")
-                    print(f"     python3 pipeline.py reset --ab {name} "
-                          f"--fertig")
-                    print("     python3 pipeline.py run")
+                    print("     python3 pipeline.py weiter")
                 setze(m, name, "wartet")
                 break
 
@@ -678,6 +795,8 @@ def main():
     sub.add_parser("init")
     p = sub.add_parser("run")
     p.add_argument("--hg", action="store_true", help="im Hintergrund")
+    p = sub.add_parser("weiter", help="offene Pause freigeben und weiterlaufen")
+    p.add_argument("--hg", action="store_true", help="im Hintergrund")
     sub.add_parser("status")
     p = sub.add_parser("log")
     p.add_argument("-f", action="store_true")
@@ -699,6 +818,7 @@ def main():
     p.add_argument("--nur-teile", action="store_true",
                    help="nur Chunk-Dateien und Zustaende")
     sub.add_parser("schritte")
+    sub.add_parser("modelle", help="Modell und Tiefe je Rolle, mit Empfehlung")
     p = sub.add_parser("technik")
     p.add_argument("--uebernehmen", action="store_true",
                    help="Abweichungen aus dem Repo uebertragen")
@@ -724,9 +844,11 @@ def main():
 
     cfg = G.lade_config()
     {"run": lambda: cmd_run(cfg, args),
+     "weiter": lambda: cmd_weiter(cfg, args),
      "status": lambda: cmd_status(cfg),
      "reset": lambda: cmd_reset(cfg, args),
-     "schritte": lambda: cmd_schritte(cfg)}[args.kommando]()
+     "schritte": lambda: cmd_schritte(cfg),
+     "modelle": lambda: cmd_modelle(cfg)}[args.kommando]()
 
 
 if __name__ == "__main__":
