@@ -52,6 +52,16 @@ TEILE = {
 # ==================================================================
 # Konfiguration
 # ==================================================================
+# 'annotation' war bis August 2026 EINE Rolle fuer zwei sehr verschiedene
+# Arbeiten: eine Begruendungszeile je Aenderung (Massenware, zwanzig Stueck
+# je Aufruf) und das Screening des ganzen Buches gegen das Original (die
+# eigentliche Qualitaetspruefung). Ein Modell fuer beides heisst: entweder
+# zahlt man den Preis der Pruefung fuer die Massenware, oder man prueft mit
+# dem Modell der Massenware.
+ROLLEN = ("uebersetzung", "revision", "stil", "korrektorat", "zitat",
+          "vorbereitung", "judge", "begruendung", "screening", "vergleich")
+
+
 STANDARD = {
     "sprachpaar":                "nl-de",
     "varietaet":                 "bundesdeutsch",
@@ -70,7 +80,8 @@ STANDARD = {
     "modell_vorbereitung":       "",
     "modell_zitat":              "",
     "modell_judge":              "",
-    "modell_annotation":         "",
+    "modell_begruendung":        "",
+    "modell_screening":          "",
     "modell_vergleich":          "",
     "effort_uebersetzung":       "hoch",
     "effort_revision":           "hoch",
@@ -79,7 +90,8 @@ STANDARD = {
     "effort_vorbereitung":       "hoch",
     "effort_zitat":              "hoch",
     "effort_judge":              "hoch",
-    "effort_annotation":         "niedrig",
+    "effort_begruendung":        "niedrig",
+    "effort_screening":          "hoch",
     "effort_vergleich":          "hoch",
     "max_tokens_api":            32000,
     "timeout_read_api":          600,       # Auftrag Paket 1: hoechstens 10 min
@@ -159,12 +171,7 @@ AENDERBAR = {
     "timeout_connect", "max_retries",
     "backend_standard", "max_tokens_api", "timeout_read_api", "cache_ttl",
     "sdk_nutzen",
-} | {f"modell_{r}" for r in (
-    "uebersetzung", "revision", "stil", "korrektorat",
-    "vorbereitung", "zitat", "judge", "annotation", "vergleich")
-} | {f"effort_{r}" for r in (
-    "uebersetzung", "revision", "stil", "korrektorat",
-    "vorbereitung", "zitat", "judge", "annotation", "vergleich")}
+} | {f"modell_{r}" for r in ROLLEN} | {f"effort_{r}" for r in ROLLEN}
 
 
 def lade_config(pfad=CONFIG, pflicht=True):
@@ -369,9 +376,6 @@ def api_schluessel(anbieter, still=True):
 # ==================================================================
 # Rollen, Modelle, Backends
 # ==================================================================
-ROLLEN = ("uebersetzung", "revision", "stil", "korrektorat", "zitat",
-          "vorbereitung", "judge", "annotation", "vergleich")
-
 # Das Backend ergibt sich aus dem Modellnamen, nicht aus der Konfiguration.
 # 'backend_standard' ist nur der Default fuer Rollen ohne eigenes Modell.
 PRAEFIXE = (("claude-", "anthropic"), ("gemini-", "google"))
@@ -379,6 +383,78 @@ PRAEFIXE = (("claude-", "anthropic"), ("gemini-", "google"))
 # projekt.json haelt die Stufen deutsch, die APIs erwarten englisch.
 EFFORT = {"niedrig": "low", "mittel": "medium", "hoch": "high",
           "sehr_hoch": "xhigh", "maximal": "max"}
+
+# Nur Anthropic-Modelle kennen 'effort'. Gemini bekommt den Schluessel gar
+# nicht erst geschickt — 'effort_screening' zu aendern hat dort keine
+# Wirkung, und das gehoert dazugesagt, statt dass jemand daran dreht.
+EFFORT_WIRKT = ("anthropic",)
+
+
+# ==================================================================
+# Empfehlung je Rolle — die eine Stelle, an der Modell und Tiefe
+# begruendet stehen. Geaendert wird in projekt.json; 'pipeline.py modelle'
+# stellt Ist und Empfehlung nebeneinander.
+#
+# Die Begruendung steht bewusst hier und nicht in einer Doku: Wer die
+# Belegung aendert, liest sie genau in dem Moment, in dem es darauf
+# ankommt. Empfehlung heisst Empfehlung — abweichen ist vorgesehen,
+# 'technik_ausnahmen' haelt die Abweichung fest.
+# ==================================================================
+EMPFEHLUNG = {
+    "uebersetzung": (
+        "claude-opus-5", "hoch",
+        "Der Text selbst. Hier wird nicht gespart — jeder Fehler dieses "
+        "Passes wandert durch alle folgenden."),
+    "revision": (
+        "claude-opus-5", "hoch",
+        "Sieht Quelle und Entwurf nebeneinander und aendert in 99 % der "
+        "Chunks substanziell. Ein schwaecheres Modell hier hiesse: mit "
+        "dem schwaecheren Urteil ueber das staerkere entscheiden."),
+    "stil": (
+        "claude-opus-5", "hoch",
+        "Wort und Wendung, 86 % der Lektoratsaenderungen. Das ist "
+        "Sprachgefuehl, nicht Regelanwendung."),
+    "korrektorat": (
+        "claude-sonnet-5", "mittel",
+        "Regelanwendung: Rechtschreibung, Zeichensetzung, Kongruenz. "
+        "Dafuer braucht es kein Spitzenmodell, und der Pass laeuft ueber "
+        "das ganze Buch. Wird der Diff duenn oder greift er daneben, "
+        "zurueck auf claude-opus-5 — die Messung steht aus."),
+    "vorbereitung": (
+        "claude-fable-5", "sehr_hoch",
+        "Einmalig, wenige Aufrufe, und alles Spaetere haengt daran: "
+        "Glossar, Figurenblatt, Anrede, Leitmotive, Stilprofil. Ein "
+        "Fehler hier steht in jedem Chunk des Buches. Der Aufpreis faellt "
+        "bei neun Aufrufen nicht ins Gewicht."),
+    "zitat": (
+        "claude-opus-5", "hoch",
+        "Recherche mit Websuche. Ein erfundener Wortlaut waere schlimmer "
+        "als eine markierte Luecke — das Modell muss wissen, wann es "
+        "nichts weiss."),
+    "judge": (
+        "gemini-3.1-pro-preview", "hoch",
+        "Fremdurteil. Bewusst nicht von Anthropic: Ein Modell, das seine "
+        "eigene Ausgabe bewertet, bevorzugt sie."),
+    "begruendung": (
+        "gemini-3.6-flash", "niedrig",
+        "Massenware: eine Zeile je Aenderung, zwanzig Stueck je Aufruf, "
+        "rein berichtend. Der Leser ueberfliegt sie."),
+    "screening": (
+        "gemini-3.1-pro-preview", "hoch",
+        "Liest das ganze Buch gegen das Original und sucht, was vier "
+        "Anthropic-Durchgaenge uebersehen haben. Als Fremdurteil nur "
+        "brauchbar, wenn es von einem anderen Anbieter kommt — und nur "
+        "mit einem Modell, das genau hinsieht."),
+    "vergleich": (
+        "claude-fable-5", "hoch",
+        "Einmaliger Vergleichslauf. Wird von keinem Schritt gerufen; der "
+        "Ping vor dem Lauf prueft den Namen trotzdem mit."),
+}
+
+
+def empfehlung(rolle):
+    """(Modell, Effort, Begruendung) — oder Leeres fuer unbekannte Rollen."""
+    return EMPFEHLUNG.get(rolle, ("", "", ""))
 
 
 # Schluessel, die technische Entscheidungen tragen und deshalb mit dem
@@ -1094,7 +1170,7 @@ class GeminiBackend(Backend):
         try:
             r = requests.post(
                 f"{self.BASIS}/{modell}:countTokens",
-                json=self.payload(cfg, system, user, "annotation", modell),
+                json=self.payload(cfg, system, user, "begruendung", modell),
                 headers={"x-goog-api-key": schluessel,
                          "content-type": "application/json"},
                 timeout=(cfg.get("timeout_connect", 10), 60))
@@ -1103,7 +1179,7 @@ class GeminiBackend(Backend):
         except Exception:
             return None
 
-    def chat(self, cfg, system, user, rolle="annotation", modell="",
+    def chat(self, cfg, system, user, rolle="begruendung", modell="",
              roh=False):
         schluessel = api_schluessel("google")
         if not schluessel:
@@ -1176,7 +1252,7 @@ def aktive_rollen(cfg):
 
     Die Liste ist die Grundlage der Kostenschaetzung und des Pings vor dem
     Lauf. Eine fehlende Rolle heisst dort: kostenlos und ungeprueft — und
-    genau so sind 'zitat' und 'annotation' durchgerutscht, nachdem ihre
+    genau so sind 'zitat' und 'screening' durchgerutscht, nachdem ihre
     Schritte gebaut waren. Wer einen modellrufenden Schritt ergaenzt,
     ergaenzt ihn hier."""
     rollen = ["uebersetzung"]
@@ -1189,7 +1265,8 @@ def aktive_rollen(cfg):
     # dieselbe Rolle zusaetzlich, wenn das Glossar lokal entsteht.
     rollen.append("vorbereitung")
     rollen.append("zitat")            # zitatrecherche.py
-    rollen.append("annotation")       # annotation.py: Begruendungen, Screening
+    rollen.append("begruendung")      # annotation.py, Teil 1
+    rollen.append("screening")        # annotation.py, Teil 2
     if cfg.get("export_bewertung"):
         rollen.append("judge")
     # 'vergleich' bleibt draussen: konfiguriert, aber von keinem Schritt

@@ -17,6 +17,7 @@ setzt an der richtigen Stelle fort und loescht nur auf ausdruecklichen Befehl.
     python3 pipeline.py neu             ALLES verwerfen (mit Rueckfrage)
     python3 pipeline.py schritte        Liste der Schritte
     python3 pipeline.py technik         technische Einstellungen abgleichen
+    python3 pipeline.py modelle         Modell und Tiefe je Rolle, mit Empfehlung
 
 Das einzige Kommando, das Ergebnisse loescht, ist 'neu'. 'reset' oeffnet nur
 Schritte wieder; die Dateien bleiben, bis der Schritt sie neu schreibt.
@@ -29,6 +30,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import textwrap
 import time
 
 import gemeinsam as G
@@ -182,6 +184,77 @@ def kostenuebersicht(m):
         print("  Hinweis: nicht alle Tarife sind gegen die Anbieterdoku "
               "verifiziert\n           (Google-Tarife: Stand 31.07.2026, "
               "Verifikation in Paket 2).")
+
+
+def cmd_modelle(cfg):
+    """Ist und Empfehlung nebeneinander, je Rolle, mit Begruendung.
+
+    Die eine Stelle, an der die Belegung nachgesehen wird. Geaendert wird
+    sie in projekt.json — dieser Befehl schreibt nichts, damit niemand aus
+    Versehen die Modellwahl eines laufenden Buchs verstellt."""
+    G.kopf("MODELLE")
+    m = manifest_lesen()
+    # Was die Rolle im letzten Lauf wirklich gekostet hat, aus der
+    # Buchproduktion. Eine Empfehlung ohne Preis daneben ist eine Meinung.
+    kosten = {}
+    for lauf, rolle, _, e in G.kosten_posten(m):
+        if lauf in ("voll", ""):
+            d = G.kosten_dollar(e, G.tarif(e.get("modell", "")))
+            if d is not None:
+                kosten[rolle] = kosten.get(rolle, 0.0) + d
+
+    aktiv = set(G.aktive_rollen(cfg))
+    # backend_name() bricht bei unbekannten Praefixen ab; hier soll die
+    # Uebersicht trotzdem stehen, also wird vorher zugeordnet.
+    modell_anbieter = {}
+    for rolle in G.ROLLEN:
+        name = (cfg.get(f"modell_{rolle}") or "").strip()
+        for praefix, anbieter in G.PRAEFIXE:
+            if name.startswith(praefix):
+                modell_anbieter[name] = anbieter
+    abweichend = []
+    print(f"{'Rolle':<14} {'Modell':<24} {'Tiefe':<10} {'letzter Lauf':>12}")
+    print("-" * 64)
+    for rolle in G.ROLLEN:
+        ist_m = (cfg.get(f"modell_{rolle}") or "").strip() or "— nicht gesetzt"
+        ist_e = (cfg.get(f"effort_{rolle}") or "").strip()
+        soll_m, soll_e, warum = G.empfehlung(rolle)
+        preis = f"{kosten[rolle]:.2f} $" if rolle in kosten else "—"
+        marke = " " if rolle in aktiv else "·"
+        print(f"{marke}{rolle:<13} {ist_m:<24} {ist_e:<10} {preis:>12}")
+
+        if ist_m in modell_anbieter and \
+                modell_anbieter[ist_m] not in G.EFFORT_WIRKT:
+            print(f"{'':<14} Tiefe wirkt hier nicht — nur Anthropic-Modelle "
+                  f"kennen 'effort'.")
+        if (ist_m, ist_e) != (soll_m, soll_e):
+            abweichend.append((rolle, ist_m, ist_e, soll_m, soll_e, warum))
+    print("-" * 64)
+    print("· = wird in diesem Lauf nicht gerufen")
+
+    if not abweichend:
+        print("\nAlle Rollen stehen auf der Empfehlung.")
+    else:
+        print(f"\n{len(abweichend)} Abweichung(en) von der Empfehlung:\n")
+        for rolle, im_, ie, sm, se, warum in abweichend:
+            print(f"  {rolle}")
+            print(f"    ist:       {im_}  /  {ie}")
+            print(f"    empfohlen: {sm}  /  {se}")
+            for zeile in textwrap.wrap(warum, 64):
+                print(f"      {zeile}")
+            print()
+        print("Abweichen ist vorgesehen. Geaendert wird in "
+              f"{G.CONFIG}:\n"
+              "    \"modell_<rolle>\": \"...\",  \"effort_<rolle>\": \"...\"\n"
+              "Damit 'pipeline.py technik' die Abweichung stehen laesst, "
+              "den Schluessel\nin 'technik_ausnahmen' eintragen.")
+
+    stufen = ", ".join(G.EFFORT)
+    print(f"\nTiefenstufen: {stufen}")
+    ausnahmen = [k for k in cfg.get("technik_ausnahmen", [])
+                 if k.startswith(("modell_", "effort_"))]
+    if ausnahmen:
+        print(f"Als Projektentscheidung festgehalten: {', '.join(ausnahmen)}")
 
 
 def uebersprungen(cfg, name):
@@ -745,6 +818,7 @@ def main():
     p.add_argument("--nur-teile", action="store_true",
                    help="nur Chunk-Dateien und Zustaende")
     sub.add_parser("schritte")
+    sub.add_parser("modelle", help="Modell und Tiefe je Rolle, mit Empfehlung")
     p = sub.add_parser("technik")
     p.add_argument("--uebernehmen", action="store_true",
                    help="Abweichungen aus dem Repo uebertragen")
@@ -773,7 +847,8 @@ def main():
      "weiter": lambda: cmd_weiter(cfg, args),
      "status": lambda: cmd_status(cfg),
      "reset": lambda: cmd_reset(cfg, args),
-     "schritte": lambda: cmd_schritte(cfg)}[args.kommando]()
+     "schritte": lambda: cmd_schritte(cfg),
+     "modelle": lambda: cmd_modelle(cfg)}[args.kommando]()
 
 
 if __name__ == "__main__":

@@ -39,6 +39,17 @@ DE_MARKER = [r"\bder\b", r"\bdie\b", r"\bdas\b", r"\bund\b", r"\bnicht\b",
 # ==================================================================
 # Selbsttest — haette den \u-Fehler und die ss/ß-Kollision gefunden
 # ==================================================================
+# Der Code liegt im Colab-Betrieb NICHT im Arbeitsverzeichnis. Wer hier
+# eine Quelldatei relativ oeffnet, bekommt dort einen FileNotFoundError —
+# und der Selbsttest meldet 'nicht pruefbar' statt zu pruefen. Genau das
+# ist der Judge-Pruefung passiert.
+CODE = os.path.dirname(os.path.abspath(__file__))
+
+
+def quelltext(name):
+    """Eine Datei aus dem CODE-Verzeichnis, nie relativ zum Arbeitsordner."""
+    return open(os.path.join(CODE, name), encoding="utf-8").read()
+
 def selbsttest(cfg, b):
     import inspect
     b.abschnitt("Selbsttest")
@@ -424,6 +435,97 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Kostenbuchung nicht pruefbar", repr(e))
 
+    # --- Quelldateien nur ueber CODE lesen -----------------------------
+    # Im Colab-Betrieb ist das Arbeitsverzeichnis der Drive-Ordner, nicht
+    # das Repo. Ein relativ geoeffnetes 'bewertung.py' wirft dort einen
+    # FileNotFoundError, und die Pruefung meldet 'nicht pruefbar' statt zu
+    # pruefen — sie war monatelang wirkungslos, ohne dass es auffiel.
+    try:
+        fehler = []
+        for datei in ("bewertung.py", "annotation.py", "ABLAUFPLAN.md"):
+            if not quelltext(datei):
+                fehler.append(f"{datei} nicht ueber CODE lesbar")
+        eigen = quelltext(os.path.basename(os.path.abspath(__file__)))
+        # Der Fehler ist ein Muster, keine Einzelstelle: relativ
+        # geoeffnete Projektdateien im Selbsttest.
+        offen = re.findall(r'open\("(\w+\.(?:py|md))"', eigen)
+        if offen:
+            fehler.append(f"relativ geoeffnet statt ueber CODE: "
+                          f"{', '.join(sorted(set(offen)))}")
+        if fehler:
+            b.add("FEHLER", "Quelldateizugriff fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Selbsttest liest Quelldateien ueber CODE — laeuft "
+                        "auch aus einem fremden Arbeitsverzeichnis")
+    except Exception as e:
+        b.add("FEHLER", "Quelldateizugriff nicht pruefbar", repr(e))
+
+    # --- Empfehlung, Rollen und entfallene Schluessel ------------------
+    # Die Empfehlungstabelle ist die Stelle, an der die Modellwahl
+    # begruendet steht. Sie ist nur so viel wert, wie sie vollstaendig
+    # ist: Eine Rolle ohne Eintrag erscheint in 'pipeline.py modelle' mit
+    # leerer Empfehlung — und wer sie dann setzt, raet.
+    try:
+        import tempfile
+        fehler = []
+        ohne = [r for r in G.ROLLEN if not G.EMPFEHLUNG.get(r, ("",))[0]]
+        if ohne:
+            fehler.append(f"ohne Empfehlung: {', '.join(ohne)}")
+        fremd = [r for r in G.EMPFEHLUNG if r not in G.ROLLEN]
+        if fremd:
+            fehler.append(f"Empfehlung fuer unbekannte Rolle: "
+                          f"{', '.join(fremd)}")
+        for r, (m, e, warum) in G.EMPFEHLUNG.items():
+            if e not in G.EFFORT:
+                fehler.append(f"{r}: Tiefe '{e}' gibt es nicht")
+            if len(warum) < 40:
+                fehler.append(f"{r}: Begruendung zu duenn")
+
+        # Die beiden Annotationsarbeiten muessen getrennt routen — sonst
+        # war die Trennung Kosmetik.
+        probe = dict(G.STANDARD, modell_begruendung="gemini-3.6-flash",
+                     modell_screening="gemini-3.1-pro-preview")
+        if G.modell_fuer(probe, "begruendung") == \
+                G.modell_fuer(probe, "screening"):
+            fehler.append("begruendung und screening routen aufs selbe "
+                          "Modell")
+        quelle = quelltext("annotation.py")
+        for soll in ('rolle="begruendung"', 'rolle="screening"'):
+            if soll not in quelle:
+                fehler.append(f"annotation.py ruft nicht {soll}")
+        if 'rolle="annotation"' in quelle:
+            fehler.append("annotation.py ruft noch die alte Rolle")
+
+        # Entfallene Schluessel muessen auffallen, saubere nicht.
+        class _B:
+            def __init__(self): self.meldungen = []
+
+            def add(self, art, thema, text=""):
+                self.meldungen.append((art, thema))
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "projekt.json")
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump({"modell_annotation": "x", "temperature_stil": 1}, f)
+            bb = _B()
+            pruefe_entfallene_schluessel(bb, p)
+            if not any(a == "WARN" for a, _ in bb.meldungen):
+                fehler.append("entfallene Schluessel werden nicht gemeldet")
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump({"modell_uebersetzung": "claude-opus-5"}, f)
+            bb = _B()
+            pruefe_entfallene_schluessel(bb, p)
+            if bb.meldungen:
+                fehler.append("saubere projekt.json wird beanstandet")
+
+        if fehler:
+            b.add("FEHLER", "Empfehlung oder Rollentrennung fehlerhaft",
+                  "; ".join(fehler))
+        else:
+            b.add("OK", f"Empfehlung fuer alle {len(G.ROLLEN)} Rollen, "
+                        f"Begruendung und Screening getrennt geroutet")
+    except Exception as e:
+        b.add("FEHLER", "Empfehlung nicht pruefbar", repr(e))
+
     # --- SDK-Pfad: derselbe Payload, dieselbe Antwort ------------------
     # Zwei Transportwege sind erlaubt, zwei Wahrheiten nicht. Der Selbsttest
     # prueft den Payload genau einmal; geht die SDK an 'payload' vorbei
@@ -587,14 +689,13 @@ installiert, requests-Pfad"
     # --- Aktive Rollen gegen die Wirklichkeit -------------------------
     # 'aktive_rollen' ist die Grundlage der Kostenschaetzung und des Pings
     # vor dem Lauf. Eine dort fehlende Rolle heisst: kostenlos und
-    # ungeprueft. Genau so sind 'zitat' und 'annotation' durchgerutscht,
+    # ungeprueft. Genau so sind 'zitat' und 'screening' durchgerutscht,
     # nachdem ihre Schritte laengst gebaut waren.
     try:
         import glob as _glob
         fehler = []
         gerufen = set()
-        code = os.path.dirname(os.path.abspath(__file__))
-        for pfad in _glob.glob(os.path.join(code, "*.py")):
+        for pfad in _glob.glob(os.path.join(CODE, "*.py")):
             if os.path.basename(pfad) in ("gemeinsam.py", "preflight.py",
                                           "verifikation.py"):
                 continue
@@ -628,9 +729,7 @@ installiert, requests-Pfad"
     # Leere — und das faellt erst auf, wenn jemand danach arbeitet.
     try:
         import pipeline as PL
-        pfad = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                            "ABLAUFPLAN.md")
-        plan = open(pfad, encoding="utf-8").read()
+        plan = quelltext("ABLAUFPLAN.md")
         fehler = []
         fehlend = [n for n in [s[0] for s in PL.SCHRITTE]
                    if f"`{n}`" not in plan]
@@ -758,7 +857,7 @@ installiert, requests-Pfad"
             if wort not in BW.GEWICHTUNG:
                 fehler.append(f"Gewichtungshinweis nennt '{wort}' nicht")
         # Die alten Etiketten duerfen nirgends mehr stehen.
-        quelle = open("bewertung.py", encoding="utf-8").read()
+        quelle = quelltext("bewertung.py")
         for alt in ("lokalen Modells", "Selbstbewertung ist schwach"):
             if alt in quelle.replace("Frueher stand hier", ""):
                 fehler.append(f"altes Etikett '{alt}' steht noch im Bericht")
@@ -1362,17 +1461,17 @@ class _Antwort:
 def selbsttest_backends(b):
     cfg = dict(G.STANDARD)
     cfg.update({"modell_uebersetzung": "claude-opus-5",
-                "modell_annotation":   "gemini-3.6-flash",
+                "modell_begruendung":  "gemini-3.6-flash",
                 "effort_uebersetzung": "hoch",
-                "effort_annotation":   "niedrig"})
+                "effort_begruendung":  "niedrig"})
 
     # --- Routing: Rolle -> Modell -> Backend ----------------------------
     try:
         fehler = []
         if G.backend_name(G.modell_fuer(cfg, "uebersetzung")) != "anthropic":
             fehler.append("uebersetzung landet nicht bei Anthropic")
-        if G.backend_name(G.modell_fuer(cfg, "annotation")) != "google":
-            fehler.append("annotation landet nicht bei Google")
+        if G.backend_name(G.modell_fuer(cfg, "begruendung")) != "google":
+            fehler.append("begruendung landet nicht bei Google")
         # Eine Rolle ohne Modell muss abbrechen statt still zu ersetzen.
         leer = dict(G.STANDARD)
         leer["modell_stil"] = ""
@@ -1386,7 +1485,7 @@ def selbsttest_backends(b):
             fehler.append("unbekannter Anbieter wird nicht gemeldet")
         except SystemExit:
             pass
-        if G.effort_fuer(cfg, "annotation") != "low":
+        if G.effort_fuer(cfg, "begruendung") != "low":
             fehler.append("Effort 'niedrig' wird nicht auf 'low' abgebildet")
         if fehler:
             b.add("FEHLER", "Rollen-Routing falsch", "; ".join(fehler))
@@ -1489,7 +1588,7 @@ def selbsttest_backends(b):
     # --- Gemini-Payload -------------------------------------------------
     try:
         p = G.GeminiBackend().payload(cfg, "SYSTEM", "USER",
-                                      "annotation", "gemini-3.6-flash")
+                                      "begruendung", "gemini-3.6-flash")
         schluessel = set(_schluessel_tief(p))
         fehler = []
         drin = schluessel & set(SAMPLING)
@@ -1607,11 +1706,10 @@ def selbsttest_backends(b):
     # Lauf. Payloadtests finden so etwas nicht, ein Blick in die Quelle
     # schon.
     try:
-        hier = os.path.dirname(os.path.abspath(__file__))
         schuldig = []
         for datei in ("uebersetzung.py", "lektorat.py", "konkordanz.py",
                       "bewertung.py", "qa.py"):
-            pfad = os.path.join(hier, datei)
+            pfad = os.path.join(CODE, datei)
             if not os.path.exists(pfad):
                 continue
             for nr, zeile in enumerate(open(pfad, encoding="utf-8"), 1):
@@ -1794,7 +1892,7 @@ def pruefe_kosten(cfg, b, text):
     hier deshalb einzeln stehen: Der System-Prompt geht in JEDEN Chunk (er
     ist zwischengespeichert, aber nicht kostenlos), die Denkschritte machen
     den groesseren Teil der Ausgabe aus, und die Rollen 'zitat' und
-    'annotation' tauchten gar nicht auf."""
+    'screening' tauchten gar nicht auf."""
     b.abschnitt("Kostenschaetzung")
     woerter = len(text.split())
     try:
@@ -1845,8 +1943,10 @@ def pruefe_kosten(cfg, b, text):
         # System-Prompt und sind ab dem zweiten Aufruf zwischengespeichert.
         "vorbereitung": (9, min(woerter, 20000), 400, 1500),
         "zitat":        (1, 0, min(woerter, 4000), 1500),
-        # Je Chunk eine Begruendungszeile, dazu das Screening in Bloecken.
-        "annotation":   (n, 0, 2 * cfg["chunk_words"], 300),
+        # Je 20 Aenderungen ein Aufruf; grob ein Buendel je zwei Chunks.
+        "begruendung":  (max(1, n // 2), 0, 400, 300),
+        # Vier Chunkpaare je Aufruf, Quelle und Ziel nebeneinander.
+        "screening":    (max(1, n // 4), 0, 8 * cfg["chunk_words"], 200),
         # Vier Absatzpaare je Auszug, zwei Auszuege.
         "judge":        (8, 0, 800, 250),
     }
@@ -2146,7 +2246,46 @@ def pruefe_config(cfg, b):
     else:
         b.add("INFO", "Prueffgrenzen noch nicht kalibriert",
               "Werden nach dem Testlauf aus den Messwerten gesetzt.")
+    pruefe_entfallene_schluessel(b)
     b.add("INFO", "Konfigurationsfingerabdruck", G.config_hash(cfg))
+
+
+# Schluessel, die es einmal gab und die heute anders heissen. Eine
+# projekt.json wird nie ueberschrieben — der alte Schluessel bleibt also
+# stehen und wirkt nicht mehr. Ohne diese Meldung merkt das niemand.
+ENTFALLEN = {
+    "modell_annotation": "modell_begruendung und modell_screening",
+    "effort_annotation": "effort_begruendung und effort_screening",
+    "backend":           "der Modellname (das Backend ergibt sich daraus)",
+    "modell":            "modell_<rolle>",
+    "ollama_host":       "entfallen — Ollama ist zurueckgezogen",
+    "num_ctx":           "entfallen — Ollama ist zurueckgezogen",
+    "timeout_read":      "timeout_read_api",
+}
+
+
+def pruefe_entfallene_schluessel(b, pfad=None):
+    """Meldet Schluessel, die in projekt.json stehen und nichts mehr tun."""
+    pfad = pfad or G.CONFIG
+    try:
+        roh = json.load(open(pfad, encoding="utf-8"))
+    except Exception:
+        return
+    tot = [k for k in ENTFALLEN if k in roh]
+    tot += [k for k in roh
+            if k.startswith("temperature_") and k not in ENTFALLEN]
+    if not tot:
+        return
+    zeilen = []
+    for k in sorted(tot):
+        ziel = ENTFALLEN.get(k, "entfallen — es gehen keine "
+                                "Sampling-Parameter mehr raus")
+        zeilen.append(f"{k}  ->  {ziel}")
+    b.add("WARN", f"{len(tot)} entfallene(r) Schluessel in {pfad}",
+          "\n".join(zeilen)
+          + f"\n\nSie werden nicht mehr gelesen und aendern nichts. Aus "
+            f"{pfad}\nentfernen; die Belegung zeigt "
+            f"'python3 pipeline.py modelle'.")
 
 
 # ==================================================================

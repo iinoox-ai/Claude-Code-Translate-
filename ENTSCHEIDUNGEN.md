@@ -901,6 +901,73 @@ Selbsttest hält drei Gegenproben dagegen (`temperature`-Fehler, 429, 500).
 
 ---
 
+## Die Modellwahl bekommt eine Stelle: `EMPFEHLUNG` und `pipeline.py modelle`
+
+**Entschieden (August 2026).** Modell und Denktiefe stehen je Rolle in
+`projekt.json`; die **Empfehlung samt Begründung** steht in
+`gemeinsam.EMPFEHLUNG`, und `pipeline.py modelle` stellt beides
+nebeneinander — dazu, was die Rolle im letzten Lauf wirklich gekostet hat.
+
+Die Begründung steht bewusst im Code und nicht in einer Doku. Wer die
+Belegung ändert, liest sie genau in dem Moment, in dem es darauf ankommt.
+Eine Empfehlung ohne Begründung ist eine Zahl, die man entweder befolgt oder
+ignoriert; mit Begründung ist sie eine Entscheidung, die man nachvollziehen
+und begründet verwerfen kann. Abweichen ist vorgesehen —
+`technik_ausnahmen` hält die Abweichung fest, damit `pipeline.py technik`
+sie stehen lässt.
+
+Der Befehl schreibt nichts. Ein Kommando, das die Modellwahl eines
+laufenden Buchs verstellen kann, wird irgendwann versehentlich getippt.
+
+**`effort` wirkt nur bei Anthropic-Modellen.** Gemini bekommt den Schlüssel
+gar nicht erst geschickt. `effort_screening` zu ändern hat dort keine
+Wirkung, und das gehört dazugesagt (`EFFORT_WIRKT`), statt dass jemand
+daran dreht und auf eine Änderung wartet.
+
+### Drei geänderte Voreinstellungen
+
+| Rolle | vorher | jetzt | Grund |
+|---|---|---|---|
+| `korrektorat` | `claude-opus-5` / `hoch` | `claude-sonnet-5` / `mittel` | Regelanwendung, kein Sprachgefühl — und der Pass läuft über das ganze Buch |
+| `vorbereitung` | `claude-opus-5` / `hoch` | `claude-fable-5` / `sehr_hoch` | Neun Aufrufe, an denen alles Spätere hängt; der Aufpreis fällt nicht ins Gewicht, ein Fehler dort steht in jedem Chunk |
+| `screening` | (war `annotation`) | `gemini-3.1-pro-preview` / `hoch` | Fremdurteil ist nur eines, wenn es von einem anderen Anbieter kommt |
+
+Für `korrektorat` steht die Messung **aus**. Wird der Diff dünn oder greift
+er daneben, zurück auf `claude-opus-5` — das ist der eine Wert dieser Liste,
+der auf einer Vermutung beruht statt auf einer Zahl.
+
+---
+
+## `annotation` war eine Rolle für zwei Arbeiten
+
+**Entschieden (August 2026), Widerruf der gemeinsamen Rolle.** Der Schritt
+`annotation.py` liefert zwei Berichte, und sie haben nichts miteinander zu
+tun außer dem Zeitpunkt:
+
+- **Begründungen** — eine Zeile je Lektoratsänderung, zwanzig Stück je
+  Aufruf, rein berichtend. Der Leser überfliegt sie.
+- **Screening** — liest das ganze Buch gegen das Original und sucht, was
+  vier Durchgänge übersehen haben. Das ist die eigentliche
+  Qualitätsprüfung.
+
+Unter einer Rolle gab es nur zwei Möglichkeiten, und beide sind falsch: den
+Preis der Prüfung für die Massenware zahlen, oder mit dem Modell der
+Massenware prüfen. Der Lauf 1919 hat das Zweite getan — 61 Aufrufe
+`gemini-3.6-flash` für beides.
+
+Seither sind es `begruendung` und `screening`, mit eigenem Modell und
+eigener Tiefe. Der Selbsttest prüft, dass sie wirklich getrennt routen;
+sonst wäre die Trennung Kosmetik.
+
+**Ein entfallener Schlüssel bleibt stehen.** `projekt.json` wird nie
+überschrieben, also wirkt `modell_annotation` in einem laufenden Projekt
+einfach nicht mehr — ohne dass etwas kaputtgeht und ohne dass es auffällt.
+`preflight.ENTFALLEN` sammelt diese Schlüssel und meldet sie mit dem Namen
+ihres Nachfolgers. Dieselbe Liste trägt die Reste des Ollama-Rückzugs und
+die Temperatur-Schlüssel.
+
+---
+
 ## Verworfen — und warum
 
 **API-Frontier-Modell als Primärübersetzer** (zunächst). Die Kostenrechnung

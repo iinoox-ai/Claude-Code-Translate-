@@ -45,11 +45,27 @@ Ein Buch kann eine abweichende Modellwahl beanspruchen: Die betroffenen
 Schlüssel kommen in `technik_ausnahmen`, dann lässt `pipeline.py technik` sie
 in Ruhe und meldet sie nur.
 
-Die Modellbelegung je Rolle steht in `projekt.json`
-(`modell_uebersetzung`, `modell_revision`, `modell_stil`,
-`modell_korrektorat`, `modell_vorbereitung`, `modell_judge`,
-`modell_annotation`, `modell_vergleich`). Das Backend ergibt sich aus dem
-Modellnamen. Bitte keine Modellnamen hartkodieren.
+Die Modellbelegung je Rolle steht in `projekt.json` (`modell_<rolle>`,
+`effort_<rolle>` für alle zehn Rollen in `gemeinsam.ROLLEN`). Das Backend
+ergibt sich aus dem Modellnamen. Bitte keine Modellnamen hartkodieren.
+
+**Die Empfehlung samt Begründung steht in `gemeinsam.EMPFEHLUNG`,
+nebeneinandergestellt von `pipeline.py modelle`.** Wer die Belegung ändert,
+liest die Begründung genau dann, wenn es darauf ankommt — deshalb steht sie
+im Code und nicht in einer Doku. Abweichen ist vorgesehen; damit
+`pipeline.py technik` die Abweichung stehen lässt, gehört der Schlüssel in
+`technik_ausnahmen`. `effort` wirkt nur bei Anthropic-Modellen; die
+Übersicht sagt das dazu, statt jemanden daran drehen zu lassen.
+
+`annotation` war bis August 2026 **eine** Rolle für zwei verschiedene
+Arbeiten. Sie ist getrennt in `begruendung` (Massenware, eine Zeile je
+Änderung) und `screening` (die eigentliche Qualitätsprüfung gegen das
+Original). Ein Modell für beides hieß: entweder zahlt man den Preis der
+Prüfung für die Massenware, oder man prüft mit dem Modell der Massenware.
+
+Ein entfallener Schlüssel bleibt in einer bestehenden `projekt.json` stehen
+und wirkt nicht mehr — `preflight.py` meldet ihn (`ENTFALLEN`), weil das
+sonst niemand bemerkt.
 
 Zwei Eigenheiten, die nicht „repariert" werden dürfen:
 

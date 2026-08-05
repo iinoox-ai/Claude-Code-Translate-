@@ -2,12 +2,16 @@
 """
 Annotation und Volltext-Screening (Paket 7).
 
-Zwei nachgelagerte Berichte, die den Text NICHT anfassen:
+Zwei nachgelagerte Berichte, die den Text NICHT anfassen. Sie laufen unter
+ZWEI Rollen, weil es zwei verschiedene Arbeiten sind — die Belegung steht
+in projekt.json, die Begruendung in gemeinsam.EMPFEHLUNG:
 
-  1. Begruendungen: je substanzieller Lektoratsaenderung eine Zeile,
+  1. Begruendungen (Rolle 'begruendung'): je substanzieller
+     Lektoratsaenderung eine Zeile,
      warum sie sinnvoll ist. Landet in begruendungen.json und von dort
      als Spalte in bericht.html.
-  2. Screening: ein Durchgang ueber das ganze Buch, Quell- gegen
+  2. Screening (Rolle 'screening'): ein Durchgang ueber das ganze Buch,
+     Quell- gegen
      Zielchunk, der Verdachtsstellen meldet — uebersehene falsche
      Freunde, Auslassungen, Registerbrueche. Landet in
      screening_review.md.
@@ -159,7 +163,7 @@ def begruenden(cfg, aenderungen):
               flush=True)
         try:
             antwort = G.chat(cfg, SYSTEM_BEGRUENDUNG, frage,
-                             rolle="annotation", roh=True)
+                             rolle="begruendung", roh=True)
             d = json_lesen(antwort)
             if isinstance(d, dict):
                 fertig.update({k: str(v) for k, v in d.items()})
@@ -198,7 +202,7 @@ def screenen(cfg, quelle_chunks, paare):
               flush=True)
         try:
             antwort = G.chat(cfg, SYSTEM_SCREENING, "\n\n".join(stuecke),
-                             rolle="annotation", roh=True)
+                             rolle="screening", roh=True)
             d = json_lesen(antwort)
             if isinstance(d, list):
                 befunde += [x for x in d if isinstance(x, dict)]
@@ -234,7 +238,8 @@ def main():
     G.kopf("ANNOTATION")
     cfg = G.lade_config()
     print(f"Arbeitsverzeichnis: {os.getcwd()}\n")
-    modell = G.modell_fuer(cfg, "annotation")
+    m_beg = G.modell_fuer(cfg, "begruendung")
+    m_scr = G.modell_fuer(cfg, "screening")
 
     diffdatei = "lektorat_diff.txt"
     aenderungen = (aenderungen_lesen(diffdatei)
@@ -248,21 +253,32 @@ def main():
     print(f"Chunkpaare fuers Screening: {len(paare)} "
           f"({(len(paare) + CHUNKS_JE_AUFRUF - 1)//CHUNKS_JE_AUFRUF} "
           f"Aufrufe)")
-    print(f"Modell: {modell}")
+    print(f"Modell Begruendungen: {m_beg}")
+    print(f"Modell Screening:     {m_scr}")
 
     # Kostenschaetzung wie in vorbereitung.py — 'Kosten sind Teil des
-    # Ergebnisses' gilt auch fuer den Schritt, der nur berichtet.
-    t = G.tarif(modell)
-    if t:
-        faktor = G.token_faktor()
-        wort_b = sum(len((a["alt"] + a["neu"] + a["kontext"]).split())
-                     for a in aenderungen)
-        wort_s = sum(len(z.split()) for _, z in paare) * 2
-        ein = (wort_b + wort_s) * faktor
-        aus = (len(aenderungen) * 15
-               + len(paare) // CHUNKS_JE_AUFRUF * 60) * faktor
-        print(f"Kosten: rund {(ein*t['ein'] + aus*t['aus'])/1e6:.2f} $ "
-              f"(geschaetzt {ein:,.0f} Token ein, {aus:,.0f} aus)")
+    # Ergebnisses' gilt auch fuer den Schritt, der nur berichtet. Getrennt
+    # je Rolle, weil die beiden Arbeiten verschiedene Modelle haben
+    # duerfen und die Summe sonst nichts mehr aussagt.
+    faktor = G.token_faktor()
+    summe, unsicher = 0.0, False
+    for label, modell, ein, aus in (
+            ("Begruendungen", m_beg,
+             sum(len((a["alt"] + a["neu"] + a["kontext"]).split())
+                 for a in aenderungen) * faktor,
+             len(aenderungen) * 15 * faktor),
+            ("Screening", m_scr,
+             sum(len(z.split()) for _, z in paare) * 2 * faktor,
+             len(paare) // CHUNKS_JE_AUFRUF * 60 * faktor)):
+        d = G.kosten_dollar({"ein": ein, "aus": aus}, G.tarif(modell))
+        if d is None:
+            unsicher = True
+            continue
+        summe += d
+        print(f"Kosten {label}: rund {d:.2f} $ "
+              f"({ein:,.0f} Token ein, {aus:,.0f} aus)")
+    print(f"Kosten zusammen: rund {summe:.2f} $"
+          + ("  (unvollstaendig, Tarif unbekannt)" if unsicher else ""))
     print()
     if args.nur_anzeigen:
         print("Nur Anzeige — kein Modellaufruf.")
