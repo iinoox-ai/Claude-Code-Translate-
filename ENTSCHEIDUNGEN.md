@@ -1561,6 +1561,43 @@ dem der Schlüssel überhaupt drei Teile hat statt einem.
 
 ---
 
+## Ein neues Buch: die Frage steht vor der Anleitung
+
+**Entschieden (August 2026).** `NEUES_BUCH.md` gab es schon — als Anleitung,
+die den Weg von der Textdatei bis zum Paket beschreibt. Was fehlte, war die
+Stelle, an der ein neues Buch etwas *entscheiden* muss.
+
+Die wichtigste dieser Entscheidungen ist eine einzige Frage: **Wie sind die
+Erzählebenen in diesem Text ausgezeichnet?** Sie steht jetzt als Abschnitt 5a
+mitten in der Einrichtung, vor dem ersten Modellaufruf, mit dem Befund von
+1919 daneben: fünf Ebenen im Stilprofil, ein Marker, den der Autor nie benutzt
+hat, eine Gruppe über 147 Chunks.
+
+Drei Dinge, die aus einer Erinnerung eine Prüfung machen:
+
+- **Der Preflight meldet, wenn der eingestellte `rahmen_marker` im Text nicht
+  vorkommt.** Das ist die eine Zeile, die den Lauf 1919 verhindert hätte, und
+  sie kostet nichts: Der Text liegt zu diesem Zeitpunkt ohnehin geladen da.
+  Die Meldung nennt die Folge, nicht nur den Befund.
+- **Die Vorlage `projekt.json` im Repo nennt jede Einstellung ausdrücklich.**
+  Vier Schlüssel fehlten und fielen still auf `gemeinsam.STANDARD` zurück —
+  darunter `rahmen_marker`. Wer eine `projekt.json` für ein neues Buch
+  durchsieht, sieht einen fehlenden Schlüssel nicht; er entscheidet sich
+  hinter dem Rücken. Ein Selbsttest hält die Vorlage vollständig.
+- **Kein verwaistes Dokument.** `NEUES_BUCH.md` lag ein halbes Jahr im Repo,
+  ohne dass irgendein anderes Dokument es erwähnt hätte — ausgerechnet die
+  Datei, die man zuerst braucht, war die einzige unauffindbare. Ein
+  Selbsttest prüft jetzt, dass jedes Dokument von einem anderen aus erreichbar
+  ist. Dabei kamen drei weitere zutage: `VERLAG.md`, `ABBRUCHPROBE.md` und
+  `ARBEITSAUFTRAG.md`.
+
+Warum kein zweites Dokument mit dem Titel „Checkliste": Es gibt bereits vier
+Einstiege (`README`, `NEUES_BUCH`, `ABLAUFPLAN`, `ENTSCHEIDUNGEN`), und ein
+fünftes hätte dieselbe Halbwertszeit gehabt wie das erste, das niemand
+verlinkt hat. Die Entscheidungen stehen dort, wo sie anfallen — im Ablauf.
+
+---
+
 ## Verworfen — und warum
 
 **API-Frontier-Modell als Primärübersetzer** (zunächst). Die Kostenrechnung

@@ -489,8 +489,15 @@ Die Ausschlusslisten (`NICHT_DIMINUTIV`, `HOMOGRAPHEN`, `STOPP`) sind die
 Stellen, an denen bei einem neuen Text nachgebessert wird — nicht die Regeln
 selbst.
 
-## Ein neues Sprachpaar
+## Ein neues Buch, ein neues Sprachpaar
 
-Kopie mit ausgetauschten Sprachdaten. Was sich unterscheidet, steht in
-`SPRACHPAARE.md`; die Reihenfolge der Arbeit beginnt bei der Fehlerklasse und
-endet beim Code, nicht umgekehrt.
+**Buch:** `NEUES_BUCH.md` führt von der Textdatei bis zum Paket. Abschnitt 5a
+stellt die eine Frage, die jedes Buch beantworten muss — *wie sind die
+Erzählebenen ausgezeichnet?* Der Preflight meldet inzwischen, wenn der
+eingestellte `rahmen_marker` im Text nicht vorkommt; die Vorlage
+`projekt.json` im Repo nennt jede Einstellung ausdrücklich, damit sich
+keine mehr still entscheidet (Selbsttest hält beides fest).
+
+**Sprachpaar:** Kopie mit ausgetauschten Sprachdaten. Was sich unterscheidet,
+steht in `SPRACHPAARE.md`; die Reihenfolge der Arbeit beginnt bei der
+Fehlerklasse und endet beim Code, nicht umgekehrt.

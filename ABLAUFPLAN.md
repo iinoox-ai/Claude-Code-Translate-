@@ -47,12 +47,20 @@ Sagt sie „Die Anmeldung gilt nur in dieser Zelle", laufen die Sheets-Aufrufe
 
 ## 2 · Ein neues Buch einrichten
 
+> Wer das zum ersten Mal macht, nimmt **`NEUES_BUCH.md`** — dort steht
+> derselbe Weg ausführlich, mit den Entscheidungen, die dabei anfallen.
+> Hier steht die Kurzfassung für den, der ihn schon kennt.
+
 1. Drive-Ordner anlegen, `input.txt` hineinlegen.
 2. `PROJEKT` in Zelle 0 und Zelle 1 auf diesen Ordner setzen.
 3. Zelle 1 einmal starten — sie kopiert `projekt.json` und `anweisungen.md`
    aus dem Repo, wenn dort keine liegen, und sagt es. **Eine vorhandene
    `projekt.json` wird nie überschrieben.**
-4. Wer mit Sheets arbeitet: Spreadsheet anlegen, die ID oder die volle Adresse
+4. **`rahmen_marker` prüfen.** Er entscheidet, ob die Erzählebenen erkannt
+   werden. Kommt das eingestellte Zeichen im Text nicht vor, meldet der
+   Preflight das — dann hängt alles an `ebenen.json`. Begründung in
+   `NEUES_BUCH.md`, Abschnitt 5a.
+5. Wer mit Sheets arbeitet: Spreadsheet anlegen, die ID oder die volle Adresse
    als `sheets_id` in `projekt.json` eintragen, dann
 
 ```python

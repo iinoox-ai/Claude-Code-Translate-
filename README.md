@@ -122,9 +122,13 @@ Unterhaltung ohne Vorwissen.
 
 | Datei | Inhalt |
 |---|---|
+| `NEUES_BUCH.md` | **hier anfangen** — ein neues Buch von der Datei bis zum Paket |
 | `ABLAUFPLAN.md` | Schritt für Schritt, mit Befehlen |
 | `ENTSCHEIDUNGEN.md` | **warum es so gebaut ist** — vor jedem Umbau lesen |
 | `SPRACHPAARE.md` | die Fehlerklassen je Sprachpaar, neues Paar anlegen |
+| `VERLAG.md` | für Lektorat, Herstellung und Rechte — ohne Technik |
+| `ABBRUCHPROBE.md` | wie geprüft wird, dass ein Abbruch nichts kostet |
+| `ARBEITSAUFTRAG.md` | Historie: der Auftrag zur API- und Colab-Migration (erledigt) |
 
 ---
 

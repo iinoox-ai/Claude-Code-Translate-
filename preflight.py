@@ -52,6 +52,12 @@ def _glob_py():
     return glob.glob(os.path.join(CODE, "*.py"))
 
 
+def _glob_md():
+    """Alle Dokumente im CODE-Verzeichnis, mit Pfad."""
+    import glob
+    return sorted(glob.glob(os.path.join(CODE, "*.md")))
+
+
 def quelltext(name):
     """Eine Datei aus dem CODE-Verzeichnis, nie relativ zum Arbeitsordner."""
     return open(os.path.join(CODE, name), encoding="utf-8").read()
@@ -1323,6 +1329,89 @@ installiert, requests-Pfad"
                         "laufen weiter, Suchen sind bezahlt")
     except Exception as e:
         b.add("FEHLER", "Rueckfall nicht pruefbar", repr(e))
+
+    # --- Die Vorlage im Repo nennt jede Einstellung -------------------
+    # Ein Schluessel, der nur in STANDARD steht, entscheidet sich still:
+    # Wer eine projekt.json fuer ein neues Buch durchsieht, sieht ihn gar
+    # nicht. Genau so stand 'rahmen_marker' unsichtbar auf '#', waehrend
+    # der Autor von 1919 ihn nie benutzt hat.
+    try:
+        fehler = []
+        vorlage = json.load(open(os.path.join(CODE, G.CONFIG),
+                                 encoding="utf-8"))
+        fehlt = sorted(k for k in G.STANDARD if k not in vorlage)
+        if fehlt:
+            fehler.append(f"nicht in der Vorlage: {', '.join(fehlt)}")
+        # Umgekehrt: was die Vorlage nennt, muss es auch geben.
+        unbekannt = sorted(k for k in vorlage
+                           if not k.startswith("_") and k not in G.STANDARD)
+        if unbekannt:
+            fehler.append(f"Vorlage nennt Unbekanntes: "
+                          f"{', '.join(unbekannt)}")
+        # Die Schluessel, die ein neues Buch wirklich entscheiden muss,
+        # brauchen einen Hinweis daneben — sonst liest sie niemand.
+        hinweise = " ".join(str(v) for k, v in vorlage.items()
+                            if k.startswith("_"))
+        for wort in ("rahmen_marker", "ebenen.json", "NEUES_BUCH.md"):
+            if wort not in hinweise:
+                fehler.append(f"Vorlage erklaert '{wort}' nicht")
+        # Und der Preflight muss melden, wenn der eingestellte Marker im
+        # Text gar nicht vorkommt. Das ist die eine Zeile, die den Lauf
+        # 1919 verhindert haette.
+        class _Sammler:
+            def __init__(s): s.zeilen = []
+
+            def abschnitt(s, t): pass
+
+            def add(s, art, t, d=""): s.zeilen.append((art, t))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alt_cwd = os.getcwd()
+            try:
+                os.chdir(tmp)
+                paras = [f"Zin {i} met genoeg woorden hier om te tellen."
+                         for i in range(1, 30)]
+                probe = dict(cfg, rahmen_marker="#")
+                for text, erwartet, was in (
+                        ("\n\n".join(paras), "WARN", "fehlender Marker"),
+                        ("\n\n".join(paras[:5] + ["#"] + paras[5:]), "OK",
+                         "vorhandener Marker")):
+                    open(G.F["quelle"], "w", encoding="utf-8").write(text)
+                    s = _Sammler()
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        pruefe_text(probe, s)
+                    treffer = [a for a, t in s.zeilen if "ahmenmarker" in t]
+                    if treffer != [erwartet]:
+                        fehler.append(f"{was}: {treffer} statt "
+                                      f"['{erwartet}']")
+            finally:
+                os.chdir(alt_cwd)
+
+        # Kein verwaistes Dokument. NEUES_BUCH.md lag ein halbes Jahr im
+        # Repo, ohne dass irgendein anderes es erwaehnt haette — die
+        # Datei, die man zuerst braucht, war die einzige unauffindbare.
+        docs = [os.path.basename(p) for p in _glob_md()]
+        texte = {d: quelltext(os.path.join(CODE, d)) for d in docs}
+        # Gefragt ist, ob ein ANDERES Dokument darauf zeigt — der eigene
+        # Text zaehlt nicht. Die drei Einstiege zeigen auf die anderen,
+        # nicht umgekehrt, und sind deshalb ausgenommen.
+        verwaist = [d for d in docs
+                    if d not in ("README.md", "CLAUDE.md",
+                                 "ENTSCHEIDUNGEN.md")
+                    and not any(d in t for k, t in texte.items() if k != d)]
+        if verwaist:
+            fehler.append(f"von keinem anderen Dokument erwaehnt: "
+                          f"{', '.join(verwaist)}")
+
+        if fehler:
+            b.add("FEHLER", "Vorlage projekt.json unvollstaendig",
+                  "; ".join(fehler))
+        else:
+            b.add("OK", f"Vorlage projekt.json nennt alle "
+                        f"{len(G.STANDARD)} Einstellungen, "
+                        f"{len(docs)} Dokumente sind verlinkt")
+    except Exception as e:
+        b.add("FEHLER", "Vorlage nicht pruefbar", repr(e))
 
     # --- Stapelbetrieb: Ketten, Wellen, halber Tarif -------------------
     # Der Stapel rechnet zum halben Preis und kann genau eines nicht: Ein
@@ -3312,6 +3401,33 @@ def pruefe_text(cfg, b):
     b.add("INFO", "Evidentielles 'zou'",
           f"{zou} Vorkommen — jedes braucht die Entscheidung "
           f"'soll' gegen 'wuerde'")
+
+    # Wie sind die Erzaehlebenen in DIESEM Text ausgezeichnet? Die Frage
+    # steht hier, weil sie hier zum ersten Mal beantwortbar ist — und
+    # weil sie beim Buch 1919 niemand gestellt hat: fuenf Ebenen im
+    # Stilprofil, ein Marker, den der Autor nie benutzt, eine Gruppe ueber
+    # 147 Chunks. Die deutsche Rueckschau lief ueber jeden Wechsel hinweg,
+    # und keine buchweite Metrik konnte das sehen.
+    marker = str(cfg.get("rahmen_marker", "") or "").strip()
+    treffer = sum(1 for p in paras if marker and p.strip() == marker)
+    if not marker:
+        b.add("INFO", "Kein Rahmenmarker eingestellt",
+              "Die Erzaehlebenen kommen dann ausschliesslich aus "
+              "ebenen.json (vorbereitung.py --nur ebenen).")
+    elif treffer:
+        b.add("OK", f"Rahmenmarker »{marker}«: {treffer} Wechsel im Text",
+              "Er gilt als Rueckfall, wenn ebenen.json fehlt.")
+    else:
+        b.add("WARN", f"Rahmenmarker »{marker}« kommt im Text nicht vor",
+              "Erzaehlebenen koennen dann NUR aus ebenen.json kommen.\n"
+              "           Hat der Text mehrere Ebenen (Rahmen, Rueckblende, "
+              "Einschub),\n"
+              "           entstehen ohne sie null Fugen — Tempus und Person "
+              "der einen\n"
+              "           Ebene bluten dann in die andere, und keine "
+              "buchweite Zahl\n"
+              "           zeigt es an. Genau so ist der Lauf 1919 gelaufen.\n"
+              "           Siehe NEUES_BUCH.md, Punkt 3.")
     return text
 
 
