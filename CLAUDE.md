@@ -254,6 +254,15 @@ Einrichtungszelle des Runners. Fehlt der Import, trägt der `requests`-Pfad
 weiter. Die Ablehnung von litellm bleibt bestehen (Begründung in
 `ENTSCHEIDUNGEN.md`).
 
+**Strukturierte Ausgaben nur, wo die Form ausdrückbar ist.** `G.chat(...,
+schema=…)` legt ein JSON-Schema in `output_config.format`. Das Subset verlangt
+`additionalProperties: false` und kann damit **keine offenen Abbildungen**
+ausdrücken — genau das sind die Vorbereitungslieferungen (Wort → Wort). Benutzt
+wird es deshalb in `zitatrecherche.py`, wo der Befund feste Schlüssel hat.
+Gemini bekommt nie ein Schema (anderer Dialekt, HTTP 400); `schema_maengel()`
+meldet vor dem Lauf, was der Anbieter ablehnen würde. Der Parser bleibt überall
+— ein Schema ist eine Zusicherung, keine Ersetzung.
+
 **Beide Transportwege teilen sich `payload()` und `antwort_lesen()`.** Zwei
 Wege sind erlaubt, zwei Wahrheiten darüber, was rausgeht, nicht — der
 Selbsttest prüft den Payload genau einmal. `sdk_fehler()` behält den

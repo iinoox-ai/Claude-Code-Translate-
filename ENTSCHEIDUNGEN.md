@@ -968,6 +968,55 @@ die Temperatur-Schlüssel.
 
 ---
 
+## Strukturierte Ausgaben: nur die Zitatrecherche, und das ist kein Versehen
+
+**Entschieden (August 2026).** `output_config.format` mit JSON-Schema wird an
+genau einer Stelle benutzt: `zitatrecherche.py`. Der Mechanismus ist allgemein
+gebaut (`G.chat(..., schema=…)`), angewendet wird er dort — und die Begründung
+für das *Nicht*-Anwenden ist der eigentliche Inhalt dieser Entscheidung.
+
+**Das unterstützte Schema-Subset verlangt `additionalProperties: false`.** Damit
+lassen sich nur Objekte mit **fester Schlüsselliste** ausdrücken. Sieben der
+acht Vorbereitungslieferungen sind aber offene Abbildungen:
+
+| Lieferung | Form | ausdrückbar? |
+|---|---|---|
+| `glossar` | niederländisches Wort → deutsches Wort | nein |
+| `personen` | Figurenname → Pronomen | nein |
+| `kapitel` | Überschrift im Quellwortlaut → Zusammenfassung | nein |
+| `figurenblatt`, `anrede`, `leitmotive` | Name/Wendung → Objekt | nein |
+| `stilprofil` | feste Schlüssel — aber `perspektive` ist wieder offen | nein |
+| Zitatbefund | `sprache`, `status`, `vorschlag_de`, … | **ja** |
+
+Die naheliegende Reaktion wäre, die Lieferungen als Listen von
+`{schluessel, wert}`-Objekten zu modellieren. Das ist verworfen: Die JSONs
+werden von Menschen gelesen und im Spreadsheet gepflegt, und eine Abbildung, die
+als Liste von Paaren daherkommt, ist an beiden Stellen schlechter. Der Gewinn
+wäre auch klein — die **Formprüfung je Lieferung** fängt eine falsche Form
+bereits ab, und zwar bevor geschrieben wird. Ein Schema würde sie nicht
+ersetzen: Es garantiert die Form, nicht den Inhalt.
+
+Warum gerade die Zitatrecherche: Dort ist eine unlesbare Antwort am teuersten.
+Sie hieß bisher, dass das Zitat übersprungen wird — und ein übersprungenes Zitat
+ist eine Lücke, die später jemand von Hand sucht. Feste Schlüssel hat der Befund
+ohnehin.
+
+**Gemini bekommt kein Schema.** Der Anbieter spricht einen anderen Dialekt
+(OpenAPI-Subset statt JSON Schema); ein durchgereichtes Schema wäre dort ein
+HTTP 400. `G.chat` meldet das einmal und läuft ohne — dieselbe Haltung wie bei
+den serverseitigen Werkzeugen. Der Selbsttest prüft beide Richtungen.
+
+**Der Parser bleibt überall.** Ohne Schlüssel, auf einem anderen Anbieter oder
+wenn ein Modell die Form künftig nicht mehr erzwingt, trägt er weiter. Ein
+Schema ist eine Zusicherung, keine Ersetzung.
+
+`gemeinsam.schema_maengel()` hält das Subset fest und meldet, was der Anbieter
+ablehnen würde — offene Abbildungen, fehlendes `required`, Zahl- und
+Längengrenzen. Ein Schema, das erst im Lauf abgelehnt wird, kostet den Schritt
+**nach** dem Bezahlen.
+
+---
+
 ## Verworfen — und warum
 
 **API-Frontier-Modell als Primärübersetzer** (zunächst). Die Kostenrechnung

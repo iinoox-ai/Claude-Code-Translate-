@@ -435,6 +435,61 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Kostenbuchung nicht pruefbar", repr(e))
 
+    # --- Strukturierte Ausgabe: nur wo sie ausdrueckbar ist ------------
+    # Das unterstuetzte Schema-Subset verlangt 'additionalProperties':
+    # false und kann damit keine offenen Abbildungen ausdruecken. Genau
+    # das sind die Vorbereitungslieferungen (Wort -> Wort). Ein Schema,
+    # das der Anbieter ablehnt, faellt sonst erst im Lauf auf — und dann
+    # nach dem Bezahlen.
+    try:
+        import zitatrecherche as Z
+        fehler = []
+        maengel = G.schema_maengel(Z.BEFUND_SCHEMA)
+        if maengel:
+            fehler.append(f"Zitatschema abgelehnt: {'; '.join(maengel)}")
+
+        # Gegenproben: der Pruefer muss beide Fallen fangen.
+        offen = {"type": "object", "properties": {},
+                 "required": []}                       # ohne additionalProps
+        if not G.schema_maengel(offen):
+            fehler.append("offene Abbildung wird nicht beanstandet")
+        grenzen = {"type": "object", "additionalProperties": False,
+                   "required": ["n"],
+                   "properties": {"n": {"type": "number", "minimum": 0}}}
+        if not G.schema_maengel(grenzen):
+            fehler.append("Zahlgrenze wird nicht beanstandet")
+
+        # Das Schema muss im Payload ankommen — neben 'effort', nicht
+        # statt seiner.
+        p = G.AnthropicBackend().payload(cfg, "S", "U", "zitat",
+                                         "claude-opus-5",
+                                         schema=Z.BEFUND_SCHEMA)
+        oc = p.get("output_config", {})
+        if oc.get("format", {}).get("type") != "json_schema":
+            fehler.append(f"Schema fehlt im Payload: {oc}")
+        if not oc.get("effort"):
+            fehler.append("Schema verdraengt den Effort")
+        ohne = G.AnthropicBackend().payload(cfg, "S", "U", "zitat",
+                                            "claude-opus-5")
+        if "format" in ohne.get("output_config", {}):
+            fehler.append("Payload traegt ein Schema, das keiner bestellt hat")
+
+        # Gemini spricht einen anderen Dialekt: Das Schema darf dort NICHT
+        # ankommen, sonst ist der Aufruf ein HTTP 400.
+        g = G.GeminiBackend().payload(cfg, "S", "U", "begruendung",
+                                      "gemini-3.6-flash")
+        if "json_schema" in json.dumps(g):
+            fehler.append("Gemini-Payload traegt ein JSON-Schema")
+
+        if fehler:
+            b.add("FEHLER", "Strukturierte Ausgabe fehlerhaft",
+                  "; ".join(fehler))
+        else:
+            b.add("OK", "Strukturierte Ausgabe: Schema im Anthropic-Payload "
+                        "neben dem Effort, Gemini bleibt unberuehrt")
+    except Exception as e:
+        b.add("FEHLER", "Strukturierte Ausgabe nicht pruefbar", repr(e))
+
     # --- Quelldateien nur ueber CODE lesen -----------------------------
     # Im Colab-Betrieb ist das Arbeitsverzeichnis der Drive-Ordner, nicht
     # das Repo. Ein relativ geoeffnetes 'bewertung.py' wirft dort einen

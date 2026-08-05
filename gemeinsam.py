@@ -812,7 +812,7 @@ class Backend:
     """Basisklasse. Ein weiterer Anbieter heisst: eine Unterklasse."""
 
     def chat(self, cfg, system, user, rolle="uebersetzung", modell="",
-             roh=False):
+             roh=False, werkzeuge=None, schema=None):
         raise NotImplementedError
 
     def zaehle_tokens(self, cfg, system, user, modell=""):
@@ -975,7 +975,8 @@ class AnthropicBackend(Backend):
     URL     = "https://api.anthropic.com/v1/messages"
     VERSION = "2023-06-01"
 
-    def payload(self, cfg, system, user, rolle, modell, werkzeuge=None):
+    def payload(self, cfg, system, user, rolle, modell, werkzeuge=None,
+                schema=None):
         marker = {"type": "ephemeral"}
         ttl = cache_ttl(cfg)
         if ttl:
@@ -989,6 +990,12 @@ class AnthropicBackend(Backend):
             "messages": [{"role": "user", "content": user}],
             "output_config": {"effort": effort_fuer(cfg, rolle)},
         }
+        if schema:
+            # Strukturierte Ausgabe: Der Anbieter erzwingt die Form, statt
+            # dass ein Parser sie aus Prosa fischt. 'format' steht neben
+            # 'effort' im selben Block.
+            p["output_config"]["format"] = {"type": "json_schema",
+                                            "schema": schema}
         if werkzeuge:
             p["tools"] = werkzeuge
         return p
@@ -1060,7 +1067,7 @@ class AnthropicBackend(Backend):
             return None
 
     def chat(self, cfg, system, user, rolle="uebersetzung", modell="",
-             roh=False, werkzeuge=None):
+             roh=False, werkzeuge=None, schema=None):
         schluessel = api_schluessel("anthropic")
         if not schluessel:
             sys.exit("FEHLER: ANTHROPIC_API_KEY fehlt.\n"
@@ -1076,7 +1083,8 @@ class AnthropicBackend(Backend):
         # SDK an 'payload' vorbei aufruft, hat zwei Wahrheiten darueber,
         # was wirklich rausgeht — und der Selbsttest prueft nur eine.
         def einmal():
-            p = self.payload(cfg, system, user, rolle, modell, werkzeuge)
+            p = self.payload(cfg, system, user, rolle, modell, werkzeuge,
+                             schema)
             if k is not None:
                 return sdk_antwort(k, p)
             return sende(lambda: requests.post(self.URL, json=p,
@@ -1180,7 +1188,10 @@ class GeminiBackend(Backend):
             return None
 
     def chat(self, cfg, system, user, rolle="begruendung", modell="",
-             roh=False):
+             roh=False, werkzeuge=None, schema=None):
+        # 'schema' wird angenommen und NICHT gesendet: Gemini spricht einen
+        # anderen Schema-Dialekt (OpenAPI-Subset, kein JSON Schema). Ein
+        # durchgereichtes Schema waere hier ein HTTP 400. Der Parser traegt.
         schluessel = api_schluessel("google")
         if not schluessel:
             sys.exit("FEHLER: GEMINI_API_KEY fehlt.\n"
@@ -1211,7 +1222,8 @@ def backend(modell):
     return b
 
 
-def chat(cfg, system, user, rolle="uebersetzung", roh=False, werkzeuge=None):
+def chat(cfg, system, user, rolle="uebersetzung", roh=False, werkzeuge=None,
+         schema=None):
     """Der einzige Modellaufruf des Projekts.
 
     Die Rolle loest Modell, Backend und Effort auf. Es gehen keine
@@ -1232,7 +1244,18 @@ def chat(cfg, system, user, rolle="uebersetzung", roh=False, werkzeuge=None):
         print(f"    HINWEIS: {modell} kennt keine Werkzeuge — "
               f"Aufruf ohne Websuche")
         werkzeuge = None
-    zusatz = {"werkzeuge": werkzeuge} if werkzeuge else {}
+    if schema and not isinstance(b, AnthropicBackend):
+        # Dieselbe Haltung wie bei den Werkzeugen: lieber ohne laufen als
+        # mit einer Payload, die der Anbieter ablehnt. Gemini kennt einen
+        # anderen Schema-Dialekt; dort traegt der Parser weiter.
+        print(f"    HINWEIS: {modell} kennt keine strukturierte Ausgabe — "
+              f"Antwort wird gelesen statt erzwungen")
+        schema = None
+    zusatz = {}
+    if werkzeuge:
+        zusatz["werkzeuge"] = werkzeuge
+    if schema:
+        zusatz["schema"] = schema
     return b.chat(cfg, system, user, rolle=rolle, modell=modell, roh=roh,
                   **zusatz)
 
@@ -1291,6 +1314,50 @@ def saeubern(text):
     t = re.sub(r"^```[a-z]*\s*", "", t.strip())
     t = re.sub(r"\s*```$", "", t)
     return PREAMBEL.sub("", t.strip()).strip()
+
+
+def schema_maengel(schema, pfad="$"):
+    """Was der Anbieter an diesem Schema ablehnen wuerde, als Liste.
+
+    Das unterstuetzte Subset ist enger, als es aussieht. Zwei Regeln
+    kosten sonst einen ganzen Schritt, und zwar erst im Lauf:
+
+    - Jedes Objekt braucht 'additionalProperties': false und 'required'.
+    - Offene Abbildungen (beliebige Schluessel) lassen sich damit nicht
+      ausdruecken. Genau daran scheitern die Vorbereitungslieferungen —
+      Glossar, Personen, Kapitel sind Wort-zu-Wort-Abbildungen, und die
+      haben keine feste Schluesselliste. Sie behalten deshalb den Parser
+      und ihre Formpruefung.
+
+    Ebenfalls nicht im Subset: rekursive Schemata sowie Zahl- und
+    Laengengrenzen ('minimum', 'maxLength' …). Die werden hier gemeldet,
+    nicht stillschweigend entfernt."""
+    m = []
+    if not isinstance(schema, dict):
+        return [f"{pfad}: kein Objekt"]
+    typ = schema.get("type")
+    if typ == "object":
+        if schema.get("additionalProperties") is not False:
+            m.append(f"{pfad}: 'additionalProperties': false fehlt "
+                     f"(offene Abbildungen sind nicht ausdrueckbar)")
+        if "properties" not in schema:
+            m.append(f"{pfad}: 'properties' fehlt")
+        if "required" not in schema:
+            m.append(f"{pfad}: 'required' fehlt")
+        for name, teil in (schema.get("properties") or {}).items():
+            m += schema_maengel(teil, f"{pfad}.{name}")
+    elif typ == "array":
+        if "items" not in schema:
+            m.append(f"{pfad}: 'items' fehlt")
+        else:
+            m += schema_maengel(schema["items"], f"{pfad}[]")
+    for verboten in ("minimum", "maximum", "multipleOf",
+                     "minLength", "maxLength", "pattern"):
+        if verboten in schema:
+            m.append(f"{pfad}: '{verboten}' gehoert nicht zum Subset")
+    if "$ref" in schema and "$defs" not in schema:
+        m.append(f"{pfad}: '$ref' ohne '$defs' — rekursiv wird abgelehnt")
+    return m
 
 
 def json_aus_antwort(raw):
