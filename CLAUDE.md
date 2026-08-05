@@ -17,7 +17,8 @@ wichtigsten:
   Verlagsreihenfolge ab und ist Absicht.
 - **`gross` wird zu `groß` korrigiert, `Gross` nicht.** Schreibungsabhängig,
   weil großgeschrieben ein Nachname sein kann.
-- **Verstellbar sind `chunk_words`, `context_words` und `effort_<rolle>`.**
+- **Verstellbar sind `chunk_words`, `context_words`, `context_words_voraus`
+  und `effort_<rolle>`.**
   Sampling-Parameter gibt es nicht mehr: `claude-opus-5` hat
   `temperature`/`top_p`/`top_k` entfernt und antwortet darauf mit HTTP 400,
   Gemini ignoriert sie. Mit dem Rückzug des Ollama-Pfads sind die
@@ -178,6 +179,32 @@ brauchen keine Freigabe. Automatische Übernahme ist ausdrücklich verworfen —
 Grundsatz „lieber markierte Lücke als erfundener Wortlaut". Eingesetzte
 Zitate bleiben vom Lektorat ausgenommen.
 
+## Kontext in beide Richtungen
+
+Ein Chunk sieht zurück (`context_words`, Quelle und eigene Fassung) **und nach
+vorn** (`context_words_voraus`, der Anfang des nächsten Chunks). Drei Regeln,
+die keine Details sind:
+
+- Der Ausblick **endet an der Ebenenfuge** — dort beginnt eine andere Ebene,
+  und ihr Anfang wäre eine Irreführung. Stapelfugen (Paket G) sind keine
+  Ebenenfugen; dort läuft er weiter.
+- Er steht **vor** dem Auftrag im Prompt. Was zuletzt dasteht, liest ein Modell
+  als das, was zu tun ist.
+- Er schneidet an der Satzgrenze (`G.anfangswoerter`).
+
+Die Rückschau steht auch im **Revisionsbody** — sonst glättet Pass 2 die
+Anschlüsse weg, die Pass 1 hergestellt hat. `rueckschau_quelle` schaltet um,
+ob sie aus der Revision oder dem Entwurf kommt; gemessen ist das noch nicht.
+
+`figuren_nachhall` hält eine einmal genannte Figur drei Chunks im
+Personenblock, gekennzeichnet als »zuletzt erwähnt«. Zurückgesetzt **nur an
+Ebenenfugen**.
+
+Eine verschobene Absatzzahl ist kein Schönheitsfehler: Leseausgabe,
+Zitateinsatz und Tempusmessung hängen an der Absatzzuordnung. Bricht die
+Revision sie, wird die Revision verworfen; bricht der Entwurf sie, wird der
+Chunk wiederholt.
+
 ## Erzählebenen: `ebenen.json` zuerst, `rahmen_marker` als Rückfall
 
 An jeder Fuge: harte Chunkgrenze, Rückschau-Reset, Ebenen-Kennzeichnung im
@@ -228,6 +255,30 @@ schätzt vor dem Volllauf. Die Preise hält `tarife.py`
 gegen die Preisseiten — übernommen wird nur ein eindeutiges Paar, sonst bleibt
 der hinterlegte Wert (Begründung in `ENTSCHEIDUNGEN.md`). Neue modellrufende Schritte
 ohne Usage-Erfassung gelten als unfertig.
+
+## Was der Testlauf messen kann
+
+Drei Auszüge: Erzählung, Dialog und die **Fallenpassage** — die Stelle mit der
+höchsten Dichte an falschen Freunden, Diminutiven, `zou` und
+Verlaufsformen. Die ersten beiden messen, ob der Text als deutsche Prosa
+besteht; der dritte, ob die Warnungen aus `block_fallen` ankommen. Er
+überschneidet die anderen nicht. `teile.json` hält die Absatzzahl je Auszug —
+ohne sie schneidet `bewertung` bei der Hälfte und vergleicht Erzählung gegen
+Dialog.
+
+Eine **Variante** darf jeden Schalter aus `gemeinsam.VARIANTENSCHALTER`
+tragen, nicht nur `chunk_words` und Modellnamen. Die Liste ist bewusst
+geschlossen: Ein Tippfehler erzeugte sonst still eine Einstellung, die nichts
+tut, und der Vergleich liefe durch. `preflight` meldet unbekannte Schlüssel
+vor dem ersten Modellaufruf.
+
+`lektorat.py --test --variante X` und `bewertung.py --lektorat --variante X`
+ziehen die Variante bis ins Lektorat durch — die Frage »braucht das
+Korrektorat wirklich Opus« ist eine Lektoratsfrage.
+
+`bewertung.py --fugen` beurteilt die **Nähte** zwischen Chunks und fragt
+ausschließlich nach dem Übergang. Das ist die Zahl hinter `kette_max` im
+Stapelbetrieb: Kürzere Ketten heißen mehr Fugen.
 
 ## Kalibrierung gilt je Modell-Ära
 

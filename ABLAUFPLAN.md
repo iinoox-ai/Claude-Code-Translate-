@@ -177,6 +177,23 @@ Angepasste Werte kommen nach `projekt.json`. Weiter mit:
 colab_start.lauf("pipeline.py", "weiter", code=CODE)
 ```
 
+**Was sich hier zusätzlich messen lässt**, wenn eine Frage offen ist — jedes
+kostet Modellaufrufe, keines läuft von selbst:
+
+```python
+# Eine Variante bis ins Lektorat durchziehen (z. B. Korrektorat auf Sonnet):
+colab_start.lauf("lektorat.py", "--test", "--variante", "B", code=CODE)
+colab_start.lauf("bewertung.py", "--lektorat", "--variante", "B", code=CODE)
+
+# Wie teuer ist ein Kontext-Reset? Die Zahl hinter 'kette_max':
+colab_start.lauf("bewertung.py", "--fugen", code=CODE)
+```
+
+Eine Variante trägt jeden Schalter aus `gemeinsam.VARIANTENSCHALTER` —
+`rueckschau_quelle`, `context_words_voraus`, `figuren_nachhall`,
+`effort_<rolle>` und die Modelle. Ein Schlüssel, den die Liste nicht kennt,
+wird vom Preflight gemeldet und **nicht** stillschweigend ignoriert.
+
 ---
 
 ## 5 · Referenzdaten im Spreadsheet

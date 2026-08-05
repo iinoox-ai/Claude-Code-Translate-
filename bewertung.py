@@ -90,10 +90,20 @@ def ausgabe_stat(stat, titel):
 
 
 def teile_trennen(pfad, teile):
+    """Zerlegt eine Testfassung in ihre Auszuege.
+
+    Ohne teile.json wird geraten — die alte Fassung schnitt bei der
+    Haelfte der Absaetze und verglich damit Erzaehlung gegen Dialog,
+    sobald die Auszuege verschieden viele Absaetze hatten. Seit
+    uebersetzung.py die Datei schreibt, ist das nur noch der Rueckfall.
+
+    Gibt immer drei Teile zurueck; der dritte ist leer, wenn es keine
+    Fallenpassage gibt."""
     paras = G.absaetze(open(pfad, encoding="utf-8").read())
-    n1 = teile.get("erzaehlung", len(paras) // 2)
-    n1 = min(n1, len(paras))
-    return "\n\n".join(paras[:n1]), "\n\n".join(paras[n1:])
+    n1 = min(int(teile.get("erzaehlung", len(paras) // 2)), len(paras))
+    n2 = min(n1 + int(teile.get("dialog", len(paras) - n1)), len(paras))
+    return ("\n\n".join(paras[:n1]), "\n\n".join(paras[n1:n2]),
+            "\n\n".join(paras[n2:]))
 
 
 # ==================================================================
@@ -222,6 +232,103 @@ def kosten_zeile(pfad):
             + (" (unvollstaendig, Tarif unbekannt)" if unsicher else ""))
 
 
+FUGE_SYSTEM = """Du bist eine erfahrene Literaturlektorin. Du siehst das \
+Ende eines Abschnitts und den Anfang des folgenden, aus derselben deutschen \
+Uebersetzung.
+
+Beurteile AUSSCHLIESSLICH den Uebergang zwischen beiden, nicht ihre Qualitaet \
+im Uebrigen:
+
+1. Tempus und Person — bricht die Erzaehlhaltung an der Naht?
+2. Anrede und Register — springt das Du/Sie, springt die Stilhoehe?
+3. Wiederaufnahme — wird ein Pronomen benutzt, dessen Bezug nur im ersten \
+Teil steht und dort verlorengeht?
+4. Wiederholung — wird etwas erklaert, das schon dastand?
+5. Terminologie — dasselbe Ding, zwei Woerter?
+
+Ein unauffaelliger Uebergang ist das Normale und ein gutes Ergebnis.
+
+Antworte NUR mit einem JSON-Objekt:
+{"bruch": "keiner" | "leicht" | "deutlich",
+ "art": "…", "stelle": "…", "begruendung": "…"}
+Keine Codefences, kein Kommentar."""
+
+
+def fugenurteil(cfg, praefix=TESTDIR + "/", n=8, kontext=120):
+    """Wie teuer ist ein Kontext-Reset? Misst die Naht zwischen Chunks.
+
+    Das ist die Zahl hinter 'kette_max': Im Stapelbetrieb (Paket G) laeuft
+    die Kette nur so lange, wie ein Chunk auf den vorigen warten kann.
+    Kuerzere Ketten heissen mehr Fugen, und ob das schadet, ist keine
+    Geschmacksfrage — hier steht, wie oft eine Naht wirklich bricht.
+
+    Verglichen wird die vorhandene Testuebersetzung mit sich selbst: Jede
+    Chunkgrenze ist eine Naht, die MIT Rueckschau entstanden ist. Bricht
+    sie schon dort, ist eine Kette ohne Rueckschau erst recht zu kurz."""
+    st = G.lade_json(praefix + "uebersetzung_state.json", still=True)
+    total = int(st.get("total") or 0)
+    if total < 2:
+        print(f"  Kein Testlauf in {praefix} — erst uebersetzung.py --test")
+        return []
+    stuecke = [G.teil_lesen("uebersetzung", i, praefix) for i in range(total)]
+    stuecke = [s for s in stuecke if s and s.strip()]
+    if len(stuecke) < 2:
+        print("  Zu wenige Chunks für ein Fugenurteil")
+        return []
+
+    random.seed(23)
+    fugen = list(range(1, len(stuecke)))
+    random.shuffle(fugen)
+    ergebnisse = []
+    for nr, i in enumerate(fugen[:n], 1):
+        vorher = G.schlusswoerter(stuecke[i - 1], kontext)
+        nachher = G.anfangswoerter(stuecke[i], kontext)
+        user = (f"=== ENDE DES ABSCHNITTS ===\n{vorher}\n\n"
+                f"=== ANFANG DES FOLGENDEN ===\n{nachher}")
+        try:
+            d = G.json_aus_antwort(G.chat(cfg, FUGE_SYSTEM, user,
+                                          rolle="judge"))
+            if not d:
+                raise RuntimeError("kein JSON")
+            d["_fuge"] = i
+            ergebnisse.append(d)
+            print(f"  Fuge nach Chunk {i}: {d.get('bruch', '?')} "
+                  f"({d.get('art', '')[:40]})")
+        except Exception as e:
+            print(f"  Fuge nach Chunk {i} fehlgeschlagen: {e}")
+    return ergebnisse
+
+
+def fugen_auswerten(ergebnisse):
+    """Eine Zahl und eine Empfehlung fuer 'kette_max'."""
+    if not ergebnisse:
+        return
+    zaehl = Counter(str(d.get("bruch", "?")) for d in ergebnisse)
+    ges = sum(zaehl.values())
+    schlecht = zaehl.get("deutlich", 0)
+    leicht = zaehl.get("leicht", 0)
+    print(f"\n=== Fugenurteil: {ges} Nähte ===")
+    for k in ("keiner", "leicht", "deutlich"):
+        if zaehl.get(k):
+            print(f"  {k:10s} {zaehl[k]:3d}  {zaehl[k]/ges:5.0%}")
+    quote = (schlecht + 0.5 * leicht) / ges
+    print(f"\n  Bruchmaß {quote:.0%} "
+          f"(deutlich zählt voll, leicht zur Hälfte)")
+    # Die Marken sind Konvention, nicht Messung — sie machen aus einer
+    # Zahl eine Entscheidung und stehen deshalb hier und nicht im Kopf
+    # des Lesers.
+    if quote < 0.10:
+        print("  Die Nähte halten. Kurze Ketten im Stapelbetrieb sind "
+              "vertretbar;\n  'kette_max' darf klein sein.")
+    elif quote < 0.25:
+        print("  Die Nähte halten überwiegend. 'kette_max' mittelgroß "
+              "wählen und\n  nach dem ersten Stapellauf erneut messen.")
+    else:
+        print("  Die Nähte brechen zu oft. Der Kontext-Reset kostet hier "
+              "wirklich etwas —\n  'kette_max' groß wählen oder auf "
+              "Stapelverarbeitung verzichten.")
+
+
 def variantenvergleich(cfg, kein_modell=False):
     """Vergleicht alle vorhandenen Varianten gegen die Basis (Paket 5).
 
@@ -277,18 +384,20 @@ def variantenvergleich(cfg, kein_modell=False):
     if not kein_modell:
         import uebersetzung as U
         paras = G.absaetze(open(G.F["quelle"], encoding="utf-8").read())
-        t1, t2, _ = U.testauszuege(paras, cfg["test_words_erzaehlung"],
-                                   cfg["test_words_dialog"])
+        t1, t2, t3, _ = U.testauszuege(
+            paras, cfg["test_words_erzaehlung"], cfg["test_words_dialog"],
+            int(cfg.get("test_words_fallen", 0) or 0))
         # Erzaehlung UND Dialog, getrennt. Bei NL->DE liegt die Schwaeche
         # im Dialog — ein Vergleich, der ihn auslaesst, beantwortet die
         # Frage nur zur Haelfte und sieht trotzdem vollstaendig aus.
         teile = G.lade_json(TESTDIR + "/teile.json", still=True)
-        basis1, basis2 = (teile_trennen(basis_p, teile) if teile
-                          else (basis, ""))
+        basis1, basis2, basis3 = (teile_trennen(basis_p, teile) if teile
+                                  else (basis, "", ""))
         print(f"\n{signal_kopf(cfg, 'judge', 'Blindes Urteil je Variante')}")
         for name, _, t in texte:
             pfad = f"test{name}/" + G.F["uebersetzung"]
-            v1, v2 = teile_trennen(pfad, teile) if teile else (t, "")
+            v1, v2, v3 = (teile_trennen(pfad, teile) if teile
+                          else (t, "", ""))
             ergebnisse = blindbewertung(cfg, "\n\n".join(t1), basis1, v1, 4,
                                         f"{name} Erzaehlung",
                                         namen=("A", name))
@@ -296,10 +405,17 @@ def variantenvergleich(cfg, kein_modell=False):
                 ergebnisse += blindbewertung(cfg, "\n\n".join(t2), basis2,
                                              v2, 4, f"{name} Dialog",
                                              namen=("A", name))
+            # Der dritte Auszug ist der, an dem sich die Sprachrichtung
+            # entscheidet: Wenn eine Variante die Fallen besser trifft,
+            # zeigt es sich hier und nicht in der ruhigen Erzaehlung.
+            if v3.strip() and t3:
+                ergebnisse += blindbewertung(cfg, "\n\n".join(t3), basis3,
+                                             v3, 4, f"{name} Fallen",
+                                             namen=("A", name))
             urteile[name] = {
                 teil: Counter(x["_echt"] for x in ergebnisse
                               if x["_teil"].endswith(teil))
-                for teil in ("Erzaehlung", "Dialog")}
+                for teil in ("Erzaehlung", "Dialog", "Fallen")}
             for teil, c in urteile[name].items():
                 if c:
                     print(f"  A gegen {name}, {teil:11s} "
@@ -339,16 +455,48 @@ def main():
     ap.add_argument("--variantenvergleich", "--chunkvergleich",
                     dest="variantenvergleich", action="store_true")
     ap.add_argument("--kein-modell", action="store_true")
+    ap.add_argument("--fugen", action="store_true",
+                    help="beurteilt die Naehte zwischen den Chunks — die "
+                         "Zahl hinter 'kette_max' im Stapelbetrieb")
+    ap.add_argument("--variante", default="A",
+                    help="mit --lektorat: die Variante beurteilen, die "
+                         "'lektorat.py --test --variante X' erzeugt hat")
     args = ap.parse_args()
 
     G.kopf("BEWERTUNG")
     cfg = G.lade_config()
+
+    # Der Variantenvergleich stellt die Varianten GEGEN die Basis; sein
+    # Bezugspunkt muss 'test/' bleiben. '--variante' gilt deshalb nur fuer
+    # das Lektoratsurteil, wo es eine einzelne Variante beurteilt.
+    if args.variante != "A":
+        if not args.lektorat:
+            sys.exit("FEHLER: --variante gilt nur zusammen mit --lektorat.\n"
+                     "  Uebersetzungen vergleicht: "
+                     "python3 bewertung.py --variantenvergleich")
+        if not any(v["name"] == args.variante for v in G.varianten(cfg)):
+            moeglich = ", ".join(v["name"] for v in G.varianten(cfg)) or "keine"
+            sys.exit(f"FEHLER: Variante '{args.variante}' steht nicht in "
+                     f"projekt.json.\n  Moeglich: {moeglich}")
+        globals()["TESTDIR"] = "test" + args.variante
+        cfg, _, beschreibung = G.variante_anwenden(
+            cfg, next(v for v in G.varianten(cfg)
+                      if v["name"] == args.variante))
+        print(f"Variante {args.variante}: {beschreibung}")
+        print(f"Verzeichnis: {TESTDIR}/\n")
     # Die Bewertung urteilt ausschliesslich ueber die Testauszuege; ihre
     # Urteilsaufrufe gehoeren damit zur Testrechnung, nicht zum Buch.
     G.lauf_setzen(TESTDIR)
 
     if args.variantenvergleich:
         variantenvergleich(cfg, kein_modell=args.kein_modell)
+        return
+
+    if args.fugen:
+        if args.kein_modell:
+            sys.exit("FEHLER: --fugen braucht ein Modell.")
+        print(f"\n{signal_kopf(cfg, 'judge', 'Fugenurteil')}")
+        fugen_auswerten(fugenurteil(cfg))
         return
 
     teile = G.lade_json(TESTDIR + "/teile.json", still=True)
@@ -363,9 +511,10 @@ def main():
         stat, bsp = diffstat(vor, nach)
         ausgabe_stat(stat, "Lektorat gesamt")
         if teile:
-            v1, v2 = teile_trennen(vor_p, teile)
-            n1, n2 = teile_trennen(nach_p, teile)
-            for name, a, b in (("Erzaehlung", v1, n1), ("Dialog", v2, n2)):
+            v1, v2, v3 = teile_trennen(vor_p, teile)
+            n1, n2, n3 = teile_trennen(nach_p, teile)
+            for name, a, b in (("Erzaehlung", v1, n1), ("Dialog", v2, n2),
+                               ("Fallen", v3, n3)):
                 s, _ = diffstat(a, b)
                 if s:
                     ausgabe_stat(s, f"Lektorat — {name}")
@@ -429,8 +578,8 @@ def main():
         stat, bsp = diffstat(entwurf, final)
         ausgabe_stat(stat, "Entwurf -> Revision, gesamt")
         if teile:
-            e1, e2 = teile_trennen(ent_p, teile)
-            f1, f2 = teile_trennen(fin_p, teile)
+            e1, e2, e3 = teile_trennen(ent_p, teile)
+            f1, f2, f3 = teile_trennen(fin_p, teile)
             for name, a, b in (("Erzaehlung", e1, f1), ("Dialog", e2, f2)):
                 s, _ = diffstat(a, b)
                 if s:
@@ -458,13 +607,18 @@ def main():
         print(f"\n{signal_kopf(cfg, 'judge', 'Blindes Urteil')} ...")
         import uebersetzung as U
         paras = G.absaetze(open(G.F["quelle"], encoding="utf-8").read())
-        t1, t2, _ = U.testauszuege(paras, cfg["test_words_erzaehlung"],
-                                   cfg["test_words_dialog"])
-        e1, e2 = teile_trennen(ent_p, teile) if teile else (entwurf, "")
-        f1, f2 = teile_trennen(fin_p, teile) if teile else (final, "")
+        t1, t2, t3, _ = U.testauszuege(
+            paras, cfg["test_words_erzaehlung"], cfg["test_words_dialog"],
+            int(cfg.get("test_words_fallen", 0) or 0))
+        e1, e2, e3 = (teile_trennen(ent_p, teile) if teile
+                      else (entwurf, "", ""))
+        f1, f2, f3 = (teile_trennen(fin_p, teile) if teile
+                      else (final, "", ""))
         blind += blindbewertung(cfg, "\n\n".join(t1), e1, f1, 4, "Erzaehlung")
         if e2.strip():
             blind += blindbewertung(cfg, "\n\n".join(t2), e2, f2, 4, "Dialog")
+        if e3.strip() and t3:
+            blind += blindbewertung(cfg, "\n\n".join(t3), e3, f3, 4, "Fallen")
         def ergebnis(liste, titel):
             if not liste:
                 return
@@ -492,8 +646,10 @@ def main():
     if cfg["export_bewertung"]:
         import uebersetzung as U
         paras = G.absaetze(open(G.F["quelle"], encoding="utf-8").read())
-        t1, t2, dichte = U.testauszuege(paras, cfg["test_words_erzaehlung"],
-                                        cfg["test_words_dialog"])
+        t1, t2, t3, kennzahlen = U.testauszuege(
+            paras, cfg["test_words_erzaehlung"], cfg["test_words_dialog"],
+            int(cfg.get("test_words_fallen", 0) or 0))
+        dichte = kennzahlen["dialogdichte"]
         gesamt = sum(stat.values()) or 1
         subst = sum(v for k, v in stat.items()
                     if k not in ("Typografie", "Interpunktion"))
@@ -507,8 +663,10 @@ def main():
              f"Perfektanteil: {q:.1%}",
              f"- Anrede: {cfg['anrede_vorgabe']}",
              f"- chunk_words {cfg['chunk_words']}, context_words "
-             f"{cfg['context_words']}, temp {cfg['temperature_uebersetzung']}/"
-             f"{cfg['temperature_revision']}",
+             f"{cfg['context_words']}, Vorwegschau "
+             f"{cfg.get('context_words_voraus', 0)}, Denktiefe "
+             f"{cfg.get('effort_uebersetzung', '?')}/"
+             f"{cfg.get('effort_revision', '?')}",
              f"- Prueffgrenzen kalibriert: {cfg['ratio_min']:.2f}–"
              f"{cfg['ratio_max']:.2f}\n",
              f"## Diff-Statistik Entwurf -> Revision\n",
@@ -532,8 +690,10 @@ def main():
         if os.path.exists(wlog):
             L += ["## Warnungen aus dem Lauf\n```",
                   open(wlog, encoding="utf-8").read()[:3000], "```\n"]
-        e1, e2 = teile_trennen(ent_p, teile) if teile else (entwurf, "")
-        f1, f2 = teile_trennen(fin_p, teile) if teile else (final, "")
+        e1, e2, e3 = (teile_trennen(ent_p, teile) if teile
+                      else (entwurf, "", ""))
+        f1, f2, f3 = (teile_trennen(fin_p, teile) if teile
+                      else (final, "", ""))
         L += ["---\n# TEIL 1 — ERZAEHLPASSAGE\n",
               "## Niederlaendischer Ausgangstext\n```", "\n\n".join(t1),
               "```\n## Entwurf\n```", e1, "```\n## Nach Revision\n```", f1,

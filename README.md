@@ -178,8 +178,8 @@ Der Merge übernimmt nur Schlüssel aus `AENDERBAR` und schützt
 `ratio_min`, `ratio_max`, `ratio_kalibriert`, `sprachpaar` programmatisch.
 Abgelehntes wird mit Begründung ausgegeben.
 
-**Sinnvoll verstellbar sind drei Parameter:** `chunk_words`, `context_words`
-und `effort_<rolle>`. Sampling-Parameter nehmen beide APIs nicht mehr an.
+**Sinnvoll verstellbar sind vier Parameter:** `chunk_words`, `context_words`,
+`context_words_voraus` und `effort_<rolle>`. Sampling-Parameter nehmen beide APIs nicht mehr an.
 Warum nicht mehr, steht in `ENTSCHEIDUNGEN.md`.
 
 ---

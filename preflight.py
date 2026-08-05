@@ -46,6 +46,12 @@ DE_MARKER = [r"\bder\b", r"\bdie\b", r"\bdas\b", r"\bund\b", r"\bnicht\b",
 CODE = os.path.dirname(os.path.abspath(__file__))
 
 
+def _glob_py():
+    """Alle Projektskripte im CODE-Verzeichnis."""
+    import glob
+    return glob.glob(os.path.join(CODE, "*.py"))
+
+
 def quelltext(name):
     """Eine Datei aus dem CODE-Verzeichnis, nie relativ zum Arbeitsordner."""
     return open(os.path.join(CODE, name), encoding="utf-8").read()
@@ -225,6 +231,36 @@ def selbsttest(cfg, b):
             fehler.append(f"Rueckfall auf chunk_words_variante fehlt: {alt}")
         if G.varianten(dict(probe, varianten=[], chunk_words_variante=800)):
             fehler.append("identische Variante wird nicht verworfen")
+
+        # Paket D: Eine Variante darf jeden Schalter tragen, nicht nur
+        # Chunkgroesse und Modell. Sonst laesst sich kein Schalter aus
+        # Paket C vergleichen — und ein Schalter ohne Messung ist eine
+        # Meinung.
+        c3, _, besch3 = G.variante_anwenden(
+            probe, {"name": "D", "rueckschau_quelle": "entwurf",
+                    "context_words_voraus": 0, "figuren_nachhall": 0,
+                    "effort_uebersetzung": "maximal", "revision_pass": False})
+        for k, soll in (("rueckschau_quelle", "entwurf"),
+                        ("context_words_voraus", 0),
+                        ("figuren_nachhall", 0),
+                        ("effort_uebersetzung", "maximal"),
+                        ("revision_pass", False)):
+            if c3[k] != soll:
+                fehler.append(f"Variante setzt {k} nicht ({c3[k]!r})")
+        if "rueckschau_quelle=entwurf" not in besch3:
+            fehler.append(f"Schalter fehlt in der Beschreibung: {besch3}")
+        # Ein Tippfehler im Schluessel darf NICHT still eine Einstellung
+        # erfinden — der Vergleich maesse sonst etwas anderes, als er sagt.
+        c4, _, _ = G.variante_anwenden(probe, {"name": "E",
+                                               "rueckschau_qelle": "entwurf"})
+        if "rueckschau_qelle" in c4:
+            fehler.append("unbekannter Variantenschluessel wird uebernommen")
+        if G.variante_maengel({"name": "E", "rueckschau_qelle": "x"}) != \
+                ["rueckschau_qelle"]:
+            fehler.append("Tippfehler im Variantenschluessel wird nicht "
+                          "gemeldet")
+        if G.variante_maengel({"name": "B", "chunk_words": 1600}):
+            fehler.append("gueltige Variante wird beanstandet")
 
         # Ein Buch darf ein anderes Modell waehlen, ohne dass der
         # Technik-Abgleich es beim naechsten Lauf still zuruecksetzt.
@@ -434,6 +470,220 @@ def selbsttest(cfg, b):
                         "Testlauf getrennt ausgewiesen")
     except Exception as e:
         b.add("FEHLER", "Kostenbuchung nicht pruefbar", repr(e))
+
+    # --- Fugenurteil: die Zahl hinter 'kette_max' ----------------------
+    # Im Stapelbetrieb (Paket G) laeuft die Kette nur so lange, wie ein
+    # Chunk auf den vorigen warten kann. Kuerzere Ketten heissen mehr
+    # Fugen — und ob das schadet, gehoert gemessen statt geschaetzt.
+    try:
+        import tempfile
+        import bewertung as BW
+        fehler = []
+        if "bruch" not in BW.FUGE_SYSTEM:
+            fehler.append("Fugenprompt verlangt kein Urteil 'bruch'")
+        for wort in ("Tempus", "Anrede", "Wiederaufnahme"):
+            if wort not in BW.FUGE_SYSTEM:
+                fehler.append(f"Fugenprompt nennt '{wort}' nicht")
+        # Er darf NICHT nach der Qualitaet im Uebrigen fragen — sonst
+        # misst er dasselbe wie das Blindurteil und nichts ueber die Naht.
+        if "AUSSCHLIESSLICH den Uebergang" not in BW.FUGE_SYSTEM:
+            fehler.append("Fugenprompt grenzt die Frage nicht ein")
+
+        # Ohne Testlauf darf nichts abstuerzen und kein Modell laufen.
+        gerufen = []
+        echt_chat, alt_cwd = G.chat, os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                G.chat = lambda *a, **k: gerufen.append(1) or "{}"
+                os.chdir(tmp)
+                if BW.fugenurteil(cfg, praefix="test/") != []:
+                    fehler.append("ohne Testlauf wird ein Urteil behauptet")
+            finally:
+                G.chat = echt_chat
+                os.chdir(alt_cwd)
+        if gerufen:
+            fehler.append("ohne Testlauf wird trotzdem ein Modell gerufen")
+
+        if fehler:
+            b.add("FEHLER", "Fugenurteil fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Fugenurteil fragt nur nach der Naht und laeuft "
+                        "ohne Testlauf nicht los")
+    except Exception as e:
+        b.add("FEHLER", "Fugenurteil nicht pruefbar", repr(e))
+
+    # --- Dritter Testauszug: die Fallenpassage (Paket D) ---------------
+    # Erzaehlung und Dialog messen, ob der Text als deutsche Prosa
+    # besteht. Ob die Warnungen aus dem Fallenblock ankommen, messen sie
+    # nicht — in einem ruhigen Erzaehlabschnitt kommen die Fallen gar
+    # nicht vor. Der dritte Auszug sucht die dichteste Stelle.
+    try:
+        import uebersetzung as UE
+        import bewertung as BW
+        fehler = []
+
+        ruhig = ("De zon ging onder achter de heuvel en het werd stil. "
+                 "Wij keken naar de rivier en zeiden niets meer. ")
+        fallen = ("Hij zou het meisje bellen maar het was al klaar. "
+                  "Zij liep naar de winkel en kocht een tafeltje. ")
+        if UE.fallendichte(fallen) <= UE.fallendichte(ruhig):
+            fehler.append(f"Fallendichte unterscheidet nicht: "
+                          f"{UE.fallendichte(fallen):.0f} gegen "
+                          f"{UE.fallendichte(ruhig):.0f}")
+
+        # Absaetze muessen unterscheidbar sein: Der Ueberschneidungstest
+        # vergleicht sie als Menge, und identische Zeichenketten waeren
+        # immer eine Ueberschneidung.
+        # Absaetze muessen unterscheidbar sein: Der Ueberschneidungstest
+        # vergleicht sie als Menge. Und die Fallenpassage liegt bewusst
+        # NICHT in der Mitte — dort sucht der Erzaehlauszug, und die
+        # beiden duerfen sich hier nicht zufaellig treffen.
+        paras = ([f"{ruhig * 6} Nummer {k}." for k in range(40)]
+                 + [f"{fallen * 6} Nummer {k}." for k in range(40, 52)])
+        t1, t2, t3, kz = UE.testauszuege(paras, 300, 300, 300)
+        if not t3:
+            fehler.append("dritter Auszug bleibt leer")
+        elif UE.fallendichte("\n\n".join(t3)) <= UE.fallendichte(
+                "\n\n".join(t1)):
+            fehler.append("dritter Auszug ist nicht der fallenreichste")
+        # Er darf sich mit den anderen beiden nicht ueberschneiden — sonst
+        # urteilt der Judge zweimal ueber denselben Text.
+        for a, b_ in (("Erzaehlung", t1), ("Dialog", t2)):
+            if set(t3) & set(b_):
+                fehler.append(f"dritter Auszug ueberschneidet {a}")
+        # 0 laesst ihn weg, und die Kennzahlen bleiben lesbar.
+        _, _, leer, kz2 = UE.testauszuege(paras, 300, 300, 0)
+        if leer:
+            fehler.append("test_words_fallen=0 liefert trotzdem einen Auszug")
+        if "dialogdichte" not in kz2 or "fallendichte" not in kz:
+            fehler.append(f"Kennzahlen unvollstaendig: {kz}")
+
+        # teile.json trennt die Auszuege im Ergebnis. Ohne sie schnitt die
+        # alte Fassung bei der Haelfte der Absaetze und verglich damit
+        # Erzaehlung gegen Dialog.
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "x.txt")
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("\n\n".join(f"Absatz {k}" for k in range(10)))
+            a, b_, c = BW.teile_trennen(p, {"erzaehlung": 4, "dialog": 3,
+                                            "fallen": 3})
+            if (len(G.absaetze(a)), len(G.absaetze(b_)),
+                    len(G.absaetze(c))) != (4, 3, 3):
+                fehler.append(f"teile_trennen schneidet falsch: "
+                              f"{a!r} | {b_!r} | {c!r}")
+            if "Absatz 0" not in a or "Absatz 4" not in b_ \
+                    or "Absatz 7" not in c:
+                fehler.append("teile_trennen ordnet die Absaetze falsch zu")
+
+        if fehler:
+            b.add("FEHLER", "Dritter Testauszug fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Fallenpassage wird gefunden, ueberschneidet die "
+                        "anderen Auszuege nicht, teile.json trennt exakt")
+    except Exception as e:
+        b.add("FEHLER", "Dritter Testauszug nicht pruefbar", repr(e))
+
+    # --- Vorwegschau und Figurennachhall (Paket C) ---------------------
+    # Beide geben dem Chunk Kontext, den er von sich aus nicht hat. Beide
+    # koennen dabei Schaden anrichten: eine Vorwegschau, die mituebersetzt
+    # wird, und ein Nachhall, der ueber eine Ebenenfuge laeuft und Figuren
+    # der einen Erzaehlebene in die andere traegt.
+    try:
+        import uebersetzung as UE
+        fehler = []
+
+        # Vorwegschau endet an der Satzgrenze — ein Fragment liest sich
+        # wie ein abgebrochener Auftrag.
+        t = "Erster Satz. Zweiter Satz! Noch einer laeuft weiter und weiter"
+        if G.anfangswoerter(t, 4) != "Erster Satz. Zweiter Satz!":
+            fehler.append(f"Schnitt nicht an der Satzgrenze: "
+                          f"{G.anfangswoerter(t, 4)!r}")
+        if G.anfangswoerter(t, 500) != t:
+            fehler.append("kurzer Text wird beschnitten")
+        if G.anfangswoerter(t, 0) != "":
+            fehler.append("0 schaltet die Vorwegschau nicht ab")
+        # Ein einziger langer Satz: lieber Fragment als gar nichts.
+        if not G.anfangswoerter("Ein Satz ganz ohne jede Grenze hier", 4):
+            fehler.append("Satz ohne Grenze liefert keinen Ausblick")
+        # Sie darf nicht mit der Rueckschau verwechselt werden.
+        if G.anfangswoerter(t, 4) == G.schlusswoerter(t, 4):
+            fehler.append("Vorwegschau und Rueckschau liefern dasselbe")
+
+        # Der Personenblock: wer nachhallt, muss als solcher erkennbar
+        # sein — sonst sucht das Modell den Namen im Abschnitt.
+        personen = {"Bennett": "er/ihn", "Babette": "sie/sie"}
+        da = UE.block_personen("Bennett ging fort.", personen, {})
+        if "Babette" in da:
+            fehler.append("nicht genannte Figur steht ohne Nachhall im Block")
+        hall = UE.block_personen("Hij ging fort.", personen, {},
+                                 nachhall={"Bennett"})
+        if "Bennett" not in hall:
+            fehler.append("Nachhall bringt die Figur nicht in den Block")
+        if "zuletzt erwähnt" not in hall:
+            fehler.append("nachhallende Figur ist nicht als solche markiert")
+        if "zuletzt erwähnt" in da:
+            fehler.append("anwesende Figur wird als nachhallend markiert")
+        if UE.figuren_im_chunk("Bennett und Babette.", personen) != \
+                {"Bennett", "Babette"}:
+            fehler.append("Figurenerkennung im Chunk falsch")
+
+        # Die Fugenregel ist der Kern: Die Vorwegschau darf die
+        # Ebenenfuge NICHT unterlaufen. Sonst sieht der letzte Chunk der
+        # einen Ebene den Anfang der naechsten — mit anderem Tempus und
+        # anderer Person — und genau davor schuetzt die Fuge.
+        ch = [("Eerste stuk. Nog een zin.", False),
+              ("Tweede stuk. Nog een zin.", False),
+              ("Derde stuk. Nog een zin.", False),
+              ("Een citaat blijft staan.", True),
+              ("Vijfde stuk. Nog een zin.", False)]
+        fugen = {2}                       # vor Chunk 2 liegt eine Fuge
+        if not UE.vorwegschau(ch, 0, fugen, 50).startswith("Tweede"):
+            fehler.append("Vorwegschau innerhalb der Ebene fehlt")
+        if UE.vorwegschau(ch, 1, fugen, 50) != "":
+            fehler.append("Vorwegschau laeuft ueber die Ebenenfuge hinweg")
+        if UE.vorwegschau(ch, 2, fugen, 50) != "":
+            fehler.append("geschuetztes Zitat wird als Ausblick gegeben")
+        if UE.vorwegschau(ch, 4, fugen, 50) != "":
+            fehler.append("letzter Chunk liefert einen Ausblick")
+        if UE.vorwegschau(ch, 0, fugen, 0) != "":
+            fehler.append("abgeschaltete Vorwegschau liefert trotzdem Text")
+
+        # Der Prompt muss die Vorwegschau ankuendigen, sonst uebersetzt
+        # das Modell sie mit — und die Laengenpruefung verwirft den Chunk.
+        p_ueb, _ = UE.prompts(cfg)
+        if "SO GEHT ES DANACH WEITER" not in p_ueb:
+            fehler.append("System-Prompt kennt den Vorwegschau-Block nicht")
+        if "NICHT übersetzen" not in p_ueb and "niemals erneut" not in p_ueb:
+            fehler.append("System-Prompt verbietet das Mituebersetzen nicht")
+
+        # Der Revisionsprompt muss die Rueckschau kennen. Ohne den Block
+        # glaettet Pass 2 genau die Anschluesse weg, die Pass 1 hergestellt
+        # hat — und ohne die Absatzregel bricht er die Absatztreue, an der
+        # Leseausgabe, Zitateinsatz und Tempusmessung haengen.
+        _, p_rev = UE.prompts(cfg)
+        if "ENDE DES VORIGEN ABSCHNITTS" not in p_rev:
+            fehler.append("Revisionsprompt kennt die Rueckschau nicht")
+        if "Absätze" not in p_rev and "Absätzen" not in p_rev:
+            fehler.append("Revisionsprompt nennt die Absatzregel nicht")
+
+        # Die drei neuen Schalter muessen verstellbar sein — sonst haelt
+        # eine eingespielte projekt.json sie nicht.
+        for k in ("context_words_voraus", "rueckschau_quelle",
+                  "figuren_nachhall"):
+            if k not in G.AENDERBAR:
+                fehler.append(f"{k} ist nicht verstellbar")
+            if k not in G.STANDARD:
+                fehler.append(f"{k} fehlt in STANDARD")
+
+        if fehler:
+            b.add("FEHLER", "Vorwegschau oder Nachhall fehlerhaft",
+                  "; ".join(fehler))
+        else:
+            b.add("OK", "Vorwegschau schneidet an Satzgrenzen, Nachhall "
+                        "markiert abwesende Figuren")
+    except Exception as e:
+        b.add("FEHLER", "Vorwegschau nicht pruefbar", repr(e))
 
     # --- Erzaehlebenen: die zweite Quelle der Fugen --------------------
     # Der 'rahmen_marker' setzt voraus, dass der Autor die Wechsel
@@ -1913,28 +2163,34 @@ def selbsttest_backends(b):
     # gar nicht mehr: derselbe Zugriff waere jetzt ein KeyError mitten im
     # Lauf. Payloadtests finden so etwas nicht, ein Blick in die Quelle
     # schon.
+    # Die erste Fassung sah nur nach cfg['modell'] und nur in
+    # print-Zeilen. Damit ist cfg['temperature_uebersetzung'] in
+    # bewertung.py durchgerutscht und haette den Export mit einem
+    # KeyError beendet. Jetzt: alle entfallenen Schluessel, jede Zeile.
     try:
         schuldig = []
-        for datei in ("uebersetzung.py", "lektorat.py", "konkordanz.py",
-                      "bewertung.py", "qa.py"):
-            pfad = os.path.join(CODE, datei)
-            if not os.path.exists(pfad):
-                continue
-            for nr, zeile in enumerate(open(pfad, encoding="utf-8"), 1):
-                if "print(" not in zeile:
-                    continue
-                if "cfg['modell']" in zeile or 'cfg["modell"]' in zeile:
-                    schuldig.append(f"{datei}:{nr}")
+        entfallen = sorted(set(ENTFALLEN)
+                           | {"temperature_uebersetzung",
+                              "temperature_revision", "temperature_stil",
+                              "temperature_korrektorat"})
+        for datei in sorted(_glob_py()):
+            name = os.path.basename(datei)
+            if name in ("preflight.py", "gemeinsam.py"):
+                continue          # hier stehen die Listen selbst
+            for nr, zeile in enumerate(open(datei, encoding="utf-8"), 1):
+                for k in entfallen:
+                    if f'cfg["{k}"]' in zeile or f"cfg['{k}']" in zeile:
+                        schuldig.append(f"{name}:{nr} -> {k}")
         if schuldig:
-            b.add("FEHLER", "Zugriff auf den entfallenen Schluessel 'modell'",
-                  f"{', '.join(schuldig)}\n"
-                  f"           Den gibt es nicht mehr. "
-                  f"G.modell_fuer(cfg, rolle) benutzen.")
+            b.add("FEHLER", "Zugriff auf entfallene Konfigurationsschluessel",
+                  "\n           ".join(schuldig)
+                  + "\n           Die gibt es nicht mehr — der Zugriff ist "
+                    "ein KeyError mitten im Lauf.")
         else:
-            b.add("OK", "Kein Skript liest den entfallenen Schluessel "
-                        "cfg['modell']")
+            b.add("OK", f"Kein Skript liest einen der "
+                        f"{len(entfallen)} entfallenen Schluessel")
     except Exception as e:
-        b.add("WARN", "Anzeigepruefung nicht durchfuehrbar", repr(e))
+        b.add("FEHLER", "Entfallene Schluessel nicht pruefbar", repr(e))
 
     # --- Retry und Backoff ----------------------------------------------
     try:
@@ -2171,7 +2427,11 @@ def pruefe_kosten(cfg, b, text):
         if rolle in CHUNKROLLEN:
             s = system_token.get(rolle, 0)
             # Der System-Prompt wird einmal geschrieben und n−1 mal gelesen.
-            ein = (chunk_token + KOPF_TOKEN + 2 * cfg["context_words"] * faktor) * n
+            # Je Chunk: Quelltext + Referenzbloecke + Rueckschau (Quelle
+            # und eigene Fassung) + Vorwegschau.
+            kontext = (2 * cfg["context_words"]
+                       + int(cfg.get("context_words_voraus", 0) or 0)) * faktor
+            ein = (chunk_token + KOPF_TOKEN + kontext) * n
             schreiben, lesen = s, s * (n - 1)
             aus = chunk_token * n * DENKFAKTOR
             zusatz = f"{n} Chunks, System-Prompt {s:,.0f} Token"
@@ -2523,6 +2783,24 @@ def pruefe_config(cfg, b):
         b.add("FEHLER", f"Unbekannte Lektoratsstufe: {', '.join(unbekannt)}")
     else:
         b.add("OK", "Lektoratsfolge: " + " -> ".join(cfg["lektorat_passes"]))
+    # Varianten: Ein Schluessel, den 'variante_anwenden' nicht kennt, wird
+    # ignoriert. Der Vergleich laeuft dann durch und misst etwas anderes,
+    # als er behauptet — deshalb hier, vor dem ersten Modellaufruf.
+    for v in G.varianten(cfg):
+        maengel = G.variante_maengel(v)
+        if maengel:
+            b.add("FEHLER", f"Variante {v.get('name', '?')}: unbekannte "
+                            f"Schluessel {', '.join(maengel)}",
+                  "Sie bewirken nichts — der Vergleich waere ein anderer "
+                  "als der beschriebene.\n           Erlaubt sind "
+                  "chunk_words, context_words, context_words_voraus, "
+                  "rueckschau_quelle,\n           figuren_nachhall, "
+                  "revision_pass, lektorat_passes, tempus, diminutive "
+                  "sowie modell_<rolle> und effort_<rolle>.")
+        else:
+            _, cw, besch = G.variante_anwenden(cfg, v)
+            b.add("OK", f"Variante {v.get('name', '?')}: {besch}")
+
     if cfg["ratio_kalibriert"]:
         b.add("OK", f"Prueffgrenzen kalibriert: "
                     f"{cfg['ratio_min']:.2f}–{cfg['ratio_max']:.2f}")

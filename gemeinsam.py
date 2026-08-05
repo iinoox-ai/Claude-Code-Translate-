@@ -118,6 +118,19 @@ STANDARD = {
          "modell_uebersetzung": "claude-fable-5"},
     ],
     "context_words":             250,
+    # Vorwegschau: die ersten Woerter des NAECHSTEN Chunks als Kontext.
+    # Die Rueckschau allein laesst den Uebersetzer am Chunkende blind
+    # werden — ein angefangener Satzbogen, eine Anrede, die erst danach
+    # aufgeloest wird. 0 schaltet sie ab.
+    "context_words_voraus":      150,
+    # Woraus die Rueckschau gebildet wird: 'revision' (die Endfassung des
+    # vorigen Chunks) oder 'entwurf' (Pass 1). Siehe ENTSCHEIDUNGEN.md.
+    "rueckschau_quelle":         "revision",
+    # Wie viele Chunks eine einmal genannte Figur im Personenblock
+    # nachhallt. 0 = nur wer im Chunk vorkommt. Zurueckgesetzt wird der
+    # Nachhall NUR an Ebenenfugen — innerhalb einer Erzaehlebene bleibt
+    # die Figur dieselbe.
+    "figuren_nachhall":          3,
     "revision_pass":             True,
 
     "lektorat_passes":           ["det", "stil", "korrektorat", "det"],
@@ -141,8 +154,14 @@ STANDARD = {
     "export_glossar":            True,
     "export_bewertung":          True,
 
-    "test_words_erzaehlung":     1500,
-    "test_words_dialog":         1500,
+    # Drei Testauszuege. Erzaehlung und Dialog messen, ob der Text als
+    # deutsche Prosa besteht; die Fallenpassage misst, ob die Warnungen
+    # aus dem Fallenblock ankommen — die Schwaeche dieser Sprachrichtung
+    # faellt in einem ruhigen Erzaehlabschnitt gar nicht auf.
+    # 0 fuer 'test_words_fallen' laesst den dritten Auszug weg.
+    "test_words_erzaehlung":     2500,
+    "test_words_dialog":         2500,
+    "test_words_fallen":         2000,
 
     "ratio_min":                 0.90,
     "ratio_max":                 1.20,
@@ -165,10 +184,11 @@ GESCHUETZT = {"ratio_min", "ratio_max", "ratio_kalibriert", "sprachpaar"}
 # Nur diese Schluessel darf ein externes Rueckspiel aendern (V4).
 AENDERBAR = {
     "chunk_words", "chunk_words_variante", "context_words",
+    "context_words_voraus", "rueckschau_quelle", "figuren_nachhall",
     "revision_pass", "lektorat_passes",
     "diminutive", "tempus", "anrede_vorgabe",
     "quotes", "eszett", "varietaet", "dash",
-    "test_words_erzaehlung", "test_words_dialog",
+    "test_words_erzaehlung", "test_words_dialog", "test_words_fallen",
     "lektorat_ratio_min", "lektorat_ratio_max",
     "export_glossar", "export_bewertung", "glossar_quelle", "sheets_id",
     "rahmen_marker", "varianten", "technik_ausnahmen",
@@ -1459,18 +1479,50 @@ def varianten(cfg):
     return sauber
 
 
+# Was eine Variante ausser 'chunk_words' verstellen darf. Bewusst eine
+# Liste und kein "alles ausser 'name'": Ein Tippfehler im Variantennamen
+# eines Schluessels wuerde sonst still eine Einstellung erfinden, und der
+# Vergleich maesse etwas anderes als er behauptet.
+VARIANTENSCHALTER = ({"chunk_words", "context_words", "context_words_voraus",
+                      "rueckschau_quelle", "figuren_nachhall",
+                      "revision_pass", "lektorat_passes", "tempus",
+                      "diminutive"}
+                     | {f"modell_{r}" for r in ROLLEN}
+                     | {f"effort_{r}" for r in ROLLEN})
+
+
+def variante_maengel(v):
+    """Schluessel einer Variante, die nichts bewirken wuerden."""
+    return [k for k in v if k != "name" and k not in VARIANTENSCHALTER]
+
+
 def variante_anwenden(cfg, v):
     """Uebernimmt die Abweichungen der Variante in eine Kopie der Config.
+
+    Bis Paket D trug eine Variante nur 'chunk_words' und Modellnamen.
+    Damit liessen sich die Schalter aus Paket C — Vorwegschau,
+    Rueckschauquelle, Figurennachhall — gar nicht vergleichen: Ein
+    Schalter, den man nicht messen kann, ist eine Meinung.
 
     Gibt (config, chunk_words, beschreibung) zurueck."""
     cfg = dict(cfg)
     chunk_words = int(v.get("chunk_words", cfg["chunk_words"]))
     teile = [f"{chunk_words} Woerter/Chunk"]
+
+    # 'modell_uebersetzung' zieht 'modell_revision' mit, wenn dieses nicht
+    # eigens genannt ist: Ein Vergleich, der Pass 1 umstellt und Pass 2
+    # beim alten Modell laesst, misst eine Mischung.
     modell = str(v.get("modell_uebersetzung", "")).strip()
+    if modell and "modell_revision" not in v:
+        cfg["modell_revision"] = modell
+
+    for k, wert in v.items():
+        if k == "name" or k == "chunk_words" or k not in VARIANTENSCHALTER:
+            continue
+        cfg[k] = wert
+        if k != "modell_uebersetzung":
+            teile.append(f"{k}={wert}")
     if modell:
-        cfg["modell_uebersetzung"] = modell
-        cfg["modell_revision"] = str(
-            v.get("modell_revision", modell)).strip()
         teile.append(modell)
     return cfg, chunk_words, ", ".join(teile)
 
@@ -1733,6 +1785,27 @@ def schlusswoerter(text, n):
     s = " ".join(w[-n:])
     m = re.search(r'(?<=[.!?\u2026])' + SCHLIESSER + r'\s+', s)
     return (s[m.end():] if m else s).strip()
+
+
+def anfangswoerter(text, n):
+    """Die ersten n Woerter, an einer Satzgrenze abgeschnitten.
+
+    Gegenstueck zu 'schlusswoerter'. Der Schnitt an der Satzgrenze ist
+    hier wichtiger als dort: Ein mitten im Satz endender Ausblick liest
+    sich wie ein abgebrochener Auftrag, und das Modell neigt dann dazu,
+    ihn zu Ende zu uebersetzen — genau das, was der Ausblick nicht will.
+
+    Bleibt nach dem Schnitt nichts uebrig (ein einziger langer Satz),
+    wird der ungeschnittene Anfang genommen: lieber ein Satzfragment als
+    gar kein Ausblick."""
+    if n <= 0:
+        return ""
+    w = text.split()
+    if len(w) <= n:
+        return text.strip()
+    s = " ".join(w[:n])
+    treffer = list(re.finditer(r'[.!?…]' + SCHLIESSER + r'(?=\s|$)', s))
+    return (s[:treffer[-1].end()] if treffer else s).strip()
 
 
 def verhaeltnis(a, b):
