@@ -226,6 +226,99 @@ def zieldatei(pfad):
     return pfad, False
 
 
+# ==================================================================
+# Erzaehlebenen — die neunte Lieferung, aber nicht wie die anderen
+# ==================================================================
+# Sie liest nicht die Befunde, sondern den Quelltext, und sie liefert
+# eine LISTE statt einer Abbildung. Deshalb steht sie neben LIEFERUNGEN
+# und nicht darin: Ein Sonderfall, der sich als Normalfall tarnt, ist
+# schwerer zu lesen als einer, der sich zu erkennen gibt.
+EBENEN_ANFANG_WOERTER = 12
+EBENEN_SYSTEM = (
+    "Du bestimmst die Erzaehlebenen eines literarischen Textes.\n\n"
+    "Du bekommst die ersten Woerter JEDES Absatzes, durchnummeriert. "
+    "Finde die Stellen, an denen der Text die Erzaehlebene wechselt — "
+    "Rahmenhandlung, Rueckblende, Erinnerungseinschub, Traum. Zeichen "
+    "dafuer sind Tempuswechsel, Zeitangaben, Ortswechsel, ein Schnitt "
+    "mitten in der Handlung.\n\n"
+    "Warum das gebraucht wird: Der Uebersetzungslauf setzt an jedem "
+    "Wechsel die Rueckschau zurueck, damit Tempus und Person der einen "
+    "Ebene nicht in die andere bluten. Eine Fuge am falschen Absatz ist "
+    "schaedlicher als eine fehlende.\n\n"
+    "Melde NUR Wechsel, die du wirklich siehst. Ein Buch mit einer "
+    "einzigen Ebene hat genau einen Eintrag — das ist ein gutes Ergebnis, "
+    "keine leere Antwort.\n\n"
+    "Antworte als JSON-Liste. 'beginn' sind die ersten Woerter des "
+    "Absatzes GENAU SO, wie sie oben stehen — daran wird die Stelle im "
+    "Text wiedergefunden. 'ebene' ist einer der vorgegebenen Namen.\n"
+    '[ { "beginn": "Ik zet mijn koffer neer", "ebene": "Rahmen 1919" },\n'
+    '  { "beginn": "De modder kwam tot aan onze knieen", '
+    '"ebene": "Kriegsrückblende" } ]')
+
+EBENEN_SCHEMA = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {"beginn": {"type": "string"},
+                       "ebene": {"type": "string"}},
+        "required": ["beginn", "ebene"],
+        "additionalProperties": False,
+    },
+}
+
+
+def absatzanfaenge(paras, n=EBENEN_ANFANG_WOERTER):
+    """Die ersten n Woerter je Absatz, durchnummeriert.
+
+    Nicht der ganze Text: Ein Ebenenwechsel ist am Absatzanfang sichtbar
+    (neue Szene, neues Tempus, neue Zeitangabe), und die Anfaenge sind
+    ein Zwanzigstel des Buches. Was der Aufruf dadurch nicht sieht, ist
+    ein Wechsel mitten im Absatz — den gaebe es aber auch als Chunkgrenze
+    nicht, weil Absatzgrenzen Vorrang haben."""
+    return "\n".join(f"{i+1}. {' '.join(p.split()[:n])}"
+                     for i, p in enumerate(paras))
+
+
+def ebenen_liefern(cfg, paras, perspektive):
+    """Ein Aufruf, eine Liste, eine Datei. Gibt (Zieldatei, Anzahl) zurueck."""
+    namen = list(perspektive) if isinstance(perspektive, dict) else []
+    if not namen:
+        print("  stilprofil.json nennt keine 'perspektive' — ohne "
+              "Ebenennamen waere jede Benennung geraten. Uebersprungen.")
+        return None, 0
+    system = (EBENEN_SYSTEM + "\n\nErlaubte Ebenennamen (aus "
+              "stilprofil.json, genau so schreiben):\n"
+              + "\n".join(f"  {n}: {perspektive[n]}" for n in namen))
+    antwort = G.chat(cfg, system, absatzanfaenge(paras), rolle="ebenen",
+                     roh=True, schema=EBENEN_SCHEMA)
+    daten = G.json_aus_antwort(antwort)
+    if not isinstance(daten, list):
+        print(f"  FEHLER: keine Liste in der Antwort — {G.F['ebenen']} "
+              f"nicht geschrieben")
+        return None, 0
+
+    maengel = G.ebenen_maengel(daten, perspektive)
+    if maengel:
+        print("  FEHLER: " + "; ".join(maengel[:4]))
+        print(f"  {G.F['ebenen']} nicht geschrieben")
+        return None, 0
+    _, unbekannt = G.ebenen_anfaenge(paras, daten)
+    if unbekannt:
+        # Ein 'beginn', der im Text nicht vorkommt, ist kein Schoenheits-
+        # fehler: Die Fuge saesse spaeter am falschen Absatz oder gar
+        # nicht. Lieber gar nicht schreiben.
+        print(f"  FEHLER: {len(unbekannt)} Eintrag/Eintraege kommen so "
+              f"nicht im Text vor: {', '.join(a[:40] for a in unbekannt[:3])}")
+        print(f"  {G.F['ebenen']} nicht geschrieben")
+        return None, 0
+
+    ziel, ausweich = zieldatei(G.F["ebenen"])
+    schreiben(ziel, json.dumps(daten, ensure_ascii=False, indent=2) + "\n")
+    print(f"  {len(daten)} Ebenenwechsel -> {ziel}"
+          + ("   (vorhandene Datei unangetastet)" if ausweich else ""))
+    return ziel, len(daten)
+
+
 def anweisungen_gefuellt():
     return [n for n in ("Übersetzung", "Stillektorat", "Korrektorat")
             if G.lade_anweisungen(n)]
@@ -259,11 +352,21 @@ def main():
 
     offen = [l for l in LIEFERUNGEN if args.nur in (None, l[0])]
     mit_anweisungen = args.nur in (None, "anweisungen")
+    mit_ebenen = args.nur in (None, "ebenen")
     anzahl = len(offen) + (1 if mit_anweisungen else 0)
 
     print(f"\nBefunde: {woerter} Woerter, geschaetzt "
           f"{woerter*faktor:,.0f} Token je Aufruf")
     print(f"Aufrufe: {anzahl} ({modell})")
+    if mit_ebenen and os.path.exists(G.F["quelle"]):
+        n_par = len(G.absaetze(open(G.F["quelle"], encoding="utf-8").read()))
+        w_eb = n_par * EBENEN_ANFANG_WOERTER
+        m_eb = G.modell_fuer(cfg, "ebenen")
+        t_eb = G.tarif(m_eb)
+        d = G.kosten_dollar({"ein": w_eb * faktor, "aus": 2000}, t_eb)
+        print(f"         + 1 Aufruf ebenen ({m_eb}): {n_par} Absatzanfaenge, "
+              f"rund {w_eb:,} Woerter"
+              + (f", {d:.2f} $" if d is not None else ""))
     if t:
         # Ab dem zweiten Aufruf greift der Cache auf dem System-Prompt.
         eins = woerter * faktor * t["ein"] / 1e6
@@ -300,6 +403,21 @@ def main():
         print(f"  {len(daten)} Eintraege -> {ziel}"
               + ("   (vorhandene Datei unangetastet)" if ausweich else ""))
         (vorschlaege if ausweich else erzeugt).append(ziel)
+
+    if mit_ebenen:
+        # Eigener Aufruf mit eigenem System-Prompt: Diese Lieferung liest
+        # den Quelltext, nicht die Befunde. Sie traefe den Cache also
+        # ohnehin nicht — und stuende sie in LIEFERUNGEN, zerstoerte ihr
+        # abweichender System-Prompt das Praefix der anderen acht.
+        print("\nebenen …", flush=True)
+        if not os.path.exists(G.F["quelle"]):
+            print(f"  {G.F['quelle']} fehlt — uebersprungen")
+        else:
+            paras = G.absaetze(open(G.F["quelle"], encoding="utf-8").read())
+            p = G.lade_json(G.F["stilprofil"], still=True).get("perspektive")
+            ziel, _ = ebenen_liefern(cfg, paras, p)
+            if ziel:
+                (vorschlaege if ziel.endswith(".neu") else erzeugt).append(ziel)
 
     if mit_anweisungen:
         print("\nanweisungen …", flush=True)

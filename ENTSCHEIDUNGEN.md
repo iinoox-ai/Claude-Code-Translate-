@@ -175,6 +175,26 @@ Die Reihenfolge in `perspektive` ist die des ersten Auftretens im Buch, nicht
 die alphabetische. Die erste Fassung sortierte und wies damit dem Textanfang
 die alphabetisch erste Ebene zu — im Testfall „Krieg" statt „Rahmen 1919".
 
+**Nachtrag August 2026 — die Voraussetzung trug nicht.** Der ganze Mechanismus
+setzt voraus, dass der Autor die Ebenenwechsel ausgezeichnet hat. Beim Buch
+1919 tat er das nicht:
+
+| | |
+|---|---|
+| Erzählebenen in `stilprofil.json` | 5, mit drei verschiedenen Tempora |
+| Gruppen, die der Marker `#` fand | **1** |
+| Chunks | 147 |
+
+Die deutsche Rückschau lief also über **jeden** Ebenenwechsel hinweg — genau
+der Fehler, gegen den die Regel geschrieben ist, ausgelöst durch ihre eigene
+Voraussetzung. Und er ist nirgends aufgefallen: Die Perfektquote in `qa.py` ist
+buchweit, also ein Mittelwert über Ebenen, die sich unterscheiden **sollen**.
+Ein Präsens-Rahmen mit Präteritum-Einschlag und ein Präteritum-Rückblick mit
+Präsens-Einschlag mitteln sich zu einem unauffälligen Wert.
+
+Die Antwort ist `ebenen.json` (siehe unten). Der Marker bleibt als Rückfall —
+ein Text, der seine Wechsel auszeichnet, braucht keinen Modellaufruf.
+
 ## Der Variantenvergleich bleibt dauerhaft, die Modellvariante nicht
 
 **Entschieden:** `varianten` steht in der Vorlage auf einer einzigen
@@ -1045,6 +1065,69 @@ modelle` zeigt dasselbe im Terminal.
 Der Selbsttest hält drei Dinge fest: `Modelle` steht nicht in `TABS` (sonst
 läse `sync` ihn zurück), nicht in `OPTIONAL`, und ohne `sheets_id` schreibt der
 Schritt gar nichts — der Rückfallpfad bleibt unberührt.
+
+---
+
+## `ebenen.json`: die Erzählebenen aus dem Text lesen, nicht aus dem Marker
+
+**Entschieden (August 2026).** Eine neunte Vorbereitungslieferung findet die
+Ebenenwechsel im Quelltext und schreibt sie nach `ebenen.json`. Ist die Datei
+da, bestimmt sie die Chunkgruppen; sonst gilt weiter der `rahmen_marker`.
+
+Der Grund steht im Nachtrag zu „Rahmenwechsel als harte Chunkgrenze": Beim Buch
+1919 fand der Marker über 147 Chunks **eine** Gruppe, obwohl das Stilprofil fünf
+Ebenen mit drei Tempora beschreibt. Für das nächste Buch ist die Annahme, dass
+`input.txt` keine Marker trägt.
+
+### Warum Textanfänge und keine Absatznummern
+
+Ein Eintrag ist `{"beginn": …, "ebene": …}`; `beginn` sind die ersten Wörter des
+Absatzes **im Wortlaut der Quelle** — dieselbe Idee wie bei den Überschriften in
+`kapitel.json`. Absatznummern wären kürzer und wären beim ersten korrigierten
+Absatz **alle** falsch. Ein `beginn`, der im Text nicht vorkommt, wird gemeldet
+und die Datei gar nicht erst geschrieben: Die Fuge säße sonst am falschen
+Absatz, und das ist schädlicher als eine fehlende Fuge.
+
+### Warum ein eigener Aufruf mit eigenem Prompt
+
+Die anderen acht Lieferungen lesen das Analysepaket, das im System-Prompt steht
+und ab dem zweiten Aufruf zwischengespeichert ist. Diese liest den **Quelltext**
+— sie träfe den Cache ohnehin nicht, und stünde sie in `LIEFERUNGEN`, zerstörte
+ihr abweichender System-Prompt das Präfix der anderen acht.
+
+Gegeben werden nicht die 118.000 Wörter, sondern die **ersten zwölf Wörter jedes
+Absatzes**, durchnummeriert — ein Zwanzigstel des Buches, rund 4.800 Wörter bei
+1.176 Absätzen. Ein Ebenenwechsel ist am Absatzanfang sichtbar: neue Szene,
+neues Tempus, neue Zeitangabe. Was dadurch nicht gesehen wird, ist ein Wechsel
+mitten im Absatz — den gäbe es aber auch als Chunkgrenze nicht, weil
+Absatzgrenzen Vorrang haben.
+
+### Modellwahl: abweichend vom Plan
+
+Der Plan sah `gemini-3.6-flash` vor. Die Empfehlung steht auf
+`claude-opus-5`/`hoch`, weil das Ergebnis **jede** Chunkgrenze und jeden
+Rückschau-Reset des Buches bestimmt und der Unterschied unter einem halben
+Dollar für ein ganzes Buch liegt — 0,11 $ gegen 0,03 $. Das ist die falsche
+Stelle zum Sparen. Die Messung steht aus; `pipeline.py modelle` zeigt beides
+nebeneinander.
+
+### Was sich daran ändert, was nicht
+
+- **`qa.py` misst das Tempus je Ebene**, nicht mehr nur buchweit, und warnt,
+  wenn sich die Ebenen **nicht** unterscheiden. Genau dafür gibt es die Fugen.
+- **`preflight` meldet den Fall 1919**: mehrere Ebenen im Stilprofil, aber keine
+  `ebenen.json` und kein Marker im Text. Ohne diese Meldung fällt es nirgends
+  auf.
+- **Der Marker bleibt.** Zwei Quellen gleichzeitig wären eine zu viel; die Datei
+  hat Vorrang, der Marker ist der Rückfall.
+
+**Eine Falle, die beim Bauen zugeschnappt ist:** `ebenen.json` ist die einzige
+Referenzdatei mit einer **Liste** an der Wurzel (die Reihenfolge ist die
+Information). `gemeinsam.lade_json` liefert für alles, was kein JSON-Objekt ist,
+still ein leeres Objekt zurück — über `lade_json` gelesen wäre die Datei immer
+leer gewesen: kein Fehler, keine Meldung, nur keine Fugen. Deshalb
+`ebenen_lesen()`, und deshalb ein Selbsttestfall, der genau diesen Rückschritt
+fängt.
 
 ---
 

@@ -16,7 +16,7 @@ CODE = os.path.dirname(os.path.abspath(__file__))
 MITNEHMEN = [
     G.CONFIG, G.ANWEISUNGEN, G.MANIFEST,
     G.F["quelle"], G.F["glossar"], G.F["personen"], G.F["figuren"],
-    G.F["anrede"], G.F["leitmotive"], G.F["zitate"],
+    G.F["anrede"], G.F["leitmotive"], G.F["zitate"], G.F["ebenen"],
     G.F["entwurf"], G.F["uebersetzung"], G.F["normalisiert"], G.F["lektoriert"],
     "preflight_report.txt", "qa_uebersetzung.txt", "qa_lektorat.txt",
     "qa_konsistenz.txt", "leitmotiv_varianten.txt",

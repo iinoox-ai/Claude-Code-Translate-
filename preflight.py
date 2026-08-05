@@ -435,6 +435,116 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Kostenbuchung nicht pruefbar", repr(e))
 
+    # --- Erzaehlebenen: die zweite Quelle der Fugen --------------------
+    # Der 'rahmen_marker' setzt voraus, dass der Autor die Wechsel
+    # ausgezeichnet hat. Beim Buch 1919 tat er das nicht: fuenf Ebenen im
+    # Stilprofil, EINE Gruppe ueber 147 Chunks — die deutsche Rueckschau
+    # lief also ueber jeden Ebenenwechsel. ebenen.json ist die Antwort
+    # darauf, und ein Eintrag, der am falschen Absatz landet, ist
+    # schaedlicher als gar keiner.
+    try:
+        import tempfile
+        import vorbereitung as VB
+        fehler = []
+        paras = ["Ik zet mijn koffer neer en kijk omhoog.",
+                 "Het regent nog steeds boven de stad.",
+                 "De modder kwam tot aan onze knieen.",
+                 "Wij groeven de hele nacht door.",
+                 "Ik sta weer op het plein."]
+        ebenen = [{"beginn": "Ik zet mijn koffer neer", "ebene": "Rahmen"},
+                  {"beginn": "De modder kwam", "ebene": "Rückblende"},
+                  {"beginn": "Ik sta weer op het plein", "ebene": "Rahmen"}]
+
+        anfaenge, unbekannt = G.ebenen_anfaenge(paras, ebenen)
+        if [i for i, _ in anfaenge] != [0, 2, 4]:
+            fehler.append(f"Anfaenge falsch gefunden: {anfaenge}")
+        if unbekannt:
+            fehler.append(f"gueltige Eintraege gelten als unbekannt: "
+                          f"{unbekannt}")
+        gruppen, namen = G.ebenen_gruppen(paras, ebenen)
+        if [len(g) for g in gruppen] != [2, 2, 1]:
+            fehler.append(f"Gruppen falsch geschnitten: "
+                          f"{[len(g) for g in gruppen]}")
+        if namen != ["Rahmen", "Rückblende", "Rahmen"]:
+            fehler.append(f"Ebenennamen falsch: {namen}")
+
+        # Ein 'beginn', den es nicht gibt, MUSS auffallen — sonst saesse
+        # die Fuge am falschen Absatz.
+        _, fehlt = G.ebenen_anfaenge(paras, [{"beginn": "Er was eens",
+                                              "ebene": "Rahmen"}])
+        if not fehlt:
+            fehler.append("nicht auffindbarer 'beginn' wird verschwiegen")
+
+        # Beginnt der erste Eintrag spaeter, ist das Davor eine eigene,
+        # unbenannte Gruppe — und keine, die zur ersten Ebene gehoert.
+        g2, n2 = G.ebenen_gruppen(paras, [{"beginn": "De modder kwam",
+                                           "ebene": "Rückblende"}])
+        if [len(g) for g in g2] != [2, 3] or n2[0] != "":
+            fehler.append(f"Vorspann falsch behandelt: "
+                          f"{[len(g) for g in g2]}, {n2}")
+
+        # Namen muessen aus stilprofil.json kommen; zwei Schreibweisen
+        # derselben Ebene sehen wie zwei Ebenen aus.
+        p = {"Rahmen": "erste Person Präsens",
+             "Rückblende": "erste Person Präteritum"}
+        if G.ebenen_maengel(ebenen, p):
+            fehler.append(f"gueltige Datei beanstandet: "
+                          f"{G.ebenen_maengel(ebenen, p)}")
+        if not G.ebenen_maengel([{"beginn": "x", "ebene": "Traum"}], p):
+            fehler.append("unbekannte Ebene wird nicht beanstandet")
+        if not G.ebenen_maengel([{"ebene": "Rahmen"}], p):
+            fehler.append("fehlendes 'beginn' wird nicht beanstandet")
+
+        # Das Lieferschema muss durch den Anbieter kommen.
+        if G.schema_maengel(VB.EBENEN_SCHEMA):
+            fehler.append(f"Ebenenschema abgelehnt: "
+                          f"{G.schema_maengel(VB.EBENEN_SCHEMA)}")
+        # Die Absatzanfaenge muessen durchnummeriert und woertlich sein —
+        # das Modell echot sie zurueck, und daran wird wiedergefunden.
+        anf = VB.absatzanfaenge(paras)
+        if not anf.startswith("1. Ik zet mijn koffer neer"):
+            fehler.append(f"Absatzanfaenge falsch aufbereitet: {anf[:40]}")
+
+        # Ohne Datei gilt weiter der Marker — der Rueckfall bleibt.
+        leer, leer_n = G.ebenen_gruppen(paras, [])
+        if len(leer) != 1 or leer_n != [""]:
+            fehler.append("ohne Eintraege wird nicht eine Gruppe geliefert")
+
+        # Diese Datei hat als einzige Referenzdatei eine LISTE an der
+        # Wurzel. 'lade_json' liefert dafuer still ein leeres Objekt —
+        # ueber lade_json gelesen waere ebenen.json IMMER leer: kein
+        # Fehler, keine Meldung, nur keine Fugen. Genau das ist beim
+        # Bauen passiert.
+        with tempfile.TemporaryDirectory() as tmp:
+            pfad = os.path.join(tmp, "ebenen.json")
+            with open(pfad, "w", encoding="utf-8") as f:
+                json.dump(ebenen, f)
+            if len(G.ebenen_lesen(pfad)) != 3:
+                fehler.append("Liste an der Wurzel wird nicht gelesen")
+            # Ein Modell kann sie auch als Objekt liefern.
+            with open(pfad, "w", encoding="utf-8") as f:
+                json.dump({"ebenen": ebenen}, f)
+            if len(G.ebenen_lesen(pfad)) != 3:
+                fehler.append("Objektform wird nicht gelesen")
+            with open(pfad, "w", encoding="utf-8") as f:
+                f.write("kein json")
+            if G.ebenen_lesen(pfad) != []:
+                fehler.append("kaputte Datei liefert keine leere Liste")
+        # Gegenprobe, dass niemand doch wieder lade_json benutzt. Die
+        # Nadel wird zusammengesetzt, sonst findet der Test sich selbst.
+        nadel = "lade_json(G.F[" + '"ebenen"' + "]"
+        for datei in ("qa.py", "uebersetzung.py", "preflight.py"):
+            if nadel in quelltext(datei):
+                fehler.append(f"{datei} liest ebenen.json ueber lade_json")
+
+        if fehler:
+            b.add("FEHLER", "Erzaehlebenen fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Erzaehlebenen: Fugen sitzen am richtigen Absatz, "
+                        "unauffindbare Eintraege werden gemeldet")
+    except Exception as e:
+        b.add("FEHLER", "Erzaehlebenen nicht pruefbar", repr(e))
+
     # --- Strukturierte Ausgabe: nur wo sie ausdrueckbar ist ------------
     # Das unterstuetzte Schema-Subset verlangt 'additionalProperties':
     # false und kann damit keine offenen Abbildungen ausdruecken. Genau
@@ -2041,6 +2151,8 @@ def pruefe_kosten(cfg, b, text):
         # System-Prompt und sind ab dem zweiten Aufruf zwischengespeichert.
         "vorbereitung": (9, min(woerter, 20000), 400, 1500),
         "zitat":        (1, 0, min(woerter, 4000), 1500),
+        # Ein Aufruf ueber die Absatzanfaenge des ganzen Buches.
+        "ebenen":       (1, 0, len(G.absaetze(text)) * 12, 300),
         # Je 20 Aenderungen ein Aufruf; grob ein Buendel je zwei Chunks.
         "begruendung":  (max(1, n // 2), 0, 400, 300),
         # Vier Chunkpaare je Aufruf, Quelle und Ziel nebeneinander.
@@ -2063,6 +2175,14 @@ def pruefe_kosten(cfg, b, text):
             schreiben, lesen = s, s * (n - 1)
             aus = chunk_token * n * DENKFAKTOR
             zusatz = f"{n} Chunks, System-Prompt {s:,.0f} Token"
+        elif rolle not in einmalig:
+            # Ein modellrufender Schritt ohne Umfangsangabe waere hier
+            # kostenlos. Melden statt abbrechen — der Preflight soll den
+            # Rest trotzdem schaetzen.
+            b.add("WARN", f"Rolle '{rolle}' fehlt in der Kostenschaetzung",
+                  "Sie ruft ein Modell, taucht hier aber nicht auf. "
+                  "Umfang in preflight.pruefe_kosten ergaenzen.")
+            continue
         else:
             rufe, kopf, w_ein, w_aus = einmalig[rolle]
             ein = rufe * w_ein * faktor
@@ -2273,6 +2393,69 @@ SCHEMA = {
 }
 
 
+def pruefe_ebenen(cfg, b):
+    """ebenen.json gegen Text und Stilprofil — die Pruefung fuer PAUSE_review.
+
+    Sie beantwortet, was sich ohne Lesen entscheiden laesst: Kommt jeder
+    'beginn' im Text vor, sind die Namen die des Stilprofils, wie viele
+    Fugen entstehen. Ob die Fuge an der RICHTIGEN Stelle sitzt, steht im
+    Text und muss gelesen werden — dafuer ist die Pause da."""
+    pfad = G.F["ebenen"]
+    p = G.lade_json(G.F["stilprofil"], still=True).get("perspektive")
+    mehrere = isinstance(p, dict) and len(p) > 1
+
+    if not os.path.exists(pfad):
+        if mehrere:
+            # Genau der Fall des Buchs 1919: mehrere Ebenen im Profil,
+            # keine Fuge im Lauf. Ohne diese Meldung faellt es nirgends
+            # auf — die buchweite Perfektquote kann es nicht sehen.
+            b.add("WARN", f"{pfad} fehlt, aber das Stilprofil kennt "
+                          f"{len(p)} Erzaehlebenen",
+                  f"Ohne Fugen laeuft die deutsche Rueckschau ueber jeden "
+                  f"Ebenenwechsel hinweg.\n"
+                  f"           Erzeugen: python3 vorbereitung.py --nur "
+                  f"ebenen\n"
+                  f"           Traegt der Text den Marker "
+                  f"»{cfg['rahmen_marker']}«, genuegt der auch.")
+        else:
+            b.add("INFO", f"{pfad} fehlt",
+                  "Wird in der Vorbereitung erzeugt; ohne sie gilt der "
+                  "rahmen_marker.")
+        return
+
+    ebenen = G.ebenen_lesen(pfad)
+    maengel = G.ebenen_maengel(ebenen, p)
+    if maengel:
+        b.add("FEHLER", f"{pfad} fehlerhaft", "\n           ".join(maengel[:8]))
+        return
+    if not os.path.exists(G.F["quelle"]):
+        b.add("INFO", f"{pfad}: {len(ebenen)} Eintraege, "
+                      f"Text fehlt zum Abgleich")
+        return
+
+    paras = G.absaetze(open(G.F["quelle"], encoding="utf-8").read())
+    anfaenge, unbekannt = G.ebenen_anfaenge(paras, ebenen)
+    if unbekannt:
+        b.add("FEHLER", f"{pfad}: {len(unbekannt)} Eintrag/Eintraege "
+                        f"kommen so nicht im Text vor",
+              "\n           ".join(unbekannt[:6])
+              + "\n           'beginn' muss die ersten Woerter eines "
+                "Absatzes im Wortlaut der Quelle sein — sonst saesse die "
+                "Fuge am falschen Absatz.")
+        return
+    benannt = sorted({n for _, n in anfaenge})
+    ungenutzt = [n for n in (p or {}) if n not in benannt]
+    b.add("OK", f"{pfad}: {len(anfaenge)} Fugen, {len(benannt)} Ebenen",
+          ", ".join(benannt)
+          + (f"\n           Im Stilprofil, aber nicht im Text: "
+             f"{', '.join(ungenutzt)}" if ungenutzt else ""))
+    if anfaenge and anfaenge[0][0] > 0:
+        b.add("INFO", f"Vor der ersten Fuge stehen {anfaenge[0][0]} "
+                      f"Absaetze",
+              "Sie bilden eine eigene, unbenannte Gruppe. Fehlt dort ein "
+              "Eintrag?")
+
+
 def pruefe_begleitdateien(cfg, b, streng):
     """F4: auch im Schnellmodus, mit Schemapruefung. 'streng' verlangt ein
     nichtleeres Glossar."""
@@ -2306,6 +2489,8 @@ def pruefe_begleitdateien(cfg, b, streng):
                   f"Erwartet: {beschreibung}")
             continue
         b.add("OK", f"{pfad}: {len(nutz)} Eintraege, Schema in Ordnung")
+
+    pruefe_ebenen(cfg, b)
 
     if os.path.exists(G.ANWEISUNGEN):
         gefuellt = [a for a in ("Übersetzung", "Stillektorat", "Korrektorat")

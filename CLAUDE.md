@@ -117,7 +117,9 @@ Dateien in `teile/`.
 `vorbereitung.py` läuft als Pipelineschritt zwischen `konkordanz` und dem
 Testlauf und erzeugt aus dem Analysepaket Glossar, Personen, Figurenblatt,
 Anrede, Leitmotive, `stilprofil.json`, `kapitel.json` und einen Entwurf von
-`anweisungen.md`. Danach hält die Pipeline bei `PAUSE_review`.
+`anweisungen.md`. Dazu `ebenen.json` — die eine Lieferung, die den Quelltext
+liest statt der Befunde, und deshalb einen eigenen Aufruf mit eigenem Prompt
+bekommt (Rolle `ebenen`). Danach hält die Pipeline bei `PAUSE_review`.
 
 Drei Dinge, die nicht „aufgeräumt" werden dürfen:
 
@@ -176,13 +178,32 @@ brauchen keine Freigabe. Automatische Übernahme ist ausdrücklich verworfen —
 Grundsatz „lieber markierte Lücke als erfundener Wortlaut". Eingesetzte
 Zitate bleiben vom Lektorat ausgenommen.
 
-## Rahmenwechsel (`rahmen_marker`)
+## Erzählebenen: `ebenen.json` zuerst, `rahmen_marker` als Rückfall
 
-An jeder Marker-Zeile (Standard `#`): harte Chunkgrenze, Rückschau-Reset,
-Ebenen-Kennzeichnung im User-Prompt aus `stilprofil.json`. Wer Chunking
-anfasst, hält diese Regel und den zugehörigen Selbsttestfall am Leben.
-Grund: Tempus und Person der einen Erzählebene dürfen nicht in die andere
-bluten.
+An jeder Fuge: harte Chunkgrenze, Rückschau-Reset, Ebenen-Kennzeichnung im
+User-Prompt aus `stilprofil.json`. Grund: Tempus und Person der einen
+Erzählebene dürfen nicht in die andere bluten.
+
+**Woher die Fugen kommen, hat sich im August 2026 geändert.** Der Marker
+setzt voraus, dass der Autor die Wechsel auszeichnet. Beim Buch 1919 tat er
+das nicht: fünf Ebenen im Stilprofil, **eine** Gruppe über 147 Chunks — die
+Rückschau lief über jeden Wechsel hinweg, und die buchweite Perfektquote
+konnte das nicht sehen. Deshalb liest `uebersetzung.ebenengruppen` zuerst
+`ebenen.json`; der Marker bleibt der Rückfall. Zwei Quellen gleichzeitig
+wären eine zu viel.
+
+- `ebenen.json` ist eine **Liste** — die Reihenfolge ist die Information.
+  Sie wird über `G.ebenen_lesen()` gelesen, **nie** über `lade_json`: das
+  liefert für Nicht-Objekte still `{}`, und die Datei wäre immer leer.
+- `beginn` sind die ersten Wörter des Absatzes **im Wortlaut der Quelle**
+  (wie die Überschriften in `kapitel.json`). Ein `beginn`, der nicht
+  vorkommt, wird gemeldet und die Datei nicht geschrieben — die Fuge säße
+  sonst am falschen Absatz.
+- `qa.py` misst das Tempus **je Ebene** und warnt, wenn die Ebenen sich
+  nicht unterscheiden. `preflight` meldet den Fall 1919.
+
+Wer Chunking anfasst, hält diese Regel und die zugehörigen Selbsttestfälle
+am Leben.
 
 ## Annotation und Screening fassen den Text nicht an
 

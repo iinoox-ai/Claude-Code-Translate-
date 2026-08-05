@@ -75,6 +75,79 @@ def zaehl(text, pat):
 
 
 # ==================================================================
+def tempus_je_ebene(cfg, ziel, b):
+    """Perfektquote getrennt je Erzaehlebene.
+
+    Die buchweite Quote ist ein Mittelwert ueber Ebenen, die
+    verschiedene Tempora haben SOLLEN. Beim Buch 1919 beschreibt das
+    Stilprofil fuenf Ebenen — Rahmen im Praesens, Einschub im Perfekt,
+    drei Rueckblenden im Praeteritum. Eine Zahl darueber kann gar nicht
+    auffallen lassen, dass die Ebenen ineinander geblutet sind: Ein
+    Praesens-Rahmen mit Praeteritum-Einschlag und ein Praeteritum-
+    Rueckblick mit Praesens-Einschlag mitteln sich zu einem
+    unauffaelligen Wert.
+
+    Ohne ebenen.json passiert hier nichts — dann gibt es keine Ebenen zu
+    trennen, und eine erfundene Aufteilung waere schlimmer als keine."""
+    ebenen = G.ebenen_lesen()
+    quelle = G.F["quelle"]
+    if not ebenen or not os.path.exists(quelle):
+        return
+    q_paras = G.absaetze(open(quelle, encoding="utf-8").read())
+    z_paras = G.absaetze(ziel)
+    if len(q_paras) != len(z_paras):
+        # Ohne gleiche Absatzzahl laesst sich die Ebene nicht auf den
+        # deutschen Text uebertragen. Das ist kein Fehler dieser Pruefung
+        # — die Absatztreue meldet ein anderer Abschnitt.
+        b.add("INFO", "Tempus je Ebene nicht möglich",
+              f"{len(q_paras)} Quellabsätze gegen {len(z_paras)} deutsche "
+              f"— die Zuordnung wäre geraten.")
+        return
+
+    anfaenge, _ = G.ebenen_anfaenge(q_paras, ebenen)
+    if not anfaenge:
+        return
+    grenzen = [i for i, _ in anfaenge]
+    namen = [n for _, n in anfaenge]
+    if grenzen[0] > 0:
+        grenzen.insert(0, 0)
+        namen.insert(0, "(vor dem ersten Wechsel)")
+
+    # Abschnitte derselben Ebene zusammenfassen: Eine Ebene, die zehnmal
+    # wiederkehrt, ist eine Ebene und nicht zehn.
+    je_ebene = {}
+    for k, start in enumerate(grenzen):
+        ende = grenzen[k + 1] if k + 1 < len(grenzen) else len(z_paras)
+        je_ebene.setdefault(namen[k], []).append(
+            "\n\n".join(z_paras[start:ende]))
+
+    zeilen, auffaellig = [], []
+    for name, stuecke in je_ebene.items():
+        q, mit, ges = G.perfekt_quote("\n\n".join(stuecke))
+        if ges < 20:                     # zu wenig Sätze für eine Quote
+            zeilen.append(f"{name}: {ges} Sätze — zu wenig für eine Quote")
+            continue
+        zeilen.append(f"{name}: {q:.1%} ({mit}/{ges} Sätze, "
+                      f"{len(stuecke)} Abschnitte)")
+        auffaellig.append((q, name))
+    b.add("INFO", f"Tempus je Ebene ({len(je_ebene)})", "\n".join(zeilen))
+
+    # Der eigentliche Befund: Ebenen, die sich NICHT unterscheiden. Genau
+    # dafuer gibt es die Fugen — wenn die Quoten dicht beieinander liegen,
+    # haben sie nicht gewirkt.
+    if len(auffaellig) > 1:
+        spanne = max(q for q, _ in auffaellig) - min(q for q, _ in auffaellig)
+        if spanne < 0.05:
+            b.add("WARN", "Die Erzählebenen unterscheiden sich im Tempus "
+                          "kaum",
+                  f"Spanne {spanne:.1%} über {len(auffaellig)} Ebenen. Das "
+                  f"Stilprofil verlangt verschiedene Tempora — sind die "
+                  f"Fugen wirksam geworden?")
+        else:
+            b.add("OK", f"Erzählebenen unterscheiden sich im Tempus "
+                        f"(Spanne {spanne:.1%})")
+
+
 def pruefe_uebersetzung(cfg, b, praefix=""):
     ziel_p = praefix + G.F["uebersetzung"]
     if not os.path.exists(ziel_p):
@@ -188,6 +261,7 @@ def pruefe_uebersetzung(cfg, b, praefix=""):
     if cfg["tempus"] == "quellnah" and q < 0.05:
         b.add("WARN", "Kaum Perfekt trotz quellnaher Politik",
               "Der gewollte Wechsel ist möglicherweise nicht entstanden.")
+    tempus_je_ebene(cfg, ziel, b)
 
     b.abschnitt("Typografie")
     if cfg["quotes"] == "guillemets":

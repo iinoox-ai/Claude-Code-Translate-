@@ -440,7 +440,7 @@ def cmd_run(cfg, args):
                         print(f"1. Im Drive-Ordner {ordner} bzw. im "
                               f"Spreadsheet pruefen:")
                         print("   Glossar, Personen, Figurenblatt, Anrede, "
-                              "Leitmotive, Stilprofil, Kapitel")
+                              "Leitmotive, Stilprofil, Kapitel, Ebenen")
                         print("2. anweisungen.md lesen und schaerfen — sie "
                               "geht woertlich in die Prompts")
                         print("   Dateien auf .neu sind Vorschlaege neben "
