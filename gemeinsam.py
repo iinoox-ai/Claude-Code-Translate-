@@ -35,6 +35,7 @@ F = {
     "zitate":        "zitate.json",
     "stilprofil":    "stilprofil.json",
     "kapitel":       "kapitel.json",
+    "ebenen":        "ebenen.json",
     "entwurf":       "uebersetzung_entwurf.txt",
     "uebersetzung":  "uebersetzung_deutsch.txt",
     "normalisiert":  "normalisiert.txt",
@@ -59,7 +60,8 @@ TEILE = {
 # zahlt man den Preis der Pruefung fuer die Massenware, oder man prueft mit
 # dem Modell der Massenware.
 ROLLEN = ("uebersetzung", "revision", "stil", "korrektorat", "zitat",
-          "vorbereitung", "judge", "begruendung", "screening", "vergleich")
+          "vorbereitung", "ebenen", "judge", "begruendung", "screening",
+          "vergleich")
 
 
 STANDARD = {
@@ -79,6 +81,7 @@ STANDARD = {
     "modell_korrektorat":        "",
     "modell_vorbereitung":       "",
     "modell_zitat":              "",
+    "modell_ebenen":             "",
     "modell_judge":              "",
     "modell_begruendung":        "",
     "modell_screening":          "",
@@ -89,6 +92,7 @@ STANDARD = {
     "effort_korrektorat":        "hoch",
     "effort_vorbereitung":       "hoch",
     "effort_zitat":              "hoch",
+    "effort_ebenen":             "hoch",
     "effort_judge":              "hoch",
     "effort_begruendung":        "niedrig",
     "effort_screening":          "hoch",
@@ -426,6 +430,14 @@ EMPFEHLUNG = {
         "Glossar, Figurenblatt, Anrede, Leitmotive, Stilprofil. Ein "
         "Fehler hier steht in jedem Chunk des Buches. Der Aufpreis faellt "
         "bei neun Aufrufen nicht ins Gewicht."),
+    "ebenen": (
+        "claude-opus-5", "hoch",
+        "Findet die Erzaehlebenen im Quelltext. Ein Aufruf je Buch, und "
+        "das Ergebnis bestimmt JEDE Chunkgrenze und jeden Rueckschau-Reset "
+        "— eine falsche Fuge laesst Tempus und Person der einen Ebene in "
+        "die andere bluten. Der Plan sah hier gemini-3.6-flash vor; bei "
+        "unter einem halben Dollar Unterschied fuer ein ganzes Buch ist "
+        "das die falsche Stelle zum Sparen. Die Messung steht aus."),
     "zitat": (
         "claude-opus-5", "hoch",
         "Recherche mit Websuche. Ein erfundener Wortlaut waere schlimmer "
@@ -1288,6 +1300,7 @@ def aktive_rollen(cfg):
     # dieselbe Rolle zusaetzlich, wenn das Glossar lokal entsteht.
     rollen.append("vorbereitung")
     rollen.append("zitat")            # zitatrecherche.py
+    rollen.append("ebenen")           # vorbereitung.py, Erzaehlebenen
     rollen.append("begruendung")      # annotation.py, Teil 1
     rollen.append("screening")        # annotation.py, Teil 2
     if cfg.get("export_bewertung"):
@@ -1485,6 +1498,114 @@ def rahmen_gruppen(paras, marker="#"):
     if aktuell:
         gruppen.append(aktuell)
     return gruppen or [[]]
+
+
+def ebenen_lesen(pfad=None, still=True):
+    """ebenen.json als Liste. Eigene Routine, weil lade_json Objekte liest.
+
+    'lade_json' liefert bei allem, was kein JSON-Objekt ist, ein leeres
+    Objekt zurueck — still. Diese Datei ist die einzige Referenzdatei mit
+    einer LISTE an der Wurzel (die Reihenfolge ist die Information), und
+    ueber lade_json gelesen waere sie immer leer. Kein Fehler, keine
+    Meldung, nur keine Fugen. Deshalb hier und nicht dort: Eine Ausnahme
+    in lade_json haette dieselbe Falle fuer die naechste Datei gestellt.
+
+    Ein Objekt mit dem Schluessel 'ebenen' wird ebenfalls angenommen —
+    so schreibt es niemand von Hand, aber ein Modell schon."""
+    pfad = pfad or F["ebenen"]
+    if not os.path.exists(pfad):
+        return []
+    try:
+        d = json.load(open(pfad, encoding="utf-8"))
+    except Exception:
+        if not still:
+            print(f"  WARNUNG: {pfad} nicht lesbar, wird ignoriert.")
+        return []
+    if isinstance(d, dict):
+        d = d.get("ebenen", [])
+    return d if isinstance(d, list) else []
+
+
+def ebenen_anfaenge(paras, ebenen):
+    """(Absatzindex, Ebenenname) je Eintrag aus ebenen.json.
+
+    Ein Eintrag ist {'beginn': …, 'ebene': …}; 'beginn' sind die ersten
+    Woerter des Absatzes IM WORTLAUT DER QUELLE — dieselbe Idee wie bei
+    den Ueberschriften in kapitel.json. Absatznummern waeren kuerzer und
+    waeren beim ersten korrigierten Absatz alle falsch.
+
+    Ein Eintrag, dessen 'beginn' im Text nicht vorkommt, wird
+    uebersprungen und gemeldet. Er still einzusortieren waere schlimmer
+    als die Luecke: Die Fuge saesse dann am falschen Absatz."""
+    raus, unbekannt, gesehen = [], [], set()
+    for e in ebenen or []:
+        if not isinstance(e, dict):
+            continue
+        anfang = str(e.get("beginn", "")).strip()
+        name = str(e.get("ebene", "")).strip()
+        if not anfang or not name:
+            unbekannt.append(str(e)[:60])
+            continue
+        idx = next((i for i, p in enumerate(paras)
+                    if i not in gesehen and p.strip().startswith(anfang)), None)
+        if idx is None:
+            unbekannt.append(anfang[:60])
+            continue
+        gesehen.add(idx)
+        raus.append((idx, name))
+    raus.sort()
+    return raus, unbekannt
+
+
+def ebenen_gruppen(paras, ebenen):
+    """(Gruppen, Ebenennamen) aus ebenen.json — die zweite Quelle.
+
+    Der 'rahmen_marker' setzt voraus, dass der Autor die Wechsel markiert
+    hat. Beim Buch 1919 tat er das nicht: Das Stilprofil beschreibt fuenf
+    Erzaehlebenen mit drei Tempora, der Marker fand ueber 147 Chunks
+    genau eine Gruppe — die deutsche Rueckschau lief also ueber jeden
+    Ebenenwechsel hinweg. Das ist der Fehler, gegen den diese Datei
+    steht: Sie benennt die Wechsel, auch wenn der Text sie nicht
+    auszeichnet."""
+    anfaenge, _ = ebenen_anfaenge(paras, ebenen)
+    if not anfaenge:
+        return [list(paras)], [""]
+    # Ein Buch beginnt selten bei Absatz 0 mit dem ersten Eintrag; was
+    # davor steht, ist eine eigene, unbenannte Gruppe.
+    grenzen = [i for i, _ in anfaenge]
+    namen = [n for _, n in anfaenge]
+    if grenzen[0] > 0:
+        grenzen.insert(0, 0)
+        namen.insert(0, "")
+    gruppen = []
+    for k, start in enumerate(grenzen):
+        ende = grenzen[k + 1] if k + 1 < len(grenzen) else len(paras)
+        gruppen.append(list(paras[start:ende]))
+    return gruppen, namen
+
+
+def ebenen_maengel(ebenen, perspektive):
+    """Was an ebenen.json nicht stimmt, als Liste von Zeilen.
+
+    Die Namen muessen die aus stilprofil.json sein. Zwei Schreibweisen
+    derselben Ebene sehen im Bericht wie zwei Ebenen aus, und der
+    Ebenenblock im User-Prompt findet die Beschreibung dann nicht."""
+    m = []
+    if not isinstance(ebenen, list):
+        return ["ebenen.json ist keine Liste von Eintraegen"]
+    bekannt = list(perspektive) if isinstance(perspektive, dict) else []
+    for nr, e in enumerate(ebenen, 1):
+        if not isinstance(e, dict):
+            m.append(f"Eintrag {nr}: kein Objekt")
+            continue
+        if not str(e.get("beginn", "")).strip():
+            m.append(f"Eintrag {nr}: 'beginn' fehlt")
+        if not str(e.get("ebene", "")).strip():
+            m.append(f"Eintrag {nr}: 'ebene' fehlt")
+        elif bekannt and e["ebene"] not in bekannt:
+            m.append(f"Eintrag {nr}: Ebene '{e['ebene']}' steht nicht in "
+                     f"stilprofil.json ({', '.join(bekannt)})")
+    return m
 
 
 def ebenen_folge(gruppen, marker, perspektive):

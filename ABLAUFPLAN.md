@@ -144,7 +144,10 @@ Der Lauf hält von selbst an und sagt, was zu tun ist.
 ### `PAUSE_review` — nach der Vorbereitung
 
 Zu prüfen sind Glossar, Personen, Figurenblatt, Anrede, Leitmotive,
-Stilprofil und Kapitel — im Spreadsheet oder als Dateien im Projektordner.
+Stilprofil, Kapitel und **Erzählebenen** — im Spreadsheet oder als Dateien im
+Projektordner. `ebenen.json` verdient den genauesten Blick: Jede Zeile setzt
+eine Chunkgrenze und einen Rückschau-Reset, und eine Fuge am falschen Absatz
+ist schädlicher als eine fehlende.
 Dateien auf `.neu` sind **Vorschläge neben vorhandenen Daten**; sie werden
 nicht von selbst übernommen.
 
