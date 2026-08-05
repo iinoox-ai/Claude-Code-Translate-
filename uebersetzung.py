@@ -425,58 +425,6 @@ def kapitel_zuordnen(chunks, kapitel):
     return zuordnung
 
 
-def ebenengruppen(cfg, paras):
-    """(Gruppen, Ebenennamen) — zwei Quellen, ebenen.json hat Vorrang.
-
-    Der 'rahmen_marker' setzt voraus, dass der Autor die Ebenenwechsel
-    ausgezeichnet hat. Beim Buch 1919 tat er das nicht: fuenf Ebenen im
-    Stilprofil, eine Gruppe ueber 147 Chunks. Die deutsche Rueckschau
-    lief damit ueber jeden Wechsel hinweg, und die buchweite Perfektquote
-    in qa.py konnte das gar nicht sehen.
-
-    Deshalb liest dieser Schritt zuerst ebenen.json. Ist sie da, benennt
-    sie die Gruppen; sonst gilt weiter der Marker. Beides gleichzeitig
-    waere eine Quelle zu viel — der Marker bleibt der Rueckfall, nicht
-    die zweite Meinung."""
-    ebenen = G.ebenen_lesen()
-    if ebenen:
-        anfaenge, unbekannt = G.ebenen_anfaenge(paras, ebenen)
-        for a in unbekannt:
-            print(f"    WARNUNG: ebenen.json — »{a}« kommt so nicht im "
-                  f"Text vor, Eintrag übersprungen")
-        if anfaenge:
-            gruppen, namen = G.ebenen_gruppen(paras, ebenen)
-            benannt = sorted({n for n in namen if n})
-            print(f"Erzählebenen:       {len(gruppen)} Abschnitte aus "
-                  f"{G.F['ebenen']} ({len(benannt)} Ebenen: "
-                  f"{', '.join(benannt)})")
-            return gruppen, namen
-        print(f"    WARNUNG: ebenen.json — kein Eintrag passt auf den "
-              f"Text, es gilt der Marker »{cfg['rahmen_marker']}«")
-
-    gruppen = G.rahmen_gruppen(paras, cfg["rahmen_marker"])
-    if len(gruppen) > 1:
-        print(f"Rahmenwechsel:      {len(gruppen)-1} an Marker "
-              f"»{cfg['rahmen_marker']}«")
-    else:
-        # Eine Gruppe ueber das ganze Buch heisst: Die Rueckschau laeuft
-        # ueber jeden Ebenenwechsel. Wenn das Stilprofil mehrere Ebenen
-        # kennt, ist das fast sicher falsch — und es faellt sonst
-        # nirgends auf.
-        p = G.lade_json(G.F["stilprofil"], still=True).get("perspektive")
-        if isinstance(p, dict) and len(p) > 1:
-            print(f"\nACHTUNG: {len(p)} Erzählebenen im Stilprofil, aber "
-                  f"keine einzige Fuge im Text.")
-            print(f"         Der Marker »{cfg['rahmen_marker']}« kommt "
-                  f"nicht vor, {G.F['ebenen']} fehlt oder ist leer.")
-            print(f"         Die deutsche Rückschau läuft damit über jeden "
-                  f"Ebenenwechsel hinweg —")
-            print(f"         Tempus und Person der einen Ebene bluten in "
-                  f"die andere.")
-            print(f"         Abhilfe: python3 vorbereitung.py --nur ebenen\n")
-    return gruppen, None
-
-
 def block_ebene(name, perspektive):
     """Nennt die Erzaehlebene des Abschnitts im User-Prompt (Paket 5).
 
@@ -635,16 +583,6 @@ def testauszuege(paras, n_erzaehlung, n_dialog, n_fallen=0):
                                  "fallendichte": dichte3}
 
 
-def zitat_absaetze(zitate):
-    """Die Absaetze, die ausgeklammert werden — Zitat UND Attribution (F3)."""
-    raus = {}
-    for z in zitate:
-        raus[z["index"]] = z
-        if "index_attribution" in z:
-            raus[z["index_attribution"]] = None      # nur entfernen
-    return raus
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--test", action="store_true")
@@ -703,30 +641,29 @@ def main():
         with open(praefix + "teile.json", "w", encoding="utf-8") as f:
             json.dump({"erzaehlung": len(t1), "dialog": len(t2),
                        "fallen": len(t3)}, f, ensure_ascii=False, indent=2)
+        # Der Testlauf schneidet Auszuege statt Erzaehlebenen; die
+        # Chunkbildung darunter ist dieselbe, nur ohne Ebenennamen.
+        G.lauf_setzen(praefix)
+        chunks, fugen, ebene_je_chunk = [], set(), []
+        for gruppe in gruppen:
+            teil = G.chunks_bauen(gruppe, chunk_words)
+            if chunks:
+                fugen.add(len(chunks))
+            chunks.extend(teil)
+            ebene_je_chunk.extend([""] * len(teil))
     else:
+        # Der Buchlauf und die beiden Leser (Leseausgabe, Screening)
+        # bauen ihre Quellchunks ueber DIESELBE Funktion. Zwei Wege
+        # dorthin sind auseinandergelaufen, sobald einer ebenen.json las
+        # und der andere nicht — und dann steht ueberall der falsche
+        # Absatz neben dem falschen, ohne dass es auffaellt.
         praefix = ""
-        marken = zitat_absaetze(zitate)
-        rest = [p for i, p in enumerate(paras_alle) if i not in marken]
-        gruppen, ebenen_namen = ebenengruppen(cfg, rest)
-
-    # Chunks je Gruppe; Fugen merken (Kontext dort zuruecksetzen)
-    G.lauf_setzen(praefix)
-    perspektive = G.lade_json(G.F["stilprofil"], still=True).get("perspektive")
-    if args.test:
-        ebenen = [""] * len(gruppen)
-    elif ebenen_namen is not None:
-        ebenen = ebenen_namen                    # aus ebenen.json benannt
-    else:
-        ebenen = G.ebenen_folge(gruppen, cfg["rahmen_marker"], perspektive)
-    chunks, fugen, ebene_je_chunk = [], set(), []
-    for gruppe, ebene in zip(gruppen, ebenen):
-        teil = G.chunks_bauen(gruppe, chunk_words)
-        if chunks:
-            fugen.add(len(chunks))
-        chunks.extend(teil)
-        ebene_je_chunk.extend([ebene] * len(teil))
+        G.lauf_setzen(praefix)
+        marken, chunks, fugen, ebene_je_chunk = G.quellchunks(
+            cfg, paras_alle, zitate, chunk_words)
 
     n = len(chunks)
+    perspektive = G.lade_json(G.F["stilprofil"], still=True).get("perspektive")
     G.ueberlaengen_melden(chunks, chunk_words)
     glossar = G.lade_json(G.F["glossar"])
     personen = G.lade_json(G.F["personen"])

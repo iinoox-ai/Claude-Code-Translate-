@@ -248,6 +248,23 @@ wären eine zu viel.
 Wer Chunking anfasst, hält diese Regel und die zugehörigen Selbsttestfälle
 am Leben.
 
+## Die Chunkeinteilung kommt aus `gemeinsam.quellchunks`
+
+Der Lauf, die Leseausgabe und das Screening stellen Quelle und Fassung
+nebeneinander und müssen deshalb **dieselben** Chunks bekommen. Sie hatten
+drei Nachbauten, die gleich aussahen — bis Paket C den Lauf auf `ebenen.json`
+umstellte und die beiden Leser weiter nur den Rahmenmarker lasen. Danach stand
+überall der falsche Absatz neben dem falschen, und keine Spalte sah für sich
+falsch aus.
+
+`rahmen_gruppen` steht deshalb nur noch in `gemeinsam`; ein Selbsttest
+verbietet den direkten Aufruf in jedem anderen Skript. Die beiden Leser gehen
+über `quellchunks_wie_lauf()`: Sie nimmt `chunk_words` aus
+`uebersetzung_state.json` (nicht aus der aktuellen Konfiguration) und prüft
+die Chunkzahl gegen `total`. Weicht sie ab, **bricht der Schritt ab** —
+`ChunksWeichenAb`. Eine verschobene, aber ausgelieferte Leseausgabe ist
+schlimmer als gar keine.
+
 ## Annotation und Screening fassen den Text nicht an
 
 `annotation.py` läuft nach dem Lektorat und liefert zwei Berichte: eine Zeile
@@ -257,8 +274,18 @@ Spalte in `bericht.html`) und ein Screening über das ganze Buch
 
 **Der Schritt kann nicht editieren, nicht nur „soll nicht":** Jeder
 Schreibzugriff geht durch `annotation.schreiben()`, und die Funktion kennt
-genau zwei erlaubte Ziele. Wer das aufweicht, macht aus einem Bericht einen
-dritten Editierpass — und jeder Pass glättet.
+genau zwei erlaubte Ziele. Der einzige weitere Schreibweg ist
+`annotation.teil_schreiben()`, und der führt ausschließlich nach
+`teile/screening/`. Wer das aufweicht, macht aus einem Bericht einen dritten
+Editierpass — und jeder Pass glättet.
+
+**Das Screening verdichtet, merkt sich und meldet Lücken.** Gleichlautende
+Meldungen fallen im Bericht in eine Zeile (`muster()`); die bisherigen Muster
+gehen als Baustein in den **User-Prompt**, nie in den System-Prompt — der ist
+das zwischengespeicherte Präfix. Ein gescheitertes Bündel wird nicht mehr
+verschluckt: Die Chunknummern stehen im Bericht, und die fertigen Bündel
+liegen in `teile/screening/`, sodass ein erneuter Aufruf nur das Fehlende
+nachholt.
 
 ## Kosten sind Teil des Ergebnisses
 

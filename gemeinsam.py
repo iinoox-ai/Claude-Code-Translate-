@@ -47,6 +47,11 @@ TEILE = {
     "uebersetzung": "teile/uebersetzung",
     "entwurf":      "teile/entwurf",
     "lektorat":     "teile/lektorat",
+    # Zwischenstand des Screenings. Kein Text des Buches, sondern die
+    # Befunde je Aufrufbuendel — abgelegt aus demselben Grund wie die
+    # Chunks: Ein Absturz bei Aufruf 30 von 37 soll nicht 30 Aufrufe
+    # kosten. Annotation darf nur hierher schreiben, sonst nirgends.
+    "screening":    "teile/screening",
 }
 
 
@@ -2097,6 +2102,136 @@ def ueberlaengen_melden(chunks, ziel, drucken=print):
             "Vorrang. Erwarte dort eher\n"
             "                    verworfene Laengenverhaeltnisse.")
     return lang
+
+
+def zitat_absaetze(zitate):
+    """Die Absaetze, die ausgeklammert werden — Zitat UND Attribution (F3)."""
+    raus = {}
+    for z in zitate:
+        raus[z["index"]] = z
+        if "index_attribution" in z:
+            raus[z["index_attribution"]] = None      # nur entfernen
+    return raus
+
+
+def ebenengruppen(cfg, paras, drucken=print):
+    """(Gruppen, Ebenennamen) — zwei Quellen, ebenen.json hat Vorrang.
+
+    Der 'rahmen_marker' setzt voraus, dass der Autor die Ebenenwechsel
+    ausgezeichnet hat. Beim Buch 1919 tat er das nicht: fuenf Ebenen im
+    Stilprofil, eine Gruppe ueber 147 Chunks. Die deutsche Rueckschau
+    lief damit ueber jeden Wechsel hinweg, und die buchweite Perfektquote
+    in qa.py konnte das gar nicht sehen.
+
+    Deshalb liest dieser Schritt zuerst ebenen.json. Ist sie da, benennt
+    sie die Gruppen; sonst gilt weiter der Marker. Beides gleichzeitig
+    waere eine Quelle zu viel — der Marker bleibt der Rueckfall, nicht
+    die zweite Meinung.
+
+    Die Funktion steht in gemeinsam und nicht in uebersetzung, weil drei
+    Schritte dieselbe Gruppierung brauchen: der Lauf, die Leseausgabe und
+    das Screening. Zwei Wege dorthin heissen fremde Absaetze
+    nebeneinander — und das sieht niemand, weil beide Spalten fuer sich
+    plausibel aussehen."""
+    ebenen = ebenen_lesen()
+    if ebenen:
+        anfaenge, unbekannt = ebenen_anfaenge(paras, ebenen)
+        for a in unbekannt:
+            drucken(f"    WARNUNG: ebenen.json — »{a}« kommt so nicht im "
+                    f"Text vor, Eintrag übersprungen")
+        if anfaenge:
+            gruppen, namen = ebenen_gruppen(paras, ebenen)
+            benannt = sorted({n for n in namen if n})
+            drucken(f"Erzählebenen:       {len(gruppen)} Abschnitte aus "
+                    f"{F['ebenen']} ({len(benannt)} Ebenen: "
+                    f"{', '.join(benannt)})")
+            return gruppen, namen
+        drucken(f"    WARNUNG: ebenen.json — kein Eintrag passt auf den "
+                f"Text, es gilt der Marker »{cfg['rahmen_marker']}«")
+
+    gruppen = rahmen_gruppen(paras, cfg["rahmen_marker"])
+    if len(gruppen) > 1:
+        drucken(f"Rahmenwechsel:      {len(gruppen)-1} an Marker "
+                f"»{cfg['rahmen_marker']}«")
+    else:
+        # Eine Gruppe ueber das ganze Buch heisst: Die Rueckschau laeuft
+        # ueber jeden Ebenenwechsel. Wenn das Stilprofil mehrere Ebenen
+        # kennt, ist das fast sicher falsch — und es faellt sonst
+        # nirgends auf.
+        p = lade_json(F["stilprofil"], still=True).get("perspektive")
+        if isinstance(p, dict) and len(p) > 1:
+            drucken(f"\nACHTUNG: {len(p)} Erzählebenen im Stilprofil, aber "
+                    f"keine einzige Fuge im Text.")
+            drucken(f"         Der Marker »{cfg['rahmen_marker']}« kommt "
+                    f"nicht vor, {F['ebenen']} fehlt oder ist leer.")
+            drucken(f"         Die deutsche Rückschau läuft damit über jeden "
+                    f"Ebenenwechsel hinweg —")
+            drucken(f"         Tempus und Person der einen Ebene bluten in "
+                    f"die andere.")
+            drucken("         Abhilfe: python3 vorbereitung.py "
+                    "--nur ebenen\n")
+    return gruppen, None
+
+
+def quellchunks(cfg, paras_alle, zitate, chunk_words, drucken=print):
+    """Die Chunkbildung des Laufs, an einer Stelle.
+
+    Gibt (marken, chunks, fugen, ebenen_je_chunk). Wer Quelle und Fassung
+    nebeneinanderstellt — Leseausgabe, Screening —, muss dieselben Chunks
+    bekommen wie der Lauf. Vorher stand die Bildung dreimal im Code, und
+    die drei Fassungen sind auseinandergelaufen: Der Lauf las seit August
+    2026 ebenen.json, die beiden Leser weiter nur den Rahmenmarker. Damit
+    verglich das Screening niederländischen Chunk 40 gegen deutschen
+    Chunk 43 und meldete Auslassungen, die keine waren."""
+    marken = zitat_absaetze(zitate)
+    rest = [p for i, p in enumerate(paras_alle) if i not in marken]
+    gruppen, namen = ebenengruppen(cfg, rest, drucken)
+    perspektive = lade_json(F["stilprofil"], still=True).get("perspektive")
+    if namen is not None:
+        ebenen = namen                       # aus ebenen.json benannt
+    else:
+        ebenen = ebenen_folge(gruppen, cfg["rahmen_marker"], perspektive)
+    chunks, fugen, je_chunk = [], set(), []
+    for gruppe, ebene in zip(gruppen, ebenen):
+        teil = chunks_bauen(gruppe, chunk_words)
+        if chunks:
+            fugen.add(len(chunks))
+        chunks.extend(teil)
+        je_chunk.extend([ebene] * len(teil))
+    return marken, chunks, fugen, je_chunk
+
+
+class ChunksWeichenAb(Exception):
+    """Die nachgebauten Quellchunks passen nicht zum Lauf.
+
+    Kein Warnfall: Ab hier stuende in jedem Vergleich der falsche Absatz
+    neben dem falschen, und zwar unauffaellig. Lieber abbrechen."""
+
+
+def quellchunks_wie_lauf(cfg, praefix="", drucken=print):
+    """Die Quellchunks des abgeschlossenen Laufs, nachgebaut und geprueft.
+
+    'chunk_words' kommt aus dem Zustand des Laufs, nicht aus der aktuellen
+    Konfiguration: Wer die Chunkgroesse nach dem Lauf verstellt, bekaeme
+    sonst eine andere Einteilung als die, die uebersetzt wurde.
+
+    Die Zahl wird gegen 'total' geprueft. Diese Pruefung ist der eigentliche
+    Zweck der Funktion — eine abweichende Einteilung faellt sonst nirgends
+    auf, weil Quelle und Fassung jede fuer sich plausibel aussehen."""
+    st = lade_json(praefix + "uebersetzung_state.json", still=True)
+    total = int(st.get("total") or 0)
+    chunk_words = int(st.get("chunk_words") or cfg["chunk_words"])
+    paras = absaetze(open(F["quelle"], encoding="utf-8").read())
+    zitate = lade_json(F["zitate"], still=True).get("epigraphen", [])
+    marken, chunks, fugen, ebenen = quellchunks(cfg, paras, zitate,
+                                                chunk_words, drucken)
+    if total and len(chunks) != total:
+        raise ChunksWeichenAb(
+            f"{len(chunks)} nachgebaute Quellchunks, aber der Lauf hatte "
+            f"{total}.\n  Quelle, ebenen.json oder zitate.json haben sich "
+            f"seit dem Lauf geaendert.\n  Ein Vergleich stellte ab hier "
+            f"fremde Absaetze nebeneinander.")
+    return marken, chunks, fugen, ebenen
 
 
 def schlusswoerter(text, n):

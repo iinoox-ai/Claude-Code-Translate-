@@ -311,6 +311,8 @@ Vorbereitung rund 1 $. Die Werte hängen am Modell und an der Chunkgröße —
 | `Verhältnis 0.29 -> Durchgang verworfen` | Antwort kam gekürzt zurück | passiert; der Chunk wird bis zu `max_retries` wiederholt |
 | `unrecognized arguments: --…` | Code in der VM ist alt | Zelle 0, auf „aktuell mit origin/main" achten |
 | `module … has no attribute …` | Kernel hält alte Importe | Zelle 0 leert sie und importiert neu |
+| `N nachgebaute Quellchunks, aber der Lauf hatte M` | `input.txt`, `ebenen.json` oder `zitate.json` haben sich seit dem Lauf geändert | die Datei zurücksetzen — oder den Lauf wiederholen. Leseausgabe und Screening würden sonst fremde Absätze vergleichen |
+| Im Screening-Bericht steht „Nicht geprüft: N Chunks" | einzelne Aufrufe sind gescheitert | `annotation.py --nur screening` erneut; die fertigen Bündel laufen nicht noch einmal |
 
 Ergebnisse löscht **nur** `pipeline.py neu`. Es zeigt erst die Liste und
 löscht dann nichts, solange niemand bestätigt hat — in Colab über ein

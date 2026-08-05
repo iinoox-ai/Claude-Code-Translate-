@@ -1413,6 +1413,95 @@ geht raus, dieselbe Antwort kommt an.
 
 ---
 
+## Die Chunkeinteilung hat eine Stelle, nicht drei
+
+**Entschieden (August 2026), nach einem Fehler, den Paket C verursacht hat.**
+
+Drei Schritte stellen Quelle und Fassung nebeneinander: der Lauf selbst, die
+Leseausgabe und das Screening. Alle drei bauten die Quellchunks nach —
+`rahmen_gruppen` plus `chunks_bauen`, dreimal derselbe Dreizeiler. Solange
+alle drei denselben Weg gingen, fiel das nicht auf.
+
+Paket C hat `uebersetzung.ebenengruppen` eingeführt: Der Lauf liest seither
+zuerst `ebenen.json` und nimmt den Rahmenmarker nur noch als Rückfall. Die
+beiden Leser wurden nicht mitgeändert. Ab da teilte der Lauf den Text an den
+Ebenenfugen ein und die Leser nicht.
+
+Gemessen an einem Text mit drei Ebenen über 40 Absätze: **8 Chunks gegen 9,
+und 6 der 9 stimmen im Inhalt nicht überein.** Was das heißt:
+
+- Die **Leseausgabe** stellt den falschen Quellabsatz neben den deutschen. Der
+  Docstring von `quellchunks` warnte seit jeher genau davor — „niemand sieht
+  es, weil beide Spalten für sich plausibel aussehen". Die Warnung hat den
+  Fehler nicht verhindert.
+- Das **Screening** vergleicht niederländischen Chunk 40 gegen deutschen Chunk
+  43 und meldet Auslassungen, die keine sind. Solche Befunde muss ein Mensch
+  einzeln nachschlagen, um sie zu verwerfen — teurer als gar kein Bericht.
+
+Seither gibt es `gemeinsam.quellchunks()`, und alle drei rufen sie. Der
+Rückfallpfad `rahmen_gruppen` steht nur noch in `gemeinsam`; ein Selbsttest
+verbietet ihn in jedem anderen Skript. Ein Kommentar hätte das nicht
+verhindert, eine gemeinsame Funktion tut es.
+
+Dazu `quellchunks_wie_lauf()` für die beiden Leser. Sie nimmt `chunk_words`
+aus `uebersetzung_state.json` statt aus der aktuellen Konfiguration — wer die
+Chunkgröße nach dem Lauf verstellt, bekäme sonst eine andere Einteilung als
+die, die übersetzt wurde. Und sie **prüft die Zahl gegen `total`**. Diese
+Prüfung ist der eigentliche Zweck: Eine abweichende Einteilung fällt sonst
+nirgends auf.
+
+Weicht sie ab, brechen Leseausgabe und Screening ab, statt zu warnen. Eine
+verschobene, aber ausgelieferte Leseausgabe ist schlimmer als gar keine — sie
+wird gelesen.
+
+---
+
+## Das Screening bekommt ein Gedächtnis, einen Resume und Lücken im Bericht
+
+**Entschieden (August 2026).** Drei Dinge am selben Schritt.
+
+**Wiederkehrende Befunde füllten die Liste.** Ein falscher Freund, der im
+ganzen Buch vorkommt, wird in jedem Bündel neu gemeldet — über 37 Aufrufe
+werden daraus 37 Zeilen, die dasselbe sagen. Das ist derselbe Schaden, den
+der System-Prompt mit „erfinde nichts" abwehren soll, nur von der anderen
+Seite: In eine Liste, die zu neun Zehnteln aus Wiederholungen besteht, sieht
+niemand mehr hinein.
+
+Verdichtet wird **lokal**, im Bericht: Gleichlautende Meldungen fallen in eine
+Zeile, die Spalte `Chunks` nennt alle Fundstellen. Verdichtet wird nur, was
+wörtlich gleich lautet — Ähnliches zusammenzuziehen hieße raten, und ein
+fälschlich verschmolzener Befund verschwindet, ohne dass jemand ihn gesehen
+hat.
+
+Zusätzlich sieht das Modell die bisher gemeldeten Muster. Dieser Baustein
+steht im **User-Prompt**, nicht im System-Prompt: Der System-Prompt ist das
+zwischengespeicherte Präfix und muss über alle Aufrufe byteweise identisch
+bleiben. Er spart Ausgabe und Aufmerksamkeit, mehr nicht — die Verdichtung im
+Bericht hängt nicht daran.
+
+**Ein gescheiterter Aufruf wurde verschluckt.** `AlleFehlgeschlagen` bricht
+ab, wenn schon der *erste* Aufruf scheitert. Scheiterte der dreißigste, wurde
+das gedruckt und vergessen: Der Bericht sah vollständig aus, obwohl vier
+Chunks nie geprüft worden waren. Übersprungene Chunknummern kommen jetzt
+zurück und stehen im Bericht.
+
+**Und es gab keinen Resume.** 37 Aufrufe mit einem Prüfmodell sind Geld; ein
+Absturz beim dreißigsten kostete alle dreißig. Die Befunde je Bündel liegen
+jetzt in `teile/screening/`, gezählt werden Dateien — dieselbe Regel wie beim
+Chunklauf, aus demselben Grund: Zustandsdateien lügen nach einem Absturz,
+Verzeichnisinhalte nicht.
+
+Dabei fiel ein dritter Fehler auf, älter als die anderen: `json_lesen`
+probierte `{…}` vor `[…]`. Bei einer Liste mit **genau einem** Objekt liegt
+die geschweifte Klammer innerhalb der eckigen — der Parser lieferte das
+Objekt, der Aufrufer erwartete eine Liste und verwarf es. Jeder Befund, der
+allein in seinem Bündel stand, ging so verloren. Bei zwei Befunden schlug der
+Versuch fehl (`Extra data`) und der zweite griff; deshalb hat es nie jemand
+bemerkt. Probiert wird jetzt in der Reihenfolge, in der die Klammern im Text
+vorkommen.
+
+---
+
 ## Verworfen — und warum
 
 **API-Frontier-Modell als Primärübersetzer** (zunächst). Die Kostenrechnung

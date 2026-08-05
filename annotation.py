@@ -107,6 +107,19 @@ def schreiben(pfad, inhalt):
     os.replace(tmp, pfad)
 
 
+def teil_schreiben(j, befunde):
+    """Zwischenstand eines Screening-Buendels.
+
+    Der zweite und letzte Schreibweg dieses Moduls. Er fuehrt
+    ausschliesslich nach teile/screening/ und schreibt ausschliesslich
+    Befundlisten — kein Text des Buches liegt dort, und die Sperre oben
+    bleibt damit das, was sie verspricht. Der Selbsttest prueft beides:
+    dass dieser Weg nur dorthin fuehrt, und dass 'schreiben' weiterhin
+    keine Textdatei annimmt."""
+    G.teil_schreiben("screening", j,
+                     json.dumps(befunde, ensure_ascii=False), "")
+
+
 def kennung(chunk, kat, alt, neu):
     """Stabiler Schluessel je Aenderung — auch nach einem zweiten Lauf."""
     roh = f"{chunk}|{kat}|{alt}|{neu}"
@@ -131,10 +144,25 @@ def aenderungen_lesen(diffdatei, kontext=7):
 
 
 def json_lesen(text):
+    """Die JSON-Struktur aus einer Antwort, Objekt oder Liste.
+
+    Probiert wird in der Reihenfolge, in der die Klammern im Text
+    vorkommen. Das ist kein Schoenheitsdetail: Bei einer Liste mit GENAU
+    EINEM Objekt liegt die geschweifte Klammer innerhalb der eckigen, und
+    wer zuerst auf '{' probiert, bekommt das Objekt statt der Liste
+    zurueck. Der Aufrufer verwirft es dann, weil er eine Liste erwartet.
+
+    Genau so hat das Screening jeden Befund verloren, der allein in
+    seinem Buendel stand — bei mehreren Befunden schlug der Versuch fehl
+    ('Extra data') und der zweite griff, bei einem einzigen nicht."""
     t = text.strip()
     if t.startswith("```"):
-        t = re.sub(r"^```[a-zA-Z]*\n|\n```$", "", t)
-    for auf, zu in (("{", "}"), ("[", "]")):
+        t = re.sub(r"^```[a-zA-Z]*\n|\n```$", "", t).strip()
+    paare = [("{", "}"), ("[", "]")]
+    stellen = [i for i in (t.find("{"), t.find("[")) if i >= 0]
+    if stellen and t[min(stellen)] == "[":
+        paare.reverse()
+    for auf, zu in paare:
         a, e = t.find(auf), t.rfind(zu)
         if a >= 0 and e > a:
             try:
@@ -174,58 +202,158 @@ def begruenden(cfg, aenderungen):
     return fertig
 
 
-def chunkpaare():
-    """Quell- und Zielchunk nebeneinander, aus den abgelegten Teilen."""
+def chunkpaare(cfg):
+    """(Nummer, Quelle, Fassung) je Chunk — dieselbe Einteilung wie der Lauf.
+
+    Die Quellchunks kommen aus G.quellchunks_wie_lauf und nicht aus einem
+    eigenen Nachbau. Der eigene Nachbau war hier bis August 2026 falsch:
+    Er las den Rahmenmarker, waehrend der Lauf laengst ebenen.json las.
+    Damit stand niederlaendischer Chunk 40 neben deutschem Chunk 43, und
+    das Screening meldete Auslassungen, die keine waren — Befunde, die
+    ein Mensch einzeln nachschlagen muss, um sie zu verwerfen."""
     st = G.lade_json("uebersetzung_state.json", still=True)
     n = int(st.get("total") or 0)
     if not n:
         return []
+    _, chunks, _, _ = G.quellchunks_wie_lauf(cfg)
     paare = []
     for i in range(n):
         ziel = G.teil_lesen("lektorat", i, "") or G.teil_lesen(
             "uebersetzung", i, "")
         if ziel:
-            paare.append((i + 1, ziel))
+            paare.append((i + 1, chunks[i][0], ziel))
     return paare
 
 
-def screenen(cfg, quelle_chunks, paare):
-    befunde = []
-    for i in range(0, len(paare), CHUNKS_JE_AUFRUF):
-        teil = paare[i:i + CHUNKS_JE_AUFRUF]
-        stuecke = []
-        for nr, ziel in teil:
-            quelle = quelle_chunks.get(nr, "")
-            stuecke.append(f"### Chunk {nr}\n\nNIEDERLAENDISCH:\n{quelle}"
-                           f"\n\nDEUTSCH:\n{ziel}")
-        print(f"  Chunk {teil[0][0]}–{teil[-1][0]} von {paare[-1][0]} …",
-              flush=True)
+def muster(x):
+    """Schluessel, unter dem gleichlautende Befunde zusammenfallen.
+
+    Ein wiederkehrender falscher Freund wird in jedem Buendel neu
+    gemeldet, in dem er vorkommt. Ueber 37 Aufrufe wird daraus eine Liste,
+    in die niemand mehr hineinsieht — und das ist derselbe Schaden, den
+    der System-Prompt mit 'erfinde nichts' abwehren soll, nur von der
+    anderen Seite.
+
+    Verdichtet wird nur, was WOERTLICH gleich lautet. Aehnliches
+    zusammenzuziehen hiesse raten, und ein faelschlich verschmolzener
+    Befund verschwindet aus der Liste, ohne dass jemand ihn gesehen hat."""
+    art = re.sub(r"\s+", " ", str(x.get("art", "")).strip().lower())
+    bef = re.sub(r"\s+", " ", str(x.get("befund", "")).strip().lower())
+    return art, bef.rstrip(".;:!? ")
+
+
+def gedaechtnis(befunde, hoechstens=40):
+    """Die bisher gemeldeten Muster als Prompt-Baustein, oder ''.
+
+    Steht im USER-Prompt, nicht im System-Prompt: Der System-Prompt ist
+    das zwischengespeicherte Praefix und ueber alle Aufrufe byteweise
+    identisch. Ein wachsendes Gedaechtnis darin zerstoert die
+    Cache-Trefferquote bei jedem Aufruf.
+
+    Die Verdichtung im Bericht haengt nicht daran — sie laeuft lokal. Das
+    hier spart Ausgabe und Aufmerksamkeit, mehr nicht: Ignoriert das
+    Modell den Baustein, ist die Liste trotzdem sauber."""
+    zaehler = {}
+    for x in befunde:
+        k = muster(x)
+        zaehler[k] = zaehler.get(k, 0) + 1
+    if not zaehler:
+        return ""
+    haeufig = sorted(zaehler.items(), key=lambda kv: -kv[1])[:hoechstens]
+    zeilen = "\n".join(f"- [{a}] {b}" for (a, b), _ in haeufig)
+    return ("=== BEREITS GEMELDET (nicht wiederholen) ===\n"
+            "Diese Verdachtsstellen stehen schon in der Liste. Melde sie "
+            "NICHT erneut, auch nicht fuer einen anderen Chunk — sie sind "
+            "als wiederkehrend erfasst. Melde nur, was hier fehlt.\n"
+            + zeilen + "\n\n")
+
+
+def screenen(cfg, paare, drucken=print):
+    """Befunde ueber alle Chunkpaare. Gibt (Befunde, uebersprungene Nummern).
+
+    Ein gescheiterter Aufruf in der Mitte wurde frueher nur gedruckt und
+    dann vergessen: Der Bericht sah vollstaendig aus, obwohl drei Buendel
+    fehlten. Uebersprungene Chunks kommen deshalb zurueck und stehen im
+    Bericht."""
+    befunde, luecken = [], []
+    buendel = [paare[i:i + CHUNKS_JE_AUFRUF]
+               for i in range(0, len(paare), CHUNKS_JE_AUFRUF)]
+    for j, teil in enumerate(buendel):
+        # Resume wie beim Chunklauf: gezaehlt werden Dateien, nicht
+        # Eintraege in einer Zustandsdatei. Ein abgebrochener Lauf hat
+        # seine bisherigen Buendel schon bezahlt.
+        alt = G.teil_lesen("screening", j, "")
+        if alt is not None:
+            try:
+                befunde += json.loads(alt)
+                continue
+            except json.JSONDecodeError:
+                pass
+        stuecke = [f"### Chunk {nr}\n\nNIEDERLAENDISCH:\n{quelle}"
+                   f"\n\nDEUTSCH:\n{ziel}" for nr, quelle, ziel in teil]
+        drucken(f"  Chunk {teil[0][0]}–{teil[-1][0]} von {paare[-1][0]} …")
         try:
-            antwort = G.chat(cfg, SYSTEM_SCREENING, "\n\n".join(stuecke),
+            antwort = G.chat(cfg, SYSTEM_SCREENING,
+                             gedaechtnis(befunde) + "\n\n".join(stuecke),
                              rolle="screening", roh=True)
             d = json_lesen(antwort)
-            if isinstance(d, list):
-                befunde += [x for x in d if isinstance(x, dict)]
+            neu = [x for x in d if isinstance(x, dict)] \
+                if isinstance(d, list) else []
+            teil_schreiben(j, neu)
+            befunde += neu
         except Exception as e:
-            print(f"    uebersprungen: {e}")
-            if i == 0:
+            drucken(f"    uebersprungen: {e}")
+            luecken += [nr for nr, _, _ in teil]
+            if j == 0:
                 raise AlleFehlgeschlagen(str(e))
-    return befunde
+    return befunde, luecken
 
 
-def screening_schreiben(befunde):
+def screening_schreiben(befunde, luecken=()):
+    gruppen = {}
+    for x in befunde:
+        gruppen.setdefault(muster(x), []).append(x)
+    # Nach erstem Vorkommen sortiert: Wer die Liste durchgeht, liest sie
+    # in der Reihenfolge des Buches.
+    def erste(eintraege):
+        return min(int(y.get("chunk", 0) or 0) for y in eintraege)
+
+    reihen = sorted(gruppen.values(), key=erste)
+
     L = ["# Screening — Verdachtsstellen", "",
          "Ein Modell hat Quelle und Zielfassung nebeneinander gelesen. "
          "Die Liste ist **berichtend**:",
          "Sie verändert nichts und enthält Falschmeldungen. Prüfen, "
          "entscheiden, von Hand korrigieren.", "",
-         f"{len(befunde)} Verdachtsstellen.", "",
-         "| Chunk | Art | Befund |", "|---:|---|---|"]
-    for x in sorted(befunde, key=lambda y: int(y.get("chunk", 0) or 0)):
-        art = str(x.get("art", "")).replace("|", "\\|")
-        bef = str(x.get("befund", "")).replace("|", "\\|").replace("\n", " ")
-        L.append(f"| {x.get('chunk', '?')} | {art} | {bef} |")
+         f"{len(befunde)} Meldungen, zu {len(reihen)} Verdachtsstellen "
+         f"zusammengefasst.",
+         "Gleichlautende Meldungen stehen in einer Zeile; die Spalte "
+         "`Chunks` nennt alle Fundstellen.", ""]
+    if luecken:
+        # Eine Luecke ist kein Nebensatz: Der Bericht sieht vollstaendig
+        # aus, und niemand kaeme von selbst darauf, dass 12 Chunks gar
+        # nicht geprueft wurden.
+        L += [f"> **Nicht geprüft:** {len(luecken)} Chunks "
+              f"({kurzliste(luecken)}). Die Aufrufe sind gescheitert.",
+              "> `python3 annotation.py --nur screening` holt sie nach — "
+              "die fertigen Bündel laufen nicht noch einmal.", ""]
+    L += ["| Chunks | Anzahl | Art | Befund |", "|---|---:|---|---|"]
+    for eintraege in reihen:
+        art = str(eintraege[0].get("art", "")).replace("|", "\\|")
+        bef = str(eintraege[0].get("befund", "")).replace(
+            "|", "\\|").replace("\n", " ")
+        nummern = sorted({int(y.get("chunk", 0) or 0) for y in eintraege})
+        L.append(f"| {kurzliste(nummern)} | {len(eintraege)} | {art} "
+                 f"| {bef} |")
     schreiben(SCREENING, "\n".join(L) + "\n")
+
+
+def kurzliste(nummern, hoechstens=8):
+    """Chunknummern als Zelle, ohne die Zeile zu sprengen."""
+    n = sorted(set(int(x) for x in nummern))
+    kopf = ", ".join(str(x) for x in n[:hoechstens])
+    return kopf + (f" … (+{len(n) - hoechstens})" if len(n) > hoechstens
+                   else "")
 
 
 def main():
@@ -244,15 +372,27 @@ def main():
     diffdatei = "lektorat_diff.txt"
     aenderungen = (aenderungen_lesen(diffdatei)
                    if os.path.exists(diffdatei) else [])
-    quelle_chunks, paare = {}, []
+    paare = []
     if os.path.exists(G.F["quelle"]):
-        paare = chunkpaare()
+        try:
+            paare = chunkpaare(cfg)
+        except G.ChunksWeichenAb as e:
+            # Kein Warnfall: Das Screening vergliche ab hier fremde
+            # Absaetze und meldete Auslassungen, die keine sind. Solche
+            # Befunde muss ein Mensch einzeln nachschlagen, um sie zu
+            # verwerfen — das ist teurer als kein Bericht.
+            sys.exit(f"FEHLER: {e}\n  Screening nicht moeglich. "
+                     f"'--nur begruendungen' laeuft weiter.")
 
+    fertig = sum(1 for j in range((len(paare) + CHUNKS_JE_AUFRUF - 1)
+                                  // CHUNKS_JE_AUFRUF)
+                 if G.teil_lesen("screening", j, "") is not None)
+    offen = (len(paare) + CHUNKS_JE_AUFRUF - 1) // CHUNKS_JE_AUFRUF - fertig
     print(f"Substanzielle Aenderungen: {len(aenderungen)} "
           f"({(len(aenderungen) + BUENDEL - 1)//BUENDEL} Aufrufe)")
     print(f"Chunkpaare fuers Screening: {len(paare)} "
-          f"({(len(paare) + CHUNKS_JE_AUFRUF - 1)//CHUNKS_JE_AUFRUF} "
-          f"Aufrufe)")
+          f"({offen} Aufrufe offen"
+          + (f", {fertig} liegen vor" if fertig else "") + ")")
     print(f"Modell Begruendungen: {m_beg}")
     print(f"Modell Screening:     {m_scr}")
 
@@ -261,6 +401,10 @@ def main():
     # je Rolle, weil die beiden Arbeiten verschiedene Modelle haben
     # duerfen und die Summe sonst nichts mehr aussagt.
     faktor = G.token_faktor()
+    # Geschaetzt wird, was noch laeuft: Fertige Buendel liegen in teile/
+    # und kosten nichts mehr. Die Quellwoerter sind jetzt gezaehlt statt
+    # geschaetzt — vorher stand dort die Zielseite mal zwei.
+    anteil = offen / max(1, fertig + offen)
     summe, unsicher = 0.0, False
     for label, modell, ein, aus in (
             ("Begruendungen", m_beg,
@@ -268,8 +412,9 @@ def main():
                  for a in aenderungen) * faktor,
              len(aenderungen) * 15 * faktor),
             ("Screening", m_scr,
-             sum(len(z.split()) for _, z in paare) * 2 * faktor,
-             len(paare) // CHUNKS_JE_AUFRUF * 60 * faktor)):
+             sum(len(q.split()) + len(z.split()) for _, q, z in paare)
+             * faktor * anteil,
+             offen * 60 * faktor)):
         d = G.kosten_dollar({"ein": ein, "aus": aus}, G.tarif(modell))
         if d is None:
             unsicher = True
@@ -300,19 +445,20 @@ def main():
 
     if args.nur in (None, "screening") and paare:
         print("\nScreening:")
-        text = open(G.F["quelle"], encoding="utf-8").read()
-        gruppen = G.rahmen_gruppen(G.absaetze(text), cfg["rahmen_marker"])
-        chunks = []
-        for gruppe in gruppen:
-            chunks += G.chunks_bauen(gruppe, cfg["chunk_words"])
-        quelle_chunks = {i + 1: t for i, (t, _) in enumerate(chunks)}
         try:
-            befunde = screenen(cfg, quelle_chunks, paare)
+            befunde, luecken = screenen(cfg, paare)
         except AlleFehlgeschlagen as e:
             sys.exit(f"\nAbbruch: schon der erste Aufruf ist gescheitert "
                      f"— {e}\n  Nichts wurde geschrieben.")
-        screening_schreiben(befunde)
-        print(f"  {len(befunde)} Verdachtsstellen -> {SCREENING}")
+        screening_schreiben(befunde, luecken)
+        stellen = len({muster(x) for x in befunde})
+        print(f"  {len(befunde)} Meldungen zu {stellen} Verdachtsstellen "
+              f"-> {SCREENING}")
+        if luecken:
+            print(f"  WARNUNG: {len(luecken)} Chunks nicht geprüft "
+                  f"({kurzliste(luecken)}).\n"
+                  f"           Erneut aufrufen holt sie nach; die fertigen "
+                  f"Bündel laufen nicht noch einmal.")
 
     print(f"\nDer Schritt hat nichts am Text geaendert — er darf es nicht.")
 

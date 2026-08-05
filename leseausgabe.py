@@ -71,26 +71,28 @@ def diffview():
 # ==================================================================
 # Quellen einlesen
 # ==================================================================
-def quellchunks(cfg, test=False):
+def quellchunks(cfg, test=False, praefix=""):
     """Baut die Quellchunks genau so, wie uebersetzung.py es tut.
 
-    Muss mit dem Original mitwandern: Weicht die Chunkbildung hier ab,
-    stehen in der Leseausgabe fremde Absaetze nebeneinander und niemand
-    sieht es, weil beide Spalten fuer sich plausibel aussehen."""
+    'Genau so' heisst seit August 2026: ueber dieselbe Funktion. Die
+    frueheren zwei Fassungen sahen gleich aus und liefen auseinander,
+    sobald der Lauf ebenen.json las und diese hier weiter nur den
+    Rahmenmarker — dann stehen in der Leseausgabe fremde Absaetze
+    nebeneinander, und niemand sieht es, weil beide Spalten fuer sich
+    plausibel aussehen. Genau das steht seit jeher in diesem Docstring;
+    die Warnung hat den Fehler nicht verhindert, eine gemeinsame Funktion
+    tut es."""
     paras_alle = G.absaetze(open(G.F["quelle"], encoding="utf-8").read())
     if test:
-        t1, t2, _ = U.testauszuege(paras_alle, cfg["test_words_erzaehlung"],
-                                   cfg["test_words_dialog"])
-        gruppen, marken = [t1, t2], {}
-    else:
-        marken = U.zitat_absaetze(
-            G.lade_json(G.F["zitate"], still=True).get("epigraphen", []))
-        rest = [p for i, p in enumerate(paras_alle) if i not in marken]
-        gruppen = G.rahmen_gruppen(rest, cfg["rahmen_marker"])
-
-    chunks = []
-    for gruppe in gruppen:
-        chunks.extend(G.chunks_bauen(gruppe, cfg["chunk_words"]))
+        t1, t2, t3, _ = U.testauszuege(
+            paras_alle, cfg["test_words_erzaehlung"], cfg["test_words_dialog"],
+            int(cfg.get("test_words_fallen", 0) or 0))
+        chunks, marken = [], {}
+        for gruppe in (t1, t2, t3):
+            if gruppe:
+                chunks.extend(G.chunks_bauen(gruppe, cfg["chunk_words"]))
+        return paras_alle, marken, chunks
+    marken, chunks, _, _ = G.quellchunks_wie_lauf(cfg, praefix)
     return paras_alle, marken, chunks
 
 
@@ -205,7 +207,7 @@ def spielprobe(zeilen, praefix=""):
 
 def zeilen_bauen(cfg, praefix="", test=False):
     """Eine Zeile je Absatz: Quelle, Entwurf, Uebersetzung, Chunknummer."""
-    paras_alle, marken, chunks = quellchunks(cfg, test)
+    paras_alle, marken, chunks = quellchunks(cfg, test, praefix)
     warnung = chunkprobe(chunks, praefix)
     zeilen = []
     for i, (qtext, _geschuetzt) in enumerate(chunks):
@@ -538,7 +540,14 @@ def main():
     if not os.path.exists(G.F["quelle"]):
         sys.exit(f"FEHLER: {G.F['quelle']} nicht gefunden.")
 
-    zeilen, warnung = zeilen_bauen(cfg, praefix, args.test)
+    # Eine abweichende Chunkfolge ist kein Warnfall: Die Leseausgabe ist
+    # das Dokument, an dem ein Mensch Absatz gegen Absatz liest. Eine
+    # verschobene, aber ausgelieferte Fassung ist schlimmer als gar keine
+    # — beide Spalten sehen fuer sich plausibel aus.
+    try:
+        zeilen, warnung = zeilen_bauen(cfg, praefix, args.test)
+    except G.ChunksWeichenAb as e:
+        sys.exit(f"FEHLER: {e}\n  Die Leseausgabe wurde nicht geschrieben.")
     if not zeilen:
         sys.exit("FEHLER: keine Chunks gefunden. Lief die Uebersetzung schon?")
     mit_lektorat = lektorat_anhaengen(zeilen, praefix)
