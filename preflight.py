@@ -1324,6 +1324,195 @@ installiert, requests-Pfad"
     except Exception as e:
         b.add("FEHLER", "Rueckfall nicht pruefbar", repr(e))
 
+    # --- Stapelbetrieb: Ketten, Wellen, halber Tarif -------------------
+    # Der Stapel rechnet zum halben Preis und kann genau eines nicht: Ein
+    # Chunk sieht die Fassung des vorigen nicht, wenn beide im selben
+    # Stapel liegen. Ketten halten das aufrecht; was hier schiefgeht,
+    # kostet keine Fehlermeldung, sondern die Anschluesse im ganzen Buch.
+    try:
+        fehler = []
+
+        # Ketten decken den Text genau einmal ab und schneiden zuerst an
+        # den Ebenenfugen — dort setzt die Rueckschau ohnehin zurueck.
+        kl = G.ketten(20, {10}, 5)
+        flach = [i for k in kl for i in k]
+        if flach != list(range(20)):
+            fehler.append(f"Ketten decken den Text nicht genau einmal ab: "
+                          f"{flach}")
+        if [k[0] for k in kl] != [0, 5, 10, 15]:
+            fehler.append(f"Kettenanfaenge falsch: {[k[0] for k in kl]}")
+        if G.zusatzfugen(kl, {10}) != [5, 15]:
+            fehler.append(f"bezahlte Naehte falsch gezaehlt: "
+                          f"{G.zusatzfugen(kl, {10})}")
+        # kette_max 0: nur die Ebenenfugen, also keine bezahlte Naht.
+        if G.zusatzfugen(G.ketten(20, {10}, 0), {10}):
+            fehler.append("kette_max 0 erzeugt trotzdem bezahlte Naehte")
+        if [len(k) for k in G.ketten(20, {10}, 0)] != [10, 10]:
+            fehler.append("kette_max 0 trennt nicht an der Ebenenfuge")
+        # Gleichmaessig teilen: eine Restkette mit einem Chunk bestimmt
+        # die Wellenzahl genauso wie eine volle und stuende sonst still.
+        laengen = [len(k) for k in G.ketten(11, set(), 10)]
+        if max(laengen) - min(laengen) > 1:
+            fehler.append(f"Ketten ungleich lang: {laengen}")
+        w = G.wellen(kl)
+        if len(w) != 5 or sorted(i for x in w for i in x) != list(range(20)):
+            fehler.append(f"Wellen decken den Text nicht ab: {w}")
+
+        # Was die Stapel-API ablehnt, darf gar nicht erst hinausgehen.
+        b_a = G.AnthropicBackend()
+        roh = b_a.payload(dict(cfg, fallback_modelle="default"),
+                          "S", "U", "uebersetzung", "claude-opus-5")
+        gefiltert = G.stapel_payload(dict(roh, stream=True))
+        for k in ("fallbacks", "stream"):
+            if k in gefiltert:
+                fehler.append(f"'{k}' geht in den Stapel")
+        if gefiltert.get("model") != "claude-opus-5" \
+                or "system" not in gefiltert:
+            fehler.append("Stapelpayload verliert den eigentlichen Inhalt")
+        if G.stapel_payload({"max_tokens": 0})["max_tokens"] != 1:
+            fehler.append("max_tokens 0 wird nicht angehoben")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}",
+                            G.stapel_id_saeubern("ueb/0007 äöü")):
+            fehler.append("custom_id entspricht nicht der Anbieterregel")
+
+        # Halber Tarif, und zwar als eigene Buchungszeile.
+        t = {"ein": 5.0, "aus": 25.0, "geprueft": True}
+        posten = {"ein": 1000000, "aus": 0}
+        if abs(G.kosten_dollar(dict(posten, stapel=True), t)
+               - G.kosten_dollar(posten, t) * 0.5) > 1e-9:
+            fehler.append("Stapeltarif ist nicht der halbe Preis")
+        if G.kosten_schluessel("voll", "uebersetzung", "m", True) == \
+                G.kosten_schluessel("voll", "uebersetzung", "m"):
+            fehler.append("Stapel und synchron teilen sich eine Zeile")
+
+        # Und der Wellenlauf am kleinen Text: Was innerhalb einer Kette
+        # steht, bekommt die eigene Rueckschau; ein Kettenanfang nicht —
+        # wohl aber den niederlaendischen Quellschluss, der an keiner
+        # Uebersetzung haengt. Das ist der ganze Unterschied zum
+        # seriellen Lauf, und er muss genau so gross sein.
+        import uebersetzung as U_
+        with tempfile.TemporaryDirectory() as tmp:
+            alt_cwd, alt_stapel, alt_chat = os.getcwd(), G.Stapel, G.chat
+            try:
+                os.chdir(tmp)
+                paras = [f"Zin {i} met genoeg woorden om te tellen hier."
+                         for i in range(1, 41)]
+                open(G.F["quelle"], "w", encoding="utf-8").write(
+                    "\n\n".join(paras))
+                json.dump([{"beginn": "Zin 1 met", "ebene": "Rahmen"},
+                           {"beginn": "Zin 21 met", "ebene": "Binnen"}],
+                          open(G.F["ebenen"], "w", encoding="utf-8"))
+                probe = dict(cfg, chunk_words=20, kette_max=5,
+                             revision_pass=False, stapel_takt=0,
+                             modell_uebersetzung="claude-opus-5")
+                gesendet, einzeln = [], []
+
+                def _uebersetzt(user):
+                    roh = user.split(
+                        "=== ZU ÜBERSETZENDER TEXT ===")[-1].strip()
+                    return "\n\n".join(p.replace("Zin", "Satz")
+                                       for p in G.absaetze(roh))
+
+                class _Stapel:
+                    def __init__(s, cfg_): pass
+
+                    def senden(s, anfragen):
+                        gesendet.append(anfragen)
+                        return f"b{len(gesendet):04d}"
+
+                    def stand(s, k): return "ended", {}
+
+                    def ergebnisse(s, k):
+                        for cid, p in gesendet[int(k[1:]) - 1]:
+                            # Ein Eintrag je Welle laeuft ins Leere — der
+                            # synchrone Weg muss ihn auffangen.
+                            if cid.endswith("0005"):
+                                yield cid, "expired", {}
+                                continue
+                            u = p["messages"][0]["content"]
+                            yield cid, "succeeded", {
+                                "content": [{"type": "text",
+                                             "text": _uebersetzt(u)}],
+                                "stop_reason": "end_turn", "usage": {}}
+                G.Stapel = _Stapel
+                G.chat = lambda c, s_, u, **k: (einzeln.append(u)
+                                                or _uebersetzt(u))
+                _, chunks, fugen, ebenen = G.quellchunks(
+                    probe, paras, [], 20, drucken=lambda *a: None)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    U_.wellenlauf(probe, {
+                        "chunks": chunks, "fugen": fugen, "ebenen": ebenen,
+                        "kapitelzeilen": [""] * len(chunks),
+                        "daten": {"glossar": {}, "personen": {},
+                                  "figuren": {}, "anrede": {},
+                                  "leitmotive": {}, "kapitel": {}},
+                        "perspektive": None, "p_ueb": "S", "p_rev": "S",
+                        "praefix": "", "revision": False})
+
+                erste = dict(gesendet[0])
+                if sorted(erste) != ["ueb-0000", "ueb-0005", "ueb-0010",
+                                     "ueb-0015"]:
+                    fehler.append(f"erste Welle falsch besetzt: "
+                                  f"{sorted(erste)}")
+                for cid in erste:
+                    u = erste[cid]["messages"][0]["content"]
+                    if "DEINE ÜBERSETZUNG" in u:
+                        fehler.append(f"{cid}: Kettenanfang hat eine "
+                                      f"Rueckschau, die es nicht geben kann")
+                # Chunk 5 ist eine bezahlte Naht, keine Ebenenfuge: Der
+                # Quellschluss steht dort trotzdem zur Verfuegung.
+                if "ORIGINAL (nur Kontext)" not in \
+                        erste["ueb-0005"]["messages"][0]["content"]:
+                    fehler.append("bezahlte Naht bekommt nicht einmal den "
+                                  "Quellschluss")
+                # Chunk 10 ist die Ebenenfuge — dort ist auch der
+                # Quellschluss falsch, die Ebene wechselt.
+                if "ORIGINAL (nur Kontext)" in \
+                        erste["ueb-0010"]["messages"][0]["content"]:
+                    fehler.append("an der Ebenenfuge blutet der Quellkontext "
+                                  "in die naechste Ebene")
+                zweite = dict(gesendet[1])
+                if "DEINE ÜBERSETZUNG" not in \
+                        zweite["ueb-0001"]["messages"][0]["content"]:
+                    fehler.append("innerhalb der Kette fehlt die Rueckschau")
+                if len(einzeln) != 1:
+                    fehler.append(f"abgelaufener Eintrag nicht einzeln "
+                                  f"nachgeholt: {len(einzeln)}")
+
+                ganz = G.teile_zusammensetzen("uebersetzung", len(chunks))
+                z = G.absaetze(ganz or "")
+                if len(z) != len(paras) or any(
+                        a.replace("Zin", "Satz") != c
+                        for a, c in zip(paras, z)):
+                    fehler.append(f"Wellenlauf paart falsch: {len(z)} von "
+                                  f"{len(paras)} Absätzen")
+
+                # Resume: ein zweiter Durchgang schickt nichts mehr los,
+                # weil alle Teile vorliegen.
+                vorher = len(gesendet)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    U_.wellenlauf(probe, {
+                        "chunks": chunks, "fugen": fugen, "ebenen": ebenen,
+                        "kapitelzeilen": [""] * len(chunks),
+                        "daten": {"glossar": {}, "personen": {},
+                                  "figuren": {}, "anrede": {},
+                                  "leitmotive": {}, "kapitel": {}},
+                        "perspektive": None, "p_ueb": "S", "p_rev": "S",
+                        "praefix": "", "revision": False})
+                if len(gesendet) != vorher:
+                    fehler.append("Resume schickt fertige Chunks erneut los")
+            finally:
+                G.Stapel, G.chat = alt_stapel, alt_chat
+                os.chdir(alt_cwd)
+
+        if fehler:
+            b.add("FEHLER", "Stapelbetrieb fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Ketten schneiden an den Ebenenfugen, Wellen decken "
+                        "den Text, Stapel zahlt den halben Tarif")
+    except Exception as e:
+        b.add("FEHLER", "Stapelbetrieb nicht pruefbar", repr(e))
+
     # --- Eine Quelle fuer die Chunkeinteilung --------------------------
     # Drei Schritte stellen Quelle und Fassung nebeneinander: der Lauf,
     # die Leseausgabe und das Screening. Sie hatten drei Nachbauten der
@@ -3366,6 +3555,14 @@ def pruefe_config(cfg, b):
     b.add("INFO", "Antworttransport",
           ("Stream" if cfg.get("streaming", True) else "ein Stueck")
           + (", SDK" if cfg.get("sdk_nutzen", True) else ", requests"))
+    kmax = int(cfg.get("kette_max", 0) or 0)
+    b.add("INFO", "Stapelbetrieb ('uebersetzung.py --stapel')",
+          (f"kette_max {kmax} — Ketten werden zusaetzlich zu den "
+           f"Ebenenfugen getrennt, jede Trennung ist eine Naht ohne "
+           f"Rueckschau." if kmax else
+           "kette_max 0 — nur an den Ebenenfugen getrennt, keine "
+           "zusaetzlichen Naehte.")
+          + " 'pipeline.py wellen' zeigt den Plan.")
     w = G.websuche_werkzeug(cfg)
     if w:
         b.add("INFO", "Websuche der Zitatrecherche",

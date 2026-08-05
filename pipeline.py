@@ -18,6 +18,7 @@ setzt an der richtigen Stelle fort und loescht nur auf ausdruecklichen Befehl.
     python3 pipeline.py schritte        Liste der Schritte
     python3 pipeline.py technik         technische Einstellungen abgleichen
     python3 pipeline.py modelle         Modell und Tiefe je Rolle, mit Empfehlung
+    python3 pipeline.py wellen          Plan fuer den Stapelbetrieb
 
 Das einzige Kommando, das Ergebnisse loescht, ist 'neu'. 'reset' oeffnet nur
 Schritte wieder; die Dateien bleiben, bis der Schritt sie neu schreibt.
@@ -177,6 +178,11 @@ def kostenuebersicht(m):
         if e.get("suchen"):
             cache += f", {e['suchen']:,} Suchen"
         preis = f"{dollar:6.2f} $" if dollar is not None else "  kein Tarif"
+        # Der Stapel steht als eigene Zeile, weil er einen eigenen Tarif
+        # hat. Ohne die Beschriftung sähe dieselbe Tokenzahl zum halben
+        # Preis nach einem Rechenfehler aus.
+        if e.get("stapel"):
+            preis += "  (Stapel)"
         print(f"  {rolle:<14} {modell:<18} {token}{cache}")
         print(f"  {'':<14} {e['aufrufe']:>4} Aufrufe {'':<12} {preis}")
     print("-" * 62)
@@ -199,6 +205,65 @@ def kostenuebersicht(m):
         print("  Hinweis: nicht alle Tarife sind gegen die Anbieterdoku "
               "verifiziert\n           (Google-Tarife: Stand 31.07.2026, "
               "Verifikation in Paket 2).")
+
+
+def cmd_wellen(cfg, args):
+    """Was der Stapelbetrieb kosten und was er einbringen wuerde.
+
+    Der Befehl ruft kein Modell. Er beantwortet die eine Frage, die vor
+    '--stapel' zu entscheiden ist: Wie viele Naehte ohne Rueckschau nimmt
+    man fuer wie viel Ersparnis in Kauf? Beides steht nebeneinander,
+    damit niemand nur die halbe Rechnung sieht."""
+    G.kopf("WELLEN")
+    if not os.path.exists(G.F["quelle"]):
+        sys.exit(f"FEHLER: {G.F['quelle']} fehlt.")
+    try:
+        _, chunks, fugen, _ = G.quellchunks_wie_lauf(cfg)
+    except G.ChunksWeichenAb:
+        # Vor dem Lauf gibt es noch keinen Zustand — dann gilt die
+        # aktuelle Konfiguration, und das ist hier richtig so.
+        paras = G.absaetze(open(G.F["quelle"], encoding="utf-8").read())
+        zitate = G.lade_json(G.F["zitate"], still=True).get("epigraphen", [])
+        _, chunks, fugen, _ = G.quellchunks(cfg, paras, zitate,
+                                            cfg["chunk_words"])
+    n = len(chunks)
+    m = G.modell_fuer(cfg, "uebersetzung")
+    if G.backend_name(m) != "anthropic":
+        print(f"HINWEIS: {m} hat keine Stapel-API — der Stapelbetrieb "
+              f"gilt nur fuer den Anthropic-Pfad.\n")
+
+    print(f"{n} Chunks, {len(fugen)} Ebenenfugen\n")
+    print(f"{'kette_max':>10}  {'Ketten':>7}  {'Wellen':>7}  "
+          f"{'breiteste':>10}  {'Nähte':>6}")
+    print("  " + "-" * 48)
+    kandidaten = sorted({0, 10, 20, 40, int(cfg.get("kette_max", 0) or 0)})
+    for kmax in kandidaten:
+        kl = G.ketten(n, fugen, kmax)
+        w = G.wellen(kl)
+        extra = G.zusatzfugen(kl, fugen)
+        marke = "  <- eingestellt" if kmax == int(
+            cfg.get("kette_max", 0) or 0) else ""
+        print(f"{kmax if kmax else '—':>10}  {len(kl):>7}  {len(w):>7}  "
+              f"{max((len(x) for x in w), default=0):>10}  "
+              f"{len(extra):>6}{marke}")
+
+    # Die Ersparnis ist die einfache Haelfte — der Stapel rechnet alles
+    # zum halben Preis. Gegengerechnet wird sie nicht, weil die Kosten
+    # der Naehte keine Waehrung haben; sie stehen als Zahl daneben.
+    stand = G.kosten_stand_rolle("uebersetzung")
+    t = G.tarif(m)
+    if t and stand.get("ein"):
+        voll = G.kosten_dollar(stand, t)
+        print(f"\nGemessen an der bisherigen Buchung der Rolle "
+              f"'uebersetzung' ({m}):")
+        print(f"  synchron rund {voll:5.2f} $  ->  im Stapel rund "
+              f"{voll * G.STAPEL_FAKTOR:5.2f} $")
+    print("\nDie Nähte sind der Preis. Wie teuer sie wirklich sind, misst")
+    print("  python3 bewertung.py --fugen")
+    print("nach einem Testlauf — nicht die Tabelle hier.")
+    if args.kette_max is not None:
+        print(f"\n'kette_max' wird in projekt.json gesetzt, nicht hier. "
+              f"Gewuenscht: {args.kette_max}")
 
 
 def cmd_modelle(cfg):
@@ -834,6 +899,10 @@ def main():
                    help="nur Chunk-Dateien und Zustaende")
     sub.add_parser("schritte")
     sub.add_parser("modelle", help="Modell und Tiefe je Rolle, mit Empfehlung")
+    p = sub.add_parser("wellen", help="Plan fuer den Stapelbetrieb: Ketten, "
+                                      "Wellen, zusaetzliche Naehte")
+    p.add_argument("--kette-max", type=int, default=None, dest="kette_max",
+                   help="einen anderen Wert durchrechnen (schreibt nichts)")
     p = sub.add_parser("technik")
     p.add_argument("--uebernehmen", action="store_true",
                    help="Abweichungen aus dem Repo uebertragen")
@@ -863,7 +932,8 @@ def main():
      "status": lambda: cmd_status(cfg),
      "reset": lambda: cmd_reset(cfg, args),
      "schritte": lambda: cmd_schritte(cfg),
-     "modelle": lambda: cmd_modelle(cfg)}[args.kommando]()
+     "modelle": lambda: cmd_modelle(cfg),
+     "wellen": lambda: cmd_wellen(cfg, args)}[args.kommando]()
 
 
 if __name__ == "__main__":

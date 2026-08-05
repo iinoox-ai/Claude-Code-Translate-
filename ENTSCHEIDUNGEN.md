@@ -1502,6 +1502,65 @@ vorkommen.
 
 ---
 
+## Der Stapel läuft in Wellen über Ketten, nicht über das Buch
+
+**Entschieden (August 2026).** Die Stapel-API rechnet alles zum halben Preis
+— Eingabe, Ausgabe, Cache. Bei rund 40 $ für Übersetzung und Revision des
+Buches 1919 sind das 20 $, und die Wartezeit ist kein Argument dagegen: Die
+meisten Stapel sind in unter einer Stunde fertig, ein serieller Lauf über 147
+Chunks dauert drei.
+
+Der Haken ist nicht der Preis und nicht die Zeit. **Ein Chunk kann die
+deutsche Fassung des vorigen nicht sehen, wenn beide im selben Stapel
+liegen.** Wer das ganze Buch in einen Stapel legt, spart die Hälfte und wirft
+die Rückschau weg — und die Rückschau ist der Grund, warum die Anschlüsse
+zwischen den Chunks überhaupt halten. Das wäre kein Handel, sondern ein
+anderes Verfahren.
+
+Deshalb Ketten. Innerhalb einer Kette bleibt alles seriell; die Ketten laufen
+nebeneinander. Je Welle geht der nächste Chunk jeder Kette in denselben
+Stapel. Bei drei Ketten sind das 3 Chunks gleichzeitig, bei elf Ketten elf.
+
+**Geschnitten wird zuerst an den Ebenenfugen, und diese Schnitte kosten
+nichts.** Dort setzt die Rückschau ohnehin zurück — das ist genau der Punkt
+von `ebenen.json`. Erst wenn ein Abschnitt länger als `kette_max` ist, wird
+zusätzlich getrennt, und **jeder dieser Schnitte ist eine Naht ohne deutsche
+Rückschau**. Der Standard ist deshalb `kette_max: 0`: nur die freien
+Schnitte. Wer schneller fertig sein will, entscheidet das mit
+`pipeline.py wellen` vor Augen — die Tabelle stellt Wellen und Nähte
+nebeneinander, damit niemand nur die halbe Rechnung sieht.
+
+Was die Nähte wirklich kosten, sagt keine Tabelle, sondern `bewertung.py
+--fugen` (Paket D). Die beiden Pakete gehören zusammen: Das eine erzeugt die
+Nähte, das andere misst sie.
+
+Drei Dinge, die nicht wegvereinfacht werden dürfen:
+
+- **Der niederländische Quellschluss steht auch am Kettenanfang zur
+  Verfügung.** Er ist Original und hängt an keiner Übersetzung. Nur die
+  eigene Fassung fehlt dort. Das halbiert den Schaden einer bezahlten Naht,
+  und es kostet nichts.
+- **An der Ebenenfuge entfällt auch der Quellschluss.** Dort beginnt eine
+  andere Erzählebene; ihr Vorgänger wäre eine Irreführung, keine Hilfe. Der
+  Selbsttest prüft beide Fälle getrennt, weil sie sich im Code um eine
+  Bedingung unterscheiden.
+- **Ein Payloadbauer.** `stapel_payload()` ist ein Filter über das Ergebnis
+  von `payload()`, kein zweiter Bauer. Was die Stapel-API ablehnt, steht in
+  `STAPEL_VERBOTEN` — allen voran `fallbacks`: Der serverseitige Rückfall aus
+  Paket E ist auf diesem Weg nicht zu haben.
+
+Und daraus folgt etwas Nützliches: **Was der Stapel nicht liefert, holt der
+synchrone Weg.** Abgelehnte, abgelaufene und fehlerhafte Einträge laufen
+einzeln nach — und dort greift der Rückfall dann doch. Der Stapel verliert
+also nicht die Absicherung aus Paket E, er verschiebt sie auf den Nachlauf.
+
+**Gebucht wird unter einem eigenen Schlüssel** (`…/stapel`), weil der Stapel
+einen eigenen Tarif hat. In derselben Zeile summiert wären es Token zu zwei
+Preisen, und die Zeile ließe sich nicht mehr rechnen — derselbe Grund, aus
+dem der Schlüssel überhaupt drei Teile hat statt einem.
+
+---
+
 ## Verworfen — und warum
 
 **API-Frontier-Modell als Primärübersetzer** (zunächst). Die Kostenrechnung

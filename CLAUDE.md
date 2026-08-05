@@ -287,6 +287,28 @@ verschluckt: Die Chunknummern stehen im Bericht, und die fertigen Bündel
 liegen in `teile/screening/`, sodass ein erneuter Aufruf nur das Fehlende
 nachholt.
 
+## Stapelbetrieb: Wellen über Ketten
+
+`uebersetzung.py --stapel` läuft über die Stapel-API — halber Preis, aber ein
+Chunk sieht die Fassung des vorigen **nur innerhalb seiner Kette**. Deshalb
+Ketten: seriell innen, nebeneinander außen; je Welle ein Chunk jeder Kette in
+einem Stapel.
+
+- **Geschnitten wird zuerst an den Ebenenfugen** — dort setzt die Rückschau
+  ohnehin zurück, diese Schnitte kosten nichts. Erst `kette_max` erzwingt
+  weitere, und jeder davon ist eine Naht ohne Rückschau. Standard ist `0`.
+- **Der Quellschluss steht auch am Kettenanfang** (Original, hängt an keiner
+  Übersetzung) — **außer an der Ebenenfuge**, dort wäre er eine Irreführung.
+- **`stapel_payload()` ist ein Filter über `payload()`, kein zweiter Bauer.**
+  `STAPEL_VERBOTEN` nennt, was die API ablehnt; `fallbacks` ist dabei.
+- **Was der Stapel nicht liefert, holt der synchrone Weg** — und dort greift
+  der Ablehnungsrückfall dann doch.
+- Gebucht wird unter `…/stapel` mit `STAPEL_FAKTOR`; eine gemeinsame Zeile
+  wären Token zu zwei Preisen.
+
+`pipeline.py wellen` zeigt den Handel vor dem Lauf, `bewertung.py --fugen`
+misst ihn danach.
+
 ## Kosten sind Teil des Ergebnisses
 
 Jeder API-Aufruf meldet seine Token-Usage; `manifest.json` bucht je

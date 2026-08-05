@@ -2,6 +2,7 @@
   "_hinweis_kalibrierung": "Diese Werte gehoeren dem Projekt, nicht dem Code. Sie werden im Pruefenster entschieden und von 'pipeline.py technik' nie angefasst.",
   "_hinweis_modelle": "Modellbelegung je Rolle. Das Backend ergibt sich aus dem Modellnamen. Jede aktive Rolle braucht einen Eintrag — es gibt keinen Rueckfall mehr. Aenderungen hier gehoeren ins Repo und wandern per 'pipeline.py technik' in die Projektordner.",
   "_hinweis_rueckfall": "Lehnt der Sicherheitsklassifikator einen Chunk ab, beantwortet ihn ein Ersatzmodell, statt den Lauf abzubrechen. 'default' laesst den Anbieter waehlen, eine Liste von bis zu drei Modellnamen bestimmt selbst, '' schaltet ab. Welcher Chunk vom Ersatzmodell kam, steht in der Kostenuebersicht: dort erscheint es als eigene Zeile. 'websuche_werkzeug' ist die Fassung der serverseitigen Suche der Zitatrecherche; sie altert beim Anbieter und gehoert deshalb hierher, nicht in den Code.",
+  "_hinweis_stapel": "Stapelbetrieb: 'uebersetzung.py --stapel' laesst den Buchlauf in Wellen ueber die Stapel-API laufen — halber Preis, aber ein Chunk sieht die Fassung des vorigen nur innerhalb seiner Kette. 'kette_max' ist die laengste Kette, die seriell bleibt; 0 trennt nur an den Ebenenfugen und kostet damit keine Qualitaet. Jeder weitere Schnitt ist eine Naht ohne Rueckschau. 'pipeline.py wellen' zeigt den Handel, 'bewertung.py --fugen' misst ihn.",
   "_hinweis_varianten": "Vergleichsvarianten des Testlaufs. Je Eintrag ein Name und, was abweicht: chunk_words und/oder modell_uebersetzung. Der Vergleich laeuft bei jedem Buch mit, weil die beste Chunkgroesse vom Text abhaengt und Modelle sich weiterentwickeln. Eine Modellvariante (z.B. {\"name\": \"C\", \"chunk_words\": 800, \"modell_uebersetzung\": \"claude-fable-5\"}) kostet ein Mehrfaches und wird bewusst hinzugefuegt, wenn ein neues Modell zu pruefen ist. Leere Liste = kein Vergleich.",
   "anrede_vorgabe": "u=Sie, jij/je=du",
   "backend_standard": "anthropic",
@@ -28,6 +29,7 @@
   "fallback_modelle": "default",
   "figuren_nachhall": 3,
   "glossar_quelle": "extern",
+  "kette_max": 0,
   "lektorat_passes": [
     "det",
     "stil",
@@ -57,6 +59,7 @@
   "rueckschau_quelle": "revision",
   "sdk_nutzen": true,
   "sprachpaar": "nl-de",
+  "stapel_takt": 20,
   "streaming": true,
   "tempus": "quellnah",
   "test_words_dialog": 2500,

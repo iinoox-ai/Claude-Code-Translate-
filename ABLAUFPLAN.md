@@ -293,6 +293,27 @@ Volllauf: Übersetzung mit Revision rund 36 $, Lektorat rund 23 $,
 Vorbereitung rund 1 $. Die Werte hängen am Modell und an der Chunkgröße —
 `variantenvergleich` weist sie je Variante getrennt aus.
 
+### Halber Preis über den Stapel
+
+`uebersetzung.py --stapel` schickt den Volllauf über die Stapel-API: alles zum
+halben Preis, und statt 147 Aufrufen nacheinander laufen mehrere Ketten
+nebeneinander. Der Preis dafür sind **Nähte ohne deutsche Rückschau** an
+jedem Kettenanfang, der keine Ebenenfuge ist.
+
+```python
+colab_start.lauf("pipeline.py", "wellen", code=CODE)
+```
+
+zeigt für mehrere Werte von `kette_max` nebeneinander, wie viele Wellen und
+wie viele Nähte dabei herauskommen. `kette_max: 0` (Vorgabe) trennt nur an
+den Ebenenfugen — dort setzt die Rückschau ohnehin zurück, diese Schnitte
+kosten nichts. Jeder größere Wert ist eine Abwägung, und wie teuer sie
+wirklich ist, misst `bewertung.py --fugen` nach einem Testlauf.
+
+Der Stapel kennt den Ablehnungsrückfall aus Paket E nicht. Was er nicht
+liefert — abgelehnt, abgelaufen, fehlerhaft —, holt der Lauf einzeln nach,
+und dort greift der Rückfall dann doch.
+
 ---
 
 ## 8 · Wenn etwas klemmt
