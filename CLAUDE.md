@@ -256,6 +256,30 @@ gegen die Preisseiten — übernommen wird nur ein eindeutiges Paar, sonst bleib
 der hinterlegte Wert (Begründung in `ENTSCHEIDUNGEN.md`). Neue modellrufende Schritte
 ohne Usage-Erfassung gelten als unfertig.
 
+## Was der Testlauf messen kann
+
+Drei Auszüge: Erzählung, Dialog und die **Fallenpassage** — die Stelle mit der
+höchsten Dichte an falschen Freunden, Diminutiven, `zou` und
+Verlaufsformen. Die ersten beiden messen, ob der Text als deutsche Prosa
+besteht; der dritte, ob die Warnungen aus `block_fallen` ankommen. Er
+überschneidet die anderen nicht. `teile.json` hält die Absatzzahl je Auszug —
+ohne sie schneidet `bewertung` bei der Hälfte und vergleicht Erzählung gegen
+Dialog.
+
+Eine **Variante** darf jeden Schalter aus `gemeinsam.VARIANTENSCHALTER`
+tragen, nicht nur `chunk_words` und Modellnamen. Die Liste ist bewusst
+geschlossen: Ein Tippfehler erzeugte sonst still eine Einstellung, die nichts
+tut, und der Vergleich liefe durch. `preflight` meldet unbekannte Schlüssel
+vor dem ersten Modellaufruf.
+
+`lektorat.py --test --variante X` und `bewertung.py --lektorat --variante X`
+ziehen die Variante bis ins Lektorat durch — die Frage »braucht das
+Korrektorat wirklich Opus« ist eine Lektoratsfrage.
+
+`bewertung.py --fugen` beurteilt die **Nähte** zwischen Chunks und fragt
+ausschließlich nach dem Übergang. Das ist die Zahl hinter `kette_max` im
+Stapelbetrieb: Kürzere Ketten heißen mehr Fugen.
+
 ## Kalibrierung gilt je Modell-Ära
 
 `revision_pass`, `lektorat_passes` und `chunk_words` sind unter Opus 5

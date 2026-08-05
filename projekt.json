@@ -56,8 +56,9 @@
   "sdk_nutzen": true,
   "sprachpaar": "nl-de",
   "tempus": "quellnah",
-  "test_words_dialog": 1500,
-  "test_words_erzaehlung": 1500,
+  "test_words_dialog": 2500,
+  "test_words_erzaehlung": 2500,
+  "test_words_fallen": 2000,
   "timeout_connect": 10,
   "timeout_read_api": 600,
   "varianten": [

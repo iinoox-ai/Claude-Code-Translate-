@@ -154,8 +154,14 @@ STANDARD = {
     "export_glossar":            True,
     "export_bewertung":          True,
 
-    "test_words_erzaehlung":     1500,
-    "test_words_dialog":         1500,
+    # Drei Testauszuege. Erzaehlung und Dialog messen, ob der Text als
+    # deutsche Prosa besteht; die Fallenpassage misst, ob die Warnungen
+    # aus dem Fallenblock ankommen — die Schwaeche dieser Sprachrichtung
+    # faellt in einem ruhigen Erzaehlabschnitt gar nicht auf.
+    # 0 fuer 'test_words_fallen' laesst den dritten Auszug weg.
+    "test_words_erzaehlung":     2500,
+    "test_words_dialog":         2500,
+    "test_words_fallen":         2000,
 
     "ratio_min":                 0.90,
     "ratio_max":                 1.20,
@@ -182,7 +188,7 @@ AENDERBAR = {
     "revision_pass", "lektorat_passes",
     "diminutive", "tempus", "anrede_vorgabe",
     "quotes", "eszett", "varietaet", "dash",
-    "test_words_erzaehlung", "test_words_dialog",
+    "test_words_erzaehlung", "test_words_dialog", "test_words_fallen",
     "lektorat_ratio_min", "lektorat_ratio_max",
     "export_glossar", "export_bewertung", "glossar_quelle", "sheets_id",
     "rahmen_marker", "varianten", "technik_ausnahmen",
@@ -1473,18 +1479,50 @@ def varianten(cfg):
     return sauber
 
 
+# Was eine Variante ausser 'chunk_words' verstellen darf. Bewusst eine
+# Liste und kein "alles ausser 'name'": Ein Tippfehler im Variantennamen
+# eines Schluessels wuerde sonst still eine Einstellung erfinden, und der
+# Vergleich maesse etwas anderes als er behauptet.
+VARIANTENSCHALTER = ({"chunk_words", "context_words", "context_words_voraus",
+                      "rueckschau_quelle", "figuren_nachhall",
+                      "revision_pass", "lektorat_passes", "tempus",
+                      "diminutive"}
+                     | {f"modell_{r}" for r in ROLLEN}
+                     | {f"effort_{r}" for r in ROLLEN})
+
+
+def variante_maengel(v):
+    """Schluessel einer Variante, die nichts bewirken wuerden."""
+    return [k for k in v if k != "name" and k not in VARIANTENSCHALTER]
+
+
 def variante_anwenden(cfg, v):
     """Uebernimmt die Abweichungen der Variante in eine Kopie der Config.
+
+    Bis Paket D trug eine Variante nur 'chunk_words' und Modellnamen.
+    Damit liessen sich die Schalter aus Paket C — Vorwegschau,
+    Rueckschauquelle, Figurennachhall — gar nicht vergleichen: Ein
+    Schalter, den man nicht messen kann, ist eine Meinung.
 
     Gibt (config, chunk_words, beschreibung) zurueck."""
     cfg = dict(cfg)
     chunk_words = int(v.get("chunk_words", cfg["chunk_words"]))
     teile = [f"{chunk_words} Woerter/Chunk"]
+
+    # 'modell_uebersetzung' zieht 'modell_revision' mit, wenn dieses nicht
+    # eigens genannt ist: Ein Vergleich, der Pass 1 umstellt und Pass 2
+    # beim alten Modell laesst, misst eine Mischung.
     modell = str(v.get("modell_uebersetzung", "")).strip()
+    if modell and "modell_revision" not in v:
+        cfg["modell_revision"] = modell
+
+    for k, wert in v.items():
+        if k == "name" or k == "chunk_words" or k not in VARIANTENSCHALTER:
+            continue
+        cfg[k] = wert
+        if k != "modell_uebersetzung":
+            teile.append(f"{k}={wert}")
     if modell:
-        cfg["modell_uebersetzung"] = modell
-        cfg["modell_revision"] = str(
-            v.get("modell_revision", modell)).strip()
         teile.append(modell)
     return cfg, chunk_words, ", ".join(teile)
 

@@ -367,12 +367,32 @@ def main():
     ap.add_argument("--test", action="store_true")
     ap.add_argument("--nur", default=None, choices=["det", "stil", "korrektorat"])
     ap.add_argument("--chunk", type=int, default=None)
+    ap.add_argument("--variante", default="A",
+                    help="Variante aus projekt.json (A = Basis). Lektoriert "
+                         "die Testuebersetzung derselben Variante.")
     args = ap.parse_args()
 
     G.kopf("LEKTORAT" + (" (Test)" if args.test else ""))
     cfg = G.lade_config()
     R.sicherstellen(cfg)          # No-op ohne sheets_id
-    praefix = "test/" if args.test else ""
+
+    # Die Variante gilt hier wie in uebersetzung.py: Sie kann die
+    # Lektoratsfolge, die Modelle und die Denktiefe verstellen. Ohne das
+    # liesse sich zwar die Uebersetzung vergleichen, aber nicht das
+    # Lektorat — und die Frage 'braucht das Korrektorat wirklich Opus'
+    # ist genau eine Lektoratsfrage.
+    if args.test and args.variante != "A":
+        v = next((x for x in G.varianten(cfg)
+                  if x["name"] == args.variante), None)
+        if v is None:
+            moeglich = ", ".join(x["name"] for x in G.varianten(cfg)) or "keine"
+            sys.exit(f"FEHLER: Variante '{args.variante}' steht nicht in "
+                     f"projekt.json.\n  Moeglich: {moeglich}")
+        cfg, _, beschreibung = G.variante_anwenden(cfg, v)
+        print(f"Variante {args.variante}: {beschreibung}\n")
+
+    praefix = ("test/" if args.variante == "A" else f"test{args.variante}/") \
+        if args.test else ""
     G.lauf_setzen(praefix)
     quelle = praefix + G.F["uebersetzung"]
     ziel_datei = praefix + G.F["lektoriert"]

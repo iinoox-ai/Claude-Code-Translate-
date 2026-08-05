@@ -544,7 +544,25 @@ def block_leitmotive(chunk, leitmotive):
 REDE = tuple("„“«»'\"\u2018\u2014\u2013")
 
 
-def testauszuege(paras, n_erzaehlung, n_dialog):
+def fallendichte(text):
+    """Fallen je 1000 Woerter — falsche Freunde, Diminutive, zou, aan het.
+
+    Deterministisch aus denselben Mustern, die 'block_fallen' im Prompt
+    ausweist. Der Auszug, der danach ausgewaehlt wird, ist damit genau
+    der, in dem die Warnungen am dichtesten stehen — und damit der, an dem
+    sich zeigt, ob sie wirken."""
+    low = text.lower()
+    w = max(1, len(text.split()))
+    n = sum(len(re.findall(rf"\b{re.escape(nl)}\w{{0,3}}\b", low))
+            for nl, _, _ in VALSE_VRIENDEN)
+    n += len([x for x in DIMINUTIV_NL.findall(low)
+              if x not in DIM_LEXIKALISIERT])
+    n += len(ZOU.findall(low)) + len(AAN_HET.findall(low))
+    n += len(POSTUUR.findall(low)) + len(ER_EXIST.findall(low))
+    return n / (w / 1000)
+
+
+def testauszuege(paras, n_erzaehlung, n_dialog, n_fallen=0):
     laengen = [len(p.split()) for p in paras]
     gesamt = sum(laengen)
 
@@ -584,7 +602,37 @@ def testauszuege(paras, n_erzaehlung, n_dialog):
         n += len(p.split())
         if n >= n_dialog:
             break
-    return teil1, teil2, bester_wert
+    ende2 = bestes + len(teil2)
+
+    # Dritter Auszug: die Fallenpassage. Erzaehlung und Dialog messen, ob
+    # der Text als deutsche Prosa besteht; dieser misst, ob die
+    # Warnungen aus dem Fallenblock ankommen. Das ist die Schwaeche
+    # dieser Sprachrichtung, und sie faellt in einem ruhigen
+    # Erzaehlabschnitt gar nicht auf.
+    teil3, dichte3 = [], 0.0
+    if n_fallen > 0:
+        belegt = set(range(start, ende1)) | set(range(bestes, ende2))
+        bester3, wert3, i = None, -1.0, 0
+        while i < len(paras):
+            j, w = i, 0
+            while j < len(paras) and w < n_fallen:
+                w += laengen[j]
+                j += 1
+            if w >= n_fallen * 0.7 and not (belegt & set(range(i, j))):
+                d = fallendichte("\n\n".join(paras[i:j]))
+                if d > wert3:
+                    wert3, bester3 = d, i
+            i += 3
+        if bester3 is not None:
+            n = 0
+            for p in paras[bester3:]:
+                teil3.append(p)
+                n += len(p.split())
+                if n >= n_fallen:
+                    break
+            dichte3 = wert3
+    return teil1, teil2, teil3, {"dialogdichte": bester_wert,
+                                 "fallendichte": dichte3}
 
 
 def zitat_absaetze(zitate):
@@ -631,16 +679,30 @@ def main():
         praefix = ("test" if args.variante == "A"
                    else "test" + args.variante) + "/"
         os.makedirs(praefix, exist_ok=True)
-        t1, t2, dichte = testauszuege(paras_alle,
-                                      cfg["test_words_erzaehlung"],
-                                      cfg["test_words_dialog"])
+        t1, t2, t3, kennzahlen = testauszuege(
+            paras_alle, cfg["test_words_erzaehlung"], cfg["test_words_dialog"],
+            int(cfg.get("test_words_fallen", 0) or 0))
         print(f"Teil 1 (Erzählung): {sum(len(p.split()) for p in t1)} Wörter, "
               f"{len(t1)} Absätze")
         print(f"Teil 2 (Dialog):    {sum(len(p.split()) for p in t2)} Wörter, "
-              f"{len(t2)} Absätze, Redeanteil {dichte:.0%}")
+              f"{len(t2)} Absätze, Redeanteil "
+              f"{kennzahlen['dialogdichte']:.0%}")
+        if t3:
+            print(f"Teil 3 (Fallen):    {sum(len(p.split()) for p in t3)} "
+                  f"Wörter, {len(t3)} Absätze, "
+                  f"{kennzahlen['fallendichte']:.0f} Fallen je 1000 Wörter")
         print(f"Variante {args.variante}:         {beschreibung}\n")
-        gruppen = [t1, t2]
+        gruppen = [g for g in (t1, t2, t3) if g]
         marken = {}
+        # Wo die Auszuege im Ergebnis aneinanderstossen, muss die
+        # Bewertung wissen — sonst trennt sie bei 'Haelfte der Absaetze'
+        # und vergleicht Erzaehlung gegen Dialog. Die Absatzzahl ist
+        # belastbar, seit ein Chunk mit verschobener Absatzzahl
+        # wiederholt wird.
+        os.makedirs(praefix, exist_ok=True)
+        with open(praefix + "teile.json", "w", encoding="utf-8") as f:
+            json.dump({"erzaehlung": len(t1), "dialog": len(t2),
+                       "fallen": len(t3)}, f, ensure_ascii=False, indent=2)
     else:
         praefix = ""
         marken = zitat_absaetze(zitate)

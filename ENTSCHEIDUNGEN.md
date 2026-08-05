@@ -1216,6 +1216,79 @@ mindestens drei Chunks verwertbar sind.
 
 ---
 
+## Was der Testlauf messen kann (Paket D)
+
+**Entschieden (August 2026).** Drei Erweiterungen, die alle dasselbe Problem
+haben: Bis hierher ließ sich vieles verstellen und wenig vergleichen.
+
+### Varianten tragen jeden Schalter
+
+Eine Variante trug `chunk_words` und Modellnamen. Damit ließen sich die
+Schalter aus Paket C — Vorwegschau, Rückschauquelle, Figurennachhall — gar
+nicht messen, und `rueckschau_quelle` wäre eine Voreinstellung ohne Begründung
+geblieben. Erlaubt sind jetzt zusätzlich `context_words`,
+`context_words_voraus`, `rueckschau_quelle`, `figuren_nachhall`,
+`revision_pass`, `lektorat_passes`, `tempus`, `diminutive` sowie jedes
+`modell_<rolle>` und `effort_<rolle>`.
+
+**Bewusst eine Liste und kein „alles außer `name`".** Ein Tippfehler
+(`rueckschau_qelle`) erzeugte sonst still eine Einstellung, die nichts tut —
+und der Vergleich liefe durch und maße etwas anderes, als er behauptet. Der
+Preflight meldet unbekannte Schlüssel **vor** dem ersten Modellaufruf.
+
+`modell_uebersetzung` zieht `modell_revision` weiterhin mit, wenn dieses nicht
+eigens genannt ist: Ein Vergleich, der Pass 1 umstellt und Pass 2 beim alten
+Modell lässt, misst eine Mischung.
+
+### `lektorat.py --test --variante` und `bewertung.py --lektorat --variante`
+
+Die Frage „braucht das Korrektorat wirklich Opus" ist eine Lektoratsfrage und
+war bisher nicht zu beantworten — die Varianten endeten bei der Übersetzung.
+`--variante` gilt beim Lektorat nur mit `--test`; der Variantenvergleich der
+Übersetzung behält `test/` als Bezugspunkt, sonst verschöbe sich die Basis.
+
+### Der dritte Testauszug: die Fallenpassage
+
+Erzählung und Dialog messen, ob der Text als deutsche Prosa besteht. Ob die
+Warnungen aus dem Fallenblock **ankommen**, messen sie nicht — in einem ruhigen
+Erzählabschnitt kommen die Fallen gar nicht vor, und genau dort liegt die
+Schwäche dieser Sprachrichtung.
+
+Der dritte Auszug sucht deshalb die Stelle mit der höchsten **Fallendichte**,
+gemessen aus denselben Mustern, die `block_fallen` im Prompt ausweist:
+falsche Freunde, Diminutive, `zou`, `aan het`, `zitten te`, `er is`. Er
+überschneidet die anderen beiden nicht — sonst urteilte der Judge zweimal über
+denselben Text.
+
+Die Auszüge stehen jetzt auf 2500/2500/2000 statt 1500/1500. Sechs
+Urteilspaare statt vier, und der Testlauf kostet entsprechend mehr; dafür
+beantwortet er die Frage, für die es ihn gibt.
+
+**`teile.json` wird jetzt wirklich geschrieben.** Sie wurde gelesen und
+nirgends erzeugt — `teile_trennen` schnitt deshalb bei der Hälfte der Absätze
+und verglich Erzählung gegen Dialog, sobald die Auszüge verschieden viele
+Absätze hatten. Belastbar ist die Absatzzahl erst, seit ein Chunk mit
+verschobener Absatzzahl wiederholt wird (Paket C).
+
+### Das Fugenurteil: die Zahl hinter `kette_max`
+
+Im Stapelbetrieb (Paket G) läuft die Kette nur so lange, wie ein Chunk auf den
+vorigen warten kann. Kürzere Ketten heißen mehr Fugen — und ob das schadet,
+war bisher eine Vermutung.
+
+`bewertung.py --fugen` legt dem Judge das Ende eines Chunks und den Anfang des
+folgenden vor und fragt **ausschließlich** nach dem Übergang: Tempus, Anrede,
+Wiederaufnahme, Wiederholung, Terminologie. Nicht nach der Qualität im Übrigen
+— sonst misst es dasselbe wie das Blindurteil und nichts über die Naht.
+
+Verglichen werden Nähte, die **mit** Rückschau entstanden sind. Bricht es schon
+dort, ist eine Kette ohne Rückschau erst recht zu kurz. Das Bruchmaß (deutlich
+zählt voll, leicht zur Hälfte) mündet in eine Empfehlung; die Marken 10 % und
+25 % sind Konvention und keine Messung — sie machen aus einer Zahl eine
+Entscheidung und stehen deshalb im Code und nicht im Kopf des Lesers.
+
+---
+
 ## Verworfen — und warum
 
 **API-Frontier-Modell als Primärübersetzer** (zunächst). Die Kostenrechnung
