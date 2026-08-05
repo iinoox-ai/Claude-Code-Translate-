@@ -236,6 +236,12 @@ Ohne `sheets_id` bleibt alles wie früher: Die JSONs werden direkt gelesen.
 Fassung — und **setzt sie nicht ein.** Der Vorschlag landet mit Übersetzer,
 Fundstelle und Konfidenz in `zitate_review.md` bzw. im Tab `ZitateReview`.
 
+Daneben steht die Spalte `belege`: die URLs der Treffer, auf die sich die
+Antwort stützt. Sie sind abgerufen, während `uebersetzer` und `quelle` vom
+Modell formuliert sind — beim Freigeben ist das der Unterschied, auf den es
+ankommt. Vollständig mit Titel und belegtem Wortlaut stehen sie im Abschnitt
+„Befunde im Einzelnen".
+
 Eingesetzt wird ausschließlich, was in der Spalte `freigegeben` ein `ja`
 trägt. Nach dem Eintragen:
 

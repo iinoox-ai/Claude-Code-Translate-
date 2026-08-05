@@ -76,6 +76,13 @@ Zwei Eigenheiten, die nicht „repariert" werden dürfen:
   HTTP 400. Der Selbsttest prüft beide Payloads darauf. Die Tiefe steuert
   `effort_<rolle>` (deutsch in `projekt.json`, Abbildung auf `low`…`max` in
   `gemeinsam.EFFORT`).
+- **Eine Ablehnung des Sicherheitsklassifikators bricht den Lauf nicht ab.**
+  `fallbacks` (Standard `default`) lässt ein Ersatzmodell antworten; gebucht
+  wird unter dem Modell, das wirklich geantwortet hat, und damit steht die
+  Stelle als eigene Zeile in der Kostenübersicht. Der Beleg für einen
+  Rückfall ist `usage.iterations`, **nie** der Modellname — ein Alias löst
+  auf einen datierten Namen auf und wäre jedes Mal ein Fehlalarm. Achtung
+  Paket G: Die Stapel-API nimmt `fallbacks` nicht an.
 - **Der System-Prompt trägt einen Cache-Marker** (Anthropic
   `cache_control`). Wer Prompt-Bausteine umsortiert, zerstört unbemerkt die
   Cache-Trefferquote — identische Präfixe sind Geld. Die Lebensdauer steht in
@@ -179,6 +186,15 @@ brauchen keine Freigabe. Automatische Übernahme ist ausdrücklich verworfen —
 Grundsatz „lieber markierte Lücke als erfundener Wortlaut". Eingesetzte
 Zitate bleiben vom Lektorat ausgenommen.
 
+**`belege` ist etwas anderes als `quelle`.** Die Belege kommen aus den
+Zitatmarken der Websuche — URL, Titel, belegter Wortlaut, abgerufen.
+`uebersetzer` und `quelle` schreibt das Modell. Wer freigibt, soll den
+Unterschied sehen; deshalb stehen sie getrennt. Die Spalten der Review-Liste
+werden über `SPALTEN` gebaut **und über `SPALTEN.index(...)` wieder gelesen**
+— eine feste Position hat bei der ersten neuen Spalte still die falsche
+Zelle getroffen, und `freigegeben` ist die eine Spalte, bei der das einen
+ungeprüften Wortlaut in den Text setzt.
+
 ## Kontext in beide Richtungen
 
 Ein Chunk sieht zurück (`context_words`, Quelle und eigene Fassung) **und nach
@@ -255,6 +271,11 @@ schätzt vor dem Volllauf. Die Preise hält `tarife.py`
 gegen die Preisseiten — übernommen wird nur ein eindeutiges Paar, sonst bleibt
 der hinterlegte Wert (Begründung in `ENTSCHEIDUNGEN.md`). Neue modellrufende Schritte
 ohne Usage-Erfassung gelten als unfertig.
+
+Das gilt auch für Werkzeuge, die kein Modell sind: Die serverseitige Websuche
+kostet je Aufruf, nicht je Token, und wird als `suchen` gebucht
+(`gemeinsam.SUCHE_DOLLAR`). Ohne eigenes Feld wäre die Zitatrecherche der
+einzige Schritt, dessen Rechnung nicht aufgeht.
 
 ## Was der Testlauf messen kann
 
@@ -347,6 +368,19 @@ Wege sind erlaubt, zwei Wahrheiten darüber, was rausgeht, nicht — der
 Selbsttest prüft den Payload genau einmal. `sdk_fehler()` behält den
 Wortlaut `HTTP <code>`, sonst greift der Rückfall der Cache-Lebensdauer auf
 dem SDK-Pfad nicht. `sdk_nutzen: false` erzwingt `requests`.
+
+**Streaming gibt es nur auf dem SDK-Pfad** (`streaming`, Standard an).
+`get_final_message()` liefert dieselbe Nachricht wie ein Aufruf ohne Stream
+— der Stream ist ein Transportdetail, kein zweiter Payload. Der
+`requests`-Pfad bekommt bewusst keines: ein handgeschriebener SSE-Parser
+wäre ein Rückfallpfad, den kein Selbsttest prüfen kann.
+
+**Die Fassung der Websuche steht in `projekt.json`** (`websuche_werkzeug`),
+nicht im Code — ein Name im Code lässt die Zitatrecherche eines Tages mit
+veralteter Suche laufen, ohne dass es auffällt; ein Selbsttest verbietet ihn
+außerhalb von `gemeinsam.STANDARD`. Die Suche kostet je Aufruf und wird als
+`suchen` gebucht. `pause_turn` wird fortgesetzt, nicht als Formfehler
+gelesen.
 
 ## Testen ohne GPU
 

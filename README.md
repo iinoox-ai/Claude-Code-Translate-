@@ -213,6 +213,16 @@ Zwei Eigenheiten, die nicht „repariert" werden dürfen:
   geht der Anthropic-Verkehr über sie, sonst über `requests`; beide bauen
   denselben Payload und lesen die Antwort mit derselben Funktion. Ohne die
   SDK läuft alles weiter — nur ohne Streaming und Stapelverarbeitung.
+- **Eine Ablehnung bricht den Lauf nicht ab.** Lehnt der
+  Sicherheitsklassifikator einen Chunk ab (`stop_reason: "refusal"`),
+  beantwortet ihn ein Ersatzmodell (`fallback_modelle`, Standard
+  `default`). Gebucht wird unter dem Modell, das wirklich geantwortet hat —
+  in der Kostenübersicht steht die Stelle deshalb als eigene Zeile, und
+  genau dort findet man sie zum Nachlesen wieder.
+- **Angehaltene Werkzeugrunden laufen weiter.** Hält die API eine lange
+  Suchschleife an (`stop_reason: "pause_turn"`), geht die angehaltene
+  Antwort zurück und die Runde läuft weiter. Ohne das kam eine halbe
+  Antwort an, der Parser meldete einen Formfehler, und das Zitat fehlte.
 - **Der System-Prompt trägt einen Cache-Marker.** Er ist über alle Chunks
   byteweise identisch. Wer Bausteine umsortiert, zerstört die Trefferquote
   unbemerkt — identische Präfixe sind Geld.
@@ -268,5 +278,8 @@ Diff-Statistik und dem eigenen Urteil, nicht als Entscheidungsgrundlage.
 meldet es; verhindern lässt es sich nur durch die Prompt-Anweisung, die
 bereits drinsteht.
 
-**Kein Streaming.** Eine hängende Anfrage blockiert bis zum Timeout
-(`timeout_read`, Vorgabe 15 Minuten), erst dann greift der Retry.
+**Streaming nur auf dem SDK-Pfad.** Ist die SDK nicht installiert oder
+`sdk_nutzen: false` gesetzt, blockiert eine hängende Anfrage bis zum Timeout
+(`timeout_read_api`, Vorgabe 10 Minuten), erst dann greift der Retry. Der
+`requests`-Pfad bekommt kein Streaming: Er bräuchte einen handgeschriebenen
+SSE-Parser, und der wäre genau die Art Rückfallpfad, die niemand testet.

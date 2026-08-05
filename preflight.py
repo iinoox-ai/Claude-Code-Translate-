@@ -347,12 +347,19 @@ def selbsttest(cfg, b):
     try:
         import inspect
         fehler = []
-        soll = set(inspect.signature(G.Backend.chat).parameters)
+        # Geprueft wird 'chat_meta': Das ist die Methode, die jedes Backend
+        # selbst schreibt. 'chat' erbt jeder von der Basisklasse und ist
+        # deshalb trivial gleich — sie zu pruefen hiesse, nichts zu pruefen.
+        soll = set(inspect.signature(G.Backend.chat_meta).parameters)
         for name, backend in sorted(G.BACKENDS.items()):
-            ist = set(inspect.signature(type(backend).chat).parameters)
+            ist = set(inspect.signature(type(backend).chat_meta).parameters)
             fehlt = soll - ist
             if fehlt:
                 fehler.append(f"{name}: {', '.join(sorted(fehlt))} fehlt")
+            # Der Befund neben dem Text ist Teil des Vertrags: Wer nur den
+            # Text zurueckgibt, laesst 'chat_voll' beim Auspacken auflaufen.
+            if not isinstance(type(backend).chat_meta.__doc__ or "", str):
+                fehler.append(f"{name}: chat_meta ohne Beschreibung")
         # 'roh' und 'rolle' muessen ueberall ankommen — chat() reicht sie
         # ungeprueft durch.
         for pflicht in ("roh", "rolle", "modell"):
@@ -953,12 +960,27 @@ def selbsttest(cfg, b):
         soll = b_a.payload(cfg, "SYSTEM", "USER", "uebersetzung",
                            "claude-opus-5")
 
+        class _Strom:
+            def __init__(self, kw): self.kw = kw
+
+            def __enter__(self): return self
+
+            def __exit__(self, *a): return False
+
+            def get_final_message(self): return _Antwort()
+
         class _Nachrichten:
-            def __init__(self): self.gesehen = None
+            def __init__(self):
+                self.gesehen = None
+                self.wie = None
 
             def create(self, **kw):
-                self.gesehen = kw
+                self.gesehen, self.wie = kw, "create"
                 return _Antwort()
+
+            def stream(self, **kw):
+                self.gesehen, self.wie = kw, "stream"
+                return _Strom(kw)
 
         class _Antwort:
             def model_dump(self):
@@ -969,7 +991,9 @@ def selbsttest(cfg, b):
                                   "cache_creation_input_tokens": 0}}
 
         class _Klient:
-            def __init__(self): self.messages = _Nachrichten()
+            def __init__(self):
+                self.messages = _Nachrichten()
+                self.beta = type("B", (), {"messages": _Nachrichten()})()
 
         klient = _Klient()
         d = G.sdk_antwort(klient, soll)
@@ -978,6 +1002,30 @@ def selbsttest(cfg, b):
         text, usage = b_a.antwort_lesen(d)
         if text != "Hallo." or usage["cache_lesen"] != 11:
             fehler.append(f"SDK-Antwort falsch gelesen: {text!r}, {usage}")
+
+        # Streamen ist ein Transportdetail, kein zweiter Payload: Dieselbe
+        # Anfrage geht raus, dieselbe Nachricht kommt zurueck. Ginge dabei
+        # etwas verloren, waere es genau der Weg des Normalbetriebs.
+        klient = _Klient()
+        d = G.sdk_antwort(klient, soll, streamen=True)
+        if klient.messages.wie != "stream":
+            fehler.append("'streaming' erreicht die SDK nicht")
+        if klient.messages.gesehen != soll:
+            fehler.append("der Stream bekommt einen anderen Payload")
+        if b_a.antwort_lesen(d)[0] != "Hallo.":
+            fehler.append("Streamantwort wird anders gelesen")
+
+        # Betakennwoerter gehen ueber den Namensraum 'beta' — im normalen
+        # Namensraum kennt die API sie nicht, und der Aufruf liefe ohne die
+        # Betafunktion durch, statt sie zu melden.
+        klient = _Klient()
+        G.sdk_antwort(klient, soll, betas=[G.BETA_FALLBACK])
+        if klient.messages.gesehen is not None:
+            fehler.append("Betaaufruf laeuft ueber den normalen Namensraum")
+        gesehen = klient.beta.messages.gesehen or {}
+        if gesehen.get("betas") != [G.BETA_FALLBACK]:
+            fehler.append(f"Betakennwort fehlt im Aufruf: "
+                          f"{gesehen.get('betas')}")
 
         # Fehlerabbildung: Status bleibt lesbar, TTL-Rueckfall greift.
         class _Status(Exception):
@@ -1010,6 +1058,271 @@ installiert, requests-Pfad"
                         f"Statuscodes erhalten ({vorhanden})")
     except Exception as e:
         b.add("FEHLER", "SDK-Pfad nicht pruefbar", repr(e))
+
+    # --- Ablehnung, Rueckfall, angehaltene Werkzeugrunde ---------------
+    # Drei Faelle, die ein Buchlauf trifft und die frueher alle drei den
+    # Lauf gekostet haben: Der Klassifikator lehnt einen Chunk ab (dreimal
+    # dieselbe aussichtslose Wiederholung, dann Abbruch bei Chunk 300), die
+    # Werkzeugschleife wird angehalten (halbe Antwort, gelesen als
+    # Formfehler, Zitat uebersprungen), und die Websuche taucht in keiner
+    # Rechnung auf.
+    try:
+        import contextlib
+        import io
+        import tempfile
+        fehler = []
+        b_a = G.AnthropicBackend()
+        cfg_f = dict(cfg, fallback_modelle="default", sdk_nutzen=True,
+                     streaming=False, cache_ttl="", max_retries=1)
+
+        # (1) Der Rueckfall steht im Payload und im Kopf — und nur dann.
+        p = b_a.payload(cfg_f, "S", "U", "uebersetzung", "claude-opus-5")
+        if p.get("fallbacks") != "default":
+            fehler.append("'fallbacks' fehlt im Payload")
+        if b_a.betas(cfg_f) != [G.BETA_FALLBACK]:
+            fehler.append(f"Betakennwort fehlt: {b_a.betas(cfg_f)}")
+        aus = dict(cfg_f, fallback_modelle="")
+        if "fallbacks" in b_a.payload(aus, "S", "U", "uebersetzung", "m") \
+                or b_a.betas(aus):
+            fehler.append("leeres 'fallback_modelle' schaltet nicht ab")
+        # Mehr als drei Modelle nimmt die API nicht an. Gekappt wird hier,
+        # damit daraus kein HTTP 400 mitten im Buch wird.
+        viele = dict(cfg_f, fallback_modelle=["a", "b", "c", "d"])
+        if G.fallbacks_wert(viele) != [{"model": m} for m in ("a", "b", "c")]:
+            fehler.append(f"Modelliste nicht gekappt: "
+                          f"{G.fallbacks_wert(viele)}")
+
+        # (2) Die Ablehnung wird eng erkannt: das unbekannte Betakennwort
+        # ja, ein gewoehnlicher Payloadfehler nicht. Zu weit gefasst
+        # schluckte sie echte Fehler und gaebe still ein zweites Mal Geld aus.
+        kopffehler = G.ApiFehler(
+            "HTTP 400: Unexpected value(s) `server-side-fallback-2026-07-01` "
+            "for the `anthropic-beta` header.")
+        if not G.fallback_abgelehnt(kopffehler):
+            fehler.append("abgelehntes Betakennwort wird nicht erkannt")
+        for harmlos in ("HTTP 400: max_tokens: too large",
+                        "HTTP 429: rate limited", "Netzwerkfehler: timeout"):
+            if G.fallback_abgelehnt(G.ApiFehler(harmlos)):
+                fehler.append(f"'{harmlos}' schaltet den Rueckfall ab")
+
+        # (3) Eine Ablehnung nennt Kategorie und Erklaerung. Die Kategorie
+        # allein sagt niemandem, warum ausgerechnet dieser Absatz auffiel.
+        try:
+            b_a.antwort_lesen({"stop_reason": "refusal", "content": [],
+                               "stop_details": {
+                                   "type": "refusal",
+                                   "category": "general_harms",
+                                   "explanation": "Beschreibung von Gewalt."}})
+            fehler.append("Ablehnung wird nicht gemeldet")
+        except G.ApiFehler as e:
+            if "general_harms" not in str(e) or "Gewalt" not in str(e):
+                fehler.append(f"Ablehnungsgrund unvollstaendig: {e}")
+
+        # (4) Wer geantwortet hat, entscheidet die Iterationsliste — nicht
+        # der Modellname. Ein Alias loest auf einen datierten Namen auf;
+        # danach zu buchen zerlegte die Kostenzeile in zwei halbe.
+        alias = {"model": "claude-opus-5-20260801", "usage": {}}
+        if G.bedient_von(alias, "claude-opus-5") != "claude-opus-5":
+            fehler.append("aufgeloester Alias gilt faelschlich als Rueckfall")
+
+        folge_rueckfall = [{
+            "model": "claude-opus-4-8",
+            "content": [{"type": "fallback",
+                         "from": {"model": "claude-opus-5"},
+                         "to": {"model": "claude-opus-4-8"}},
+                        {"type": "text", "text": "Ersatzfassung."}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 5, "output_tokens": 2,
+                      "iterations": [
+                          {"type": "message", "model": "claude-opus-5",
+                           "input_tokens": 5, "output_tokens": 0},
+                          {"type": "fallback_message",
+                           "model": "claude-opus-4-8",
+                           "input_tokens": 5, "output_tokens": 2}]}}]
+
+        # (5) Eine angehaltene Werkzeugrunde wird fortgesetzt, nicht
+        # halbiert. Die angehaltene Antwort geht dabei unveraendert
+        # zurueck — aber ohne die None-Felder, mit denen die SDK
+        # ungesetzte Schluessel fuellt und die die API ablehnt.
+        folge_pause = [
+            {"content": [{"type": "server_tool_use", "id": "s1",
+                          "name": "web_search", "input": None},
+                         {"type": "text", "text": "Teil eins. "}],
+             "stop_reason": "pause_turn",
+             "usage": {"input_tokens": 10, "output_tokens": 2,
+                       "server_tool_use": {"web_search_requests": 2}}},
+            {"content": [{"type": "text", "text": "Teil zwei.",
+                          "citations": [
+                              {"type": "web_search_result_location",
+                               "url": "https://example.org/a",
+                               "title": "Beispielausgabe",
+                               "cited_text": "Alles von Wert ist wehrlos."}]}],
+             "stop_reason": "end_turn",
+             "usage": {"input_tokens": 12, "output_tokens": 4,
+                       "server_tool_use": {"web_search_requests": 1}}},
+        ]
+
+        class _MM:
+            def __init__(s, folge): s.folge, s.gesehen = list(folge), []
+
+            def create(s, **kw):
+                s.gesehen.append(kw)
+                d = s.folge.pop(0)
+                return type("A", (), {"model_dump": lambda self: d})()
+
+        class _KK:
+            def __init__(s, folge):
+                s.messages = _MM(folge)
+                s.beta = type("B", (), {"messages": s.messages})()
+
+        echt_schluessel = G.api_schluessel
+        alt_cwd = os.getcwd()
+        try:
+            G.api_schluessel = lambda *a, **k: "test-schluessel"
+            with tempfile.TemporaryDirectory() as tmp:
+                os.chdir(tmp)
+
+                klient = _KK(folge_rueckfall)
+                b_a.klient = lambda cfg_: klient
+                with contextlib.redirect_stdout(io.StringIO()) as ausgabe:
+                    text, meta = b_a.chat_meta(
+                        cfg_f, "S", "U", rolle="uebersetzung",
+                        modell="claude-opus-5")
+                if meta.get("modell") != "claude-opus-4-8":
+                    fehler.append(f"Ersatzmodell nicht erkannt: {meta}")
+                if "claude-opus-4-8" not in ausgabe.getvalue():
+                    fehler.append("Rueckfall laeuft still durch")
+                gebucht = G.kosten_schnappschuss()
+                if "voll/uebersetzung/claude-opus-4-8" not in gebucht:
+                    fehler.append(f"unter dem falschen Modell gebucht: "
+                                  f"{sorted(gebucht)}")
+
+                klient = _KK(folge_pause)
+                b_a.klient = lambda cfg_: klient
+                with contextlib.redirect_stdout(io.StringIO()):
+                    text, meta = b_a.chat_meta(
+                        cfg_f, "S", "U", rolle="zitat", roh=True,
+                        modell="claude-opus-5",
+                        werkzeuge=G.websuche_werkzeug(cfg_f))
+                if text != "Teil eins. Teil zwei.":
+                    fehler.append(f"angehaltene Runde nicht fortgesetzt: "
+                                  f"{text!r}")
+                if len(klient.messages.gesehen) != 2:
+                    fehler.append(f"{len(klient.messages.gesehen)} statt 2 "
+                                  f"Aufrufe fuer eine angehaltene Runde")
+                else:
+                    zweiter = klient.messages.gesehen[1]["messages"]
+                    if len(zweiter) != 2 or zweiter[1]["role"] != "assistant":
+                        fehler.append("angehaltene Antwort geht nicht zurueck")
+                    elif any(v is None for bl in zweiter[1]["content"]
+                             for v in bl.values()):
+                        fehler.append("None-Felder gehen an die API zurueck")
+                # Beide Zusicherungen koennen nacheinander abgelehnt
+                # werden. Frueher wurde genau einmal wiederholt: Lehnte der
+                # Anbieter erst die Lebensdauer und dann den Rueckfall ab,
+                # brach der Lauf ab, obwohl er ohne beide gelaufen waere.
+                merker = (G._TTL_ABGELEHNT, G._FALLBACK_ABGELEHNT)
+                try:
+                    ruf = []
+
+                    class _Zwei:
+                        def create(s, **kw):
+                            ruf.append(kw)
+                            if len(ruf) == 1:
+                                raise G.ApiFehler("HTTP 400: ttl: unsupported")
+                            if len(ruf) == 2:
+                                raise G.ApiFehler("HTTP 400: fallbacks not "
+                                                  "enabled")
+                            return type("A", (), {"model_dump": lambda self: {
+                                "content": [{"type": "text", "text": "Da."}],
+                                "stop_reason": "end_turn",
+                                "usage": {"input_tokens": 3,
+                                          "output_tokens": 1}}})()
+
+                    zwei = _Zwei()
+                    b_a.klient = lambda cfg_: type(
+                        "K", (), {"messages": zwei,
+                                  "beta": type(
+                                      "B", (),
+                                      {"messages": zwei})()})()
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        t2, _ = b_a.chat_meta(dict(cfg_f, cache_ttl="1h"),
+                                              "S", "U", modell="claude-opus-5")
+                    if t2 != "Da." or len(ruf) != 3:
+                        fehler.append(f"zwei Ablehnungen ueberleben den Lauf "
+                                      f"nicht: {t2!r}, {len(ruf)} Aufrufe")
+                    elif "ttl" in str(ruf[2].get("system")) \
+                            or "fallbacks" in ruf[2]:
+                        fehler.append("aufgegebene Zusicherung steht im "
+                                      "neuen Payload")
+                finally:
+                    G._TTL_ABGELEHNT, G._FALLBACK_ABGELEHNT = merker
+
+                if meta.get("suchen") != 3:
+                    fehler.append(f"Suchen falsch gezaehlt: "
+                                  f"{meta.get('suchen')}")
+                if [x["url"] for x in meta.get("belege") or []] \
+                        != ["https://example.org/a"]:
+                    fehler.append(f"Belege fehlen: {meta.get('belege')}")
+                # Die Suche kostet je Aufruf und muss in der Rechnung
+                # stehen. Ohne eigenes Feld waere die Zitatrecherche der
+                # einzige Schritt, dessen Preis nicht stimmt.
+                zeile = G.kosten_schnappschuss().get(
+                    "voll/zitat/claude-opus-5", {})
+                if zeile.get("suchen") != 3:
+                    fehler.append(f"Suchen nicht gebucht: {zeile}")
+                preis = G.kosten_dollar({"ein": 0, "aus": 0, "suchen": 4},
+                                        {"ein": 5.0, "aus": 25.0})
+                if abs(preis - 0.04) > 1e-9:
+                    fehler.append(f"Suchpreis falsch: {preis}")
+        finally:
+            G.api_schluessel = echt_schluessel
+            del b_a.klient
+            os.chdir(alt_cwd)
+
+        # (6) Die Werkzeugfassung kommt aus der Konfiguration, nicht aus
+        # dem Code. Ein Name im Code laesst den Schritt eines Tages mit
+        # veralteter Suche laufen, ohne dass es jemandem auffaellt.
+        # Ausgenommen sind die zwei Stellen, an denen der Name hingehoert:
+        # die Vorgabe in gemeinsam.STANDARD und dieser Test. Ueberall sonst
+        # ist er die Fassung, die niemand mehr aendert — zitatrecherche.py
+        # trug bis August 2026 die von Maerz 2025.
+        nadel = "web_search_" + "20"
+        drin = sorted(os.path.basename(n) for n in _glob_py()
+                      if nadel in quelltext(n)
+                      and os.path.basename(n) not in ("preflight.py",
+                                                      "gemeinsam.py"))
+        if drin:
+            fehler.append(f"Werkzeugfassung hartkodiert in {', '.join(drin)}")
+        w = G.websuche_werkzeug(
+            dict(cfg, websuche_werkzeug="web_search_20260209",
+                 websuche_filtern=True))
+        if w[0].get("allowed_callers"):
+            fehler.append("filternde Fassung wird auf direkt gezwungen")
+        w = G.websuche_werkzeug(
+            dict(cfg, websuche_werkzeug="web_search_20260209",
+                 websuche_filtern=False))
+        if w[0].get("allowed_callers") != ["direct"]:
+            fehler.append("'websuche_filtern: false' wirkt nicht")
+        # Die aelteste Fassung kennt den Schluessel nicht und antwortet
+        # darauf mit HTTP 400 — sie darf ihn nie bekommen.
+        w = G.websuche_werkzeug(
+            dict(cfg, websuche_werkzeug="web_search_20250305",
+                 websuche_filtern=False))
+        if w[0].get("allowed_callers"):
+            fehler.append("alte Fassung bekommt 'allowed_callers'")
+        if G.websuche_werkzeug(dict(cfg, websuche_werkzeug="")) is not None:
+            fehler.append("leeres 'websuche_werkzeug' schaltet nicht ab")
+
+        if fehler:
+            b.add("FEHLER", "Rueckfall oder Websuche fehlerhaft",
+                  "; ".join(fehler))
+        else:
+            b.add("OK", "Ablehnung faellt auf ein Ersatzmodell zurueck und "
+                        "wird dort gebucht, angehaltene Werkzeugrunden "
+                        "laufen weiter, Suchen sind bezahlt")
+    except Exception as e:
+        b.add("FEHLER", "Rueckfall nicht pruefbar", repr(e))
 
     # --- Ueberlaengen: gezaehlt, nicht gekappt -------------------------
     # Kappen waere die naheliegende Reaktion und die falsche: Ein Absatz
@@ -1391,9 +1704,22 @@ installiert, requests-Pfad"
                 text = open(Z.REVIEW, encoding="utf-8").read()
                 if "Musterfrau" not in text or "Ausgabe X" not in text:
                     fehler.append("Quelle fehlt in der Review-Liste")
-                # Freigabe erteilen und erneut einlesen.
-                open(Z.REVIEW, "w", encoding="utf-8").write(
-                    text.replace("| 0.9 | nein |", "| 0.9 | ja |"))
+                # Freigabe erteilen wie ein Mensch: die Zelle in der Spalte
+                # 'freigegeben' aendern. Eine feste Position im Zeilentext
+                # zu ersetzen hat bei der ersten neuen Spalte still
+                # danebengegriffen
+                # — und dann prueft der Test die Freigabe nicht mehr.
+                i_frei = Z.SPALTEN.index("freigegeben")
+                neu = []
+                for zeile in text.splitlines():
+                    f = [x.strip() for x
+                         in zeile.strip().strip("|").split("|")]
+                    if zeile.startswith("|") and len(f) == len(Z.SPALTEN) \
+                            and f[0].isdigit() and f[i_frei] == "nein":
+                        f[i_frei] = "ja"
+                        zeile = "| " + " | ".join(f) + " |"
+                    neu.append(zeile)
+                open(Z.REVIEW, "w", encoding="utf-8").write("\n".join(neu))
                 with contextlib.redirect_stdout(io.StringIO()):
                     g, o = Z.freigabe_einlesen({"sheets_id": ""}, [eng, nl])
                 if nl.get("original_deutsch") != "Alles von Wert ist "\
@@ -1428,6 +1754,16 @@ installiert, requests-Pfad"
             Z.review_in_tab({"sheets_id": "x" * 30}, [eng, nl])
         finally:
             RS_._buch = echt_buch
+        # Vorlage und Schreiber muessen dieselben Spalten meinen. Sie taten
+        # es bis August 2026 nicht: Die Vorlage legte fuenf ausgedachte
+        # Ueberschriften an, der Schritt schrieb acht andere hinein — und
+        # loeschte den Tab vorher, sodass es nie auffiel.
+        import referenz_sync as RS_vorlage
+        if list(RS_vorlage.TAB_ZITATE[1]) != list(Z.SPALTEN):
+            fehler.append(f"Vorlage und Freigabeliste haben verschiedene "
+                          f"Spalten: {RS_vorlage.TAB_ZITATE[1]}")
+        if "belege" not in Z.SPALTEN:
+            fehler.append("Belege fehlen in der Freigabeliste")
         if not blatt.werte or blatt.werte[0] != Z.SPALTEN:
             fehler.append(f"Tab-Kopfzeile fehlt: {blatt.werte[:1]}")
         elif len(blatt.werte) != 3:
@@ -2296,6 +2632,11 @@ def pruefe_api(cfg, b, backends, ping):
 # demselben System-Prompt. Alle anderen rufen einmal oder wenige Male.
 CHUNKROLLEN = ("uebersetzung", "revision", "stil", "korrektorat")
 
+# Rollen, die serverseitige Werkzeuge rufen. Deren Preis haengt nicht an
+# Token, sondern an der Zahl der Aufrufe — ohne diese Liste faellt er in
+# der Schaetzung unter den Tisch.
+SUCHROLLEN = ("zitat",)
+
 # Gemessen am Lauf 1919 (Opus 5, effort 'hoch'): 4110 Ausgabetoken je Chunk
 # bei rund 1450 Token deutschem Text. Knapp zwei Drittel der Ausgabe sind
 # Denkschritte — und die stehen auf derselben Rechnung wie der Text. Wer
@@ -2451,8 +2792,18 @@ def pruefe_kosten(cfg, b, text):
             aus = rufe * w_aus * faktor * DENKFAKTOR
             zusatz = (f"{rufe} Aufrufe à rund {w_ein} Woerter ein, "
                       f"{w_aus} aus")
+        # Die Zitatrecherche zahlt neben den Token je Suche. Bei sechs
+        # Suchen je Zitat ist das kein Rundungsfehler mehr, und es ist der
+        # einzige Posten, den keine Tokenzahl verraet.
+        suchen = 0
+        if rolle in SUCHROLLEN:
+            w = G.websuche_werkzeug(cfg)
+            if w:
+                suchen = einmalig[rolle][0] * w[0]["max_uses"]
+                zusatz += f", bis zu {suchen} Suchen"
         d = G.kosten_dollar({"ein": ein, "aus": aus, "cache_lesen": lesen,
                              "cache_schreiben": schreiben,
+                             "suchen": suchen,
                              "cache_schreiben_1h": schreiben
                              if G.cache_ttl(cfg) == "1h" else 0}, t)
         summe += d
@@ -2800,6 +3151,35 @@ def pruefe_config(cfg, b):
         else:
             _, cw, besch = G.variante_anwenden(cfg, v)
             b.add("OK", f"Variante {v.get('name', '?')}: {besch}")
+
+    # Transport und Anbieterfassungen. Sie stehen hier, weil sie sonst
+    # niemand sieht: Ein abgeschalteter Rueckfall faellt erst auf, wenn ein
+    # Chunk abgelehnt wird, und eine veraltete Suchfassung nie.
+    rueckfall = G.fallbacks_wert(cfg)
+    if rueckfall == "default":
+        b.add("OK", "Ablehnung: Ersatzmodell nach Wahl des Anbieters",
+              "Erscheint in der Kostenuebersicht als eigene Zeile.")
+    elif rueckfall:
+        b.add("OK", "Ablehnung: Ersatzmodelle "
+              + ", ".join(m["model"] for m in rueckfall))
+    else:
+        b.add("INFO", "Ablehnung bricht den Chunk ab",
+              "'fallback_modelle' ist leer. Eine Ablehnung des "
+              "Sicherheitsklassifikators beendet den Lauf; der Resume "
+              "setzt an derselben Stelle wieder an.")
+    b.add("INFO", "Antworttransport",
+          ("Stream" if cfg.get("streaming", True) else "ein Stueck")
+          + (", SDK" if cfg.get("sdk_nutzen", True) else ", requests"))
+    w = G.websuche_werkzeug(cfg)
+    if w:
+        b.add("INFO", "Websuche der Zitatrecherche",
+              f"{w[0]['type']}, hoechstens {w[0]['max_uses']} Suchen je "
+              f"Zitat"
+              + (", direkt" if w[0].get("allowed_callers") else ", filternd"))
+    else:
+        b.add("WARNUNG", "Zitatrecherche ohne Websuche",
+              "Ohne Suche raet das Modell einen Wortlaut zusammen — genau "
+              "das soll der Schritt verhindern.")
 
     if cfg["ratio_kalibriert"]:
         b.add("OK", f"Prueffgrenzen kalibriert: "

@@ -1289,6 +1289,130 @@ Entscheidung und stehen deshalb im Code und nicht im Kopf des Lesers.
 
 ---
 
+## Eine Ablehnung bricht den Lauf nicht mehr ab
+
+**Entschieden (August 2026).** `claude-opus-5` und `claude-fable-5` tragen
+Sicherheitsklassifikatoren, die eine Anfrage ablehnen können. Das ist kein
+Fehler und kein HTTP-Status, sondern eine gültige Antwort mit
+`stop_reason: "refusal"` und leerem `content`.
+
+Was bis jetzt passierte: `antwort_lesen` warf einen `ApiFehler`, die
+Chunkschleife fing ihn wie jeden anderen, wiederholte dreimal denselben
+Aufruf — jedes Mal mit demselben Ergebnis, weil ein Klassifikatorurteil
+nicht würfelt — und beendete den Lauf mit „Abbruch bei Chunk 300".
+
+Das ist kein hypothetischer Fall. Die Kategorien heißen `general_harms`,
+`cyber`, `bio`, `frontier_llm` und `reasoning_extraction`, und die
+Dokumentation sagt zu dreien ausdrücklich, dass auch harmlose Arbeit sie
+auslösen kann. Ein Roman von 1919 handelt von Krieg, Krankheit und Gewalt.
+Über 147 Chunks ist die Frage nicht ob, sondern wann.
+
+Seither steht `fallbacks: "default"` im Payload und
+`server-side-fallback-2026-07-01` im Kopf: Der Anbieter beantwortet den
+abgelehnten Chunk mit dem Modell, das er für diese Ablehnungskategorie
+empfiehlt — in derselben Anfrage, ohne dass der Lauf etwas tun muss.
+`fallback_modelle` in `projekt.json` nimmt auch eine eigene Liste von bis zu
+drei Modellen oder schaltet den Rückfall mit `""` ab.
+
+Drei Dinge, die daran nicht wegvereinfacht werden dürfen:
+
+- **Gebucht wird unter dem Modell, das geantwortet hat.** Der Rückfall ist
+  eine stille Modelländerung mitten im Buch, und für eine literarische
+  Übersetzung ist das keine Kleinigkeit. Die Kostenübersicht zeigt sie als
+  eigene Zeile (`voll/uebersetzung/claude-opus-4-8`) — damit ist sie
+  gleichzeitig gebucht *und* auffindbar, ohne dass es eine zweite Liste
+  braucht. Das ist derselbe Grundsatz, an dem die Buchung schon einmal
+  gescheitert ist: Token des einen Modells zum Preis des anderen.
+- **Der Beleg ist die Iterationsliste, nicht der Modellname.** Ein Alias
+  löst auf einen datierten Namen auf; wer den Namen vergleicht, meldet bei
+  jeder Antwort einen Rückfall und zerlegt nebenbei jede Kostenzeile in zwei
+  halbe. `rueckfall_gelaufen()` liest `usage.iterations` und findet dort
+  `fallback_message`. Der Eintrag steht auch dann da, wenn die API wegen
+  einer früheren Ablehnung gleich an das Ersatzmodell geleitet hat und gar
+  kein Übergabeblock entsteht.
+- **Die Erkennung der Ablehnung ist eng gefasst.** `fallback_abgelehnt()`
+  greift nur bei HTTP 400 mit „fallback" im Wortlaut, wie `ttl_abgelehnt()`
+  bei der Cache-Lebensdauer. Ein weiterer Fang verschluckte echte
+  Payloadfehler und gäbe still ein zweites Mal Geld aus.
+
+Lehnt der Anbieter den Rückfall ab (unbekanntes Betakennwort, keine
+Freischaltung), meldet der Lauf das einmal und läuft ohne ihn weiter — dann
+gilt wieder das alte Verhalten. Für **Paket G** steht die Einschränkung im
+Code: Die Stapel-API nimmt `fallbacks` nicht an, der Stapeladapter muss das
+Feld entfernen statt es zu erben.
+
+---
+
+## Die Websuche wird bezahlt, belegt und aktuell gehalten
+
+**Entschieden (August 2026).** Drei Befunde an einem Schritt.
+
+**Die Fassung stand im Code und war anderthalb Jahre alt.**
+`zitatrecherche.py` rief `web_search_20250305`, während es inzwischen
+`web_search_20260209` (filtert Treffer, bevor sie ins Kontextfenster wandern)
+und `web_search_20260318` gibt. Gemerkt hätte das niemand: Eine alte Fassung
+antwortet, sie bricht nicht ab. Die Fassung steht jetzt in `projekt.json`
+(`websuche_werkzeug`), und ein Selbsttest verbietet den Namen in jedem Skript
+außer `gemeinsam.STANDARD` und dem Test selbst.
+
+**Die Suche tauchte in keiner Rechnung auf.** Sie kostet 10 $ je 1000 Suchen,
+also bei sechs Suchen je Zitat rund 6 Cent — kein großer Posten, aber der
+einzige, den keine Tokenzahl verrät. `USAGE_FELDER` hat deshalb ein Feld
+`suchen`, `kosten_dollar` rechnet es mit, und der Preflight schätzt es vorab.
+Der Grundsatz „neue modellrufende Schritte ohne Usage-Erfassung gelten als
+unfertig" gilt auch für Werkzeuge, die kein Modell sind.
+
+**`pause_turn` wurde nicht behandelt.** Hält die API eine lange Suchschleife
+an, kommt eine gültige, aber unfertige Antwort zurück. Der JSON-Parser fand
+darin keine Struktur, meldete einen Formfehler — und ein übersprungenes Zitat
+ist eine Lücke, die später jemand von Hand suchen muss. `chat_meta` schickt
+die angehaltene Antwort jetzt zurück und lässt die Runde weiterlaufen,
+höchstens `PAUSEN_MAX` mal. Die `None`-Felder, mit denen die SDK ungesetzte
+Schlüssel füllt, werden dabei entfernt; unverändert zurückgeschickt lehnt die
+API sie ab.
+
+Dazu eine Verbesserung, die nicht aus einem Fehler kam: **Die Antwort trägt
+Belege.** Jeder Textblock, den ein Treffer gestützt hat, bringt URL, Titel
+und den belegten Wortlaut mit. Das ist etwas anderes als die Felder
+`uebersetzer` und `quelle`, die das Modell selbst formuliert — die eine
+Angabe ist abgerufen, die andere geschrieben. Für einen Schritt, dessen
+ganzer Zweck „erfinde nichts" ist, ist dieser Unterschied das Wichtigste, was
+die Antwort zu bieten hat. Die Belege stehen jetzt in `zitate_review.md` und
+im Tab `ZitateReview`, getrennt von der Quellenangabe.
+
+Dabei fiel auf, dass `review_lesen()` die Spalte `freigegeben` über eine feste
+Position las (`felder[-1]`). Die neue Spalte hätte still die falsche Zelle
+getroffen — und `freigegeben` ist die eine Spalte, bei der ein Lesefehler
+einen ungeprüften Wortlaut in den Text setzt. Gelesen wird jetzt über
+`SPALTEN.index(...)`, und der Selbsttest erteilt die Freigabe so, wie ein
+Mensch es täte: in der Spalte, nicht an einer Textstelle.
+
+---
+
+## Streaming: ja, aber nur auf dem SDK-Pfad
+
+**Entschieden (August 2026), Widerruf von „Kein Streaming".** Ohne Stream
+hängt eine stockende Anfrage bis zum Lesetimeout — zehn Minuten, in denen
+nichts ankommt und niemand weiß, ob noch etwas kommt. Erst danach greift der
+Retry. Mit Stream hält die Verbindung sich selbst am Leben, und die SDK
+verlangt ihn ohnehin, sobald `max_tokens` groß genug ist, dass die Antwort
+das HTTP-Zeitfenster sprengen könnte — bei `max_tokens_api: 32000` und
+`effort: high` ist das keine ferne Grenze.
+
+Der `requests`-Pfad bekommt **kein** Streaming. Er bräuchte einen
+handgeschriebenen SSE-Parser mit eigener Fehlerbehandlung, eigenem
+Zusammenbau der Blöcke und eigener Fehlerklasse für `event: error` — also
+genau die Art Rückfallpfad, die kein Selbsttest prüfen kann und die deshalb
+schon Ollama gekostet hat.
+
+Was den Preis dieser Entscheidung klein hält: `stream.get_final_message()`
+liefert dieselbe Nachricht wie ein Aufruf ohne Stream. Es bleibt bei einem
+Payloadbauer und einem Antwortleser; der Stream ist ein Transportdetail und
+keine zweite Wahrheit. Der Selbsttest prüft genau das — derselbe Payload
+geht raus, dieselbe Antwort kommt an.
+
+---
+
 ## Verworfen — und warum
 
 **API-Frontier-Modell als Primärübersetzer** (zunächst). Die Kostenrechnung

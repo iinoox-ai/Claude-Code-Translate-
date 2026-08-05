@@ -171,6 +171,11 @@ def kostenuebersicht(m):
         token = f"{e['ein']:>9,} ein / {e['aus']:>8,} aus"
         cache = (f", Cache {e['cache_lesen']:,} gelesen"
                  if e["cache_lesen"] else "")
+        # Suchen sind keine Token und stehen deshalb daneben, nicht darin.
+        # Sie kosten je Aufruf; wer sie in der Tokenspalte suchte, faende
+        # nichts und hielte den Preis fuer falsch.
+        if e.get("suchen"):
+            cache += f", {e['suchen']:,} Suchen"
         preis = f"{dollar:6.2f} $" if dollar is not None else "  kein Tarif"
         print(f"  {rolle:<14} {modell:<18} {token}{cache}")
         print(f"  {'':<14} {e['aufrufe']:>4} Aufrufe {'':<12} {preis}")
@@ -180,6 +185,16 @@ def kostenuebersicht(m):
         print(f"  {titel + ':':<24} rund {summen[lauf]:6.2f} $")
     if len(summen) > 1:
         print(f"  {'Alles zusammen:':<24} rund {sum(summen.values()):6.2f} $")
+    # Ein fehlender Tarif ist etwas anderes als ein unverifizierter: Die
+    # Summe ist dann nicht ungenau, sondern unvollstaendig. Der haeufigste
+    # Fall ist ein Ersatzmodell nach einer Ablehnung — welches der Anbieter
+    # waehlt, laesst sich vorher nicht hinterlegen.
+    fehlt = sorted({modell for _, _, modell, _, dollar, _ in zeilen
+                    if dollar is None})
+    if fehlt:
+        print(f"  Hinweis: kein Tarif fuer {', '.join(fehlt)} — die Summe "
+              f"laesst diese\n           Zeilen aus. Preis in "
+              f"gemeinsam.TARIFE ergaenzen.")
     if unsicher:
         print("  Hinweis: nicht alle Tarife sind gegen die Anbieterdoku "
               "verifiziert\n           (Google-Tarife: Stand 31.07.2026, "
