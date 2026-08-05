@@ -12,6 +12,7 @@ nackten Server ohne Google-Zugang lauffaehig ist.
     python3 referenz_sync.py --pruefen  nur pruefen, nichts schreiben
     python3 referenz_sync.py --vorlage  leere Tabs mit Kopfzeilen anlegen
     python3 referenz_sync.py --erstbefuellung   JSONs ins Sheet uebertragen
+    python3 referenz_sync.py --modelle  Modellbelegung ins Sheet spiegeln
 
 Die Validierung laeuft VOR dem Schreiben und meldet zeilengenau. Grund:
 Ein Schritt, der Referenzdaten braucht, ruft gleich darauf ein Modell —
@@ -339,6 +340,70 @@ def sicherstellen(cfg, still=False):
     return True
 
 
+# Der Tab 'Modelle' ist die eine Ausnahme in dieser Datei: Er wird
+# GESCHRIEBEN und NIE ZURUECKGELESEN.
+#
+# Der Grund ist keine Bequemlichkeit. Modellnamen sind Code-Daten — sie
+# wandern mit dem Repo, damit eine Umbenennung beim Anbieter alle Buecher
+# erreicht (siehe gemeinsam.TECHNIK). Referenzdaten sind Projektdaten und
+# wandern mit dem Buch. Ein zurueckgelesener Tab machte die Modellwahl zur
+# dritten Quelle neben Repo- und Projekt-projekt.json — und bei drei
+# Quellen weiss niemand mehr, welcher Wert gilt.
+#
+# Sichtbar im Spreadsheet, geaendert in projekt.json.
+TAB_MODELLE = ("Modelle", ["rolle", "modell", "tiefe", "empfohlen",
+                           "empfohlene_tiefe", "kosten_letzter_lauf",
+                           "begruendung"])
+
+
+def modelle_schreiben(cfg, still=False):
+    """Spiegelt die Modellbelegung ins Spreadsheet. Nur diese Richtung.
+
+    Legt den Tab an, wenn er fehlt — anders als bei den Referenztabs ist
+    das hier gefahrlos, weil nichts zurueckgelesen wird."""
+    if not aktiv(cfg):
+        return False
+    name, spalten = TAB_MODELLE
+    buch = _buch(cfg)
+    try:
+        blatt = buch.worksheet(name)
+    except Exception:
+        blatt = buch.add_worksheet(title=name, rows=40, cols=len(spalten))
+
+    kosten = {}
+    try:
+        m = json.load(open(G.MANIFEST, encoding="utf-8"))
+        for lauf, rolle, _, e in G.kosten_posten(m):
+            if lauf in ("voll", ""):
+                d = G.kosten_dollar(e, G.tarif(e.get("modell", "")))
+                if d is not None:
+                    kosten[rolle] = kosten.get(rolle, 0.0) + d
+    except Exception:
+        pass
+
+    aktiv_jetzt = set(G.aktive_rollen(cfg))
+    zeilen = [spalten]
+    for rolle in G.ROLLEN:
+        soll_m, soll_e, warum = G.empfehlung(rolle)
+        zeilen.append([
+            rolle + ("" if rolle in aktiv_jetzt else "  (ungenutzt)"),
+            (cfg.get(f"modell_{rolle}") or "").strip() or "— nicht gesetzt",
+            (cfg.get(f"effort_{rolle}") or "").strip(),
+            soll_m, soll_e,
+            f"{kosten[rolle]:.2f}" if rolle in kosten else "",
+            warum,
+        ])
+    zeilen.append([])
+    zeilen.append(["Dieser Tab wird geschrieben, nicht gelesen. "
+                   "Aenderungen hier wirken nicht — die Belegung steht in "
+                   "projekt.json."])
+    _blatt_schreiben(blatt, zeilen)
+    if not still:
+        print(f"  {name}: {len(G.ROLLEN)} Rollen eingetragen "
+              f"(nur lesend — geaendert wird in {G.CONFIG})")
+    return True
+
+
 def _blatt_schreiben(blatt, zeilen):
     """gspread hat die Reihenfolge dieser beiden Argumente zwischen 5 und
     6 vertauscht. Welche Fassung in Colab steckt, entscheidet Google —
@@ -390,7 +455,7 @@ def vorlage(cfg):
     """Legt fehlende Tabs mit Kopfzeile an. Vorhandene bleiben unberuehrt."""
     buch = _buch(cfg)
     da = {b.title for b in buch.worksheets()}
-    alle = [(t, s) for t, s, _, _, _, _ in TABS] + [TAB_ZITATE]
+    alle = [(t, s) for t, s, _, _, _, _ in TABS] + [TAB_ZITATE, TAB_MODELLE]
     for name, spalten in alle:
         if name in da:
             print(f"  {name}: vorhanden, unveraendert")
@@ -410,6 +475,10 @@ def main():
     ap.add_argument("--erstbefuellung", action="store_true",
                     help="vorhandene JSONs einmalig ins Spreadsheet "
                          "uebertragen (ueberschreibt keine Zeilen)")
+    ap.add_argument("--modelle", action="store_true",
+                    help="Modellbelegung ins Spreadsheet spiegeln "
+                         "(nur diese Richtung; geaendert wird in "
+                         "projekt.json)")
     args = ap.parse_args()
 
     G.kopf("REFERENZ-SYNC")
@@ -427,6 +496,9 @@ def main():
             return
         if args.erstbefuellung:
             erstbefuellung(cfg)
+            return
+        if args.modelle:
+            modelle_schreiben(cfg)
             return
         sync(cfg, schreiben=not args.pruefen)
         if args.pruefen:

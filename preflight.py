@@ -1264,6 +1264,49 @@ installiert, requests-Pfad"
             RS._buch = echt
             RS.G.lade_json = echt_lade
 
+        # Der Tab 'Modelle' wird geschrieben und NIE gelesen. Steht er in
+        # TABS, liest ihn 'sync' zurueck und die Modellwahl waere die
+        # dritte Quelle neben Repo- und Projekt-projekt.json.
+        if any(t[0] == "Modelle" for t in RS.TABS):
+            fehler.append("'Modelle' steht in TABS und wird damit gelesen")
+        if RS.TAB_MODELLE[0] in RS.OPTIONAL:
+            fehler.append("'Modelle' ist als Lesetab markiert")
+
+        class _BuchM:
+            def __init__(s): s.blaetter, s.neu = {}, []
+
+            def worksheet(s, n):
+                if n not in s.blaetter:
+                    raise KeyError(n)
+                return s.blaetter[n]
+
+            def add_worksheet(s, title, rows, cols):
+                s.neu.append(title)
+                s.blaetter[title] = _Blatt(title, [])
+                return s.blaetter[title]
+
+        bm = _BuchM()
+        echt_buch, alt_cwd2 = RS._buch, os.getcwd()
+        try:
+            RS._buch = lambda cfg: bm
+            os.chdir(tempfile.mkdtemp())
+            RS.modelle_schreiben(dict(cfg, sheets_id="x" * 30), still=True)
+        finally:
+            RS._buch = echt_buch
+            os.chdir(alt_cwd2)
+        geschrieben = bm.blaetter["Modelle"].werte
+        if geschrieben[0] != list(RS.TAB_MODELLE[1]):
+            fehler.append(f"Kopfzeile falsch: {geschrieben[:1]}")
+        rollen_im_tab = {z[0].split("  ")[0] for z in geschrieben[1:] if z}
+        if not set(G.ROLLEN) <= rollen_im_tab:
+            fehler.append(f"Rollen fehlen im Tab: "
+                          f"{sorted(set(G.ROLLEN) - rollen_im_tab)}")
+        if not any("nicht gelesen" in " ".join(z) for z in geschrieben if z):
+            fehler.append("der Tab sagt nicht, dass er nicht gelesen wird")
+        # Ohne sheets_id ein No-op — der Rueckfallpfad bleibt unberuehrt.
+        if RS.modelle_schreiben(dict(cfg, sheets_id=""), still=True):
+            fehler.append("schreibt trotz leerer sheets_id")
+
         tab = [t for t in RS.TABS if t[0] == "Anrede"][0]
         anrede, f = RS._pruefen_und_bauen(
             "Anrede",

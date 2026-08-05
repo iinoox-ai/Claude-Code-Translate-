@@ -1017,6 +1017,37 @@ Längengrenzen. Ein Schema, das erst im Lauf abgelehnt wird, kostet den Schritt
 
 ---
 
+## Der Tab `Modelle` wird geschrieben und nie gelesen
+
+**Entschieden (August 2026).** `referenz_sync.py --modelle` spiegelt die
+Modellbelegung ins Spreadsheet — Rolle, Ist-Modell, Tiefe, Empfehlung,
+Begründung und was die Rolle im letzten Lauf gekostet hat. Zurückgelesen wird
+der Tab **nicht**.
+
+Der naheliegende Wunsch ist, ihn editierbar zu machen: Referenzdaten werden im
+Spreadsheet gepflegt, warum nicht auch die Modellwahl? Weil die beiden nicht
+dasselbe sind. **Modellnamen sind Code-Daten** — sie stehen in
+`gemeinsam.TECHNIK` und wandern mit dem Repo, damit eine Umbenennung beim
+Anbieter alle Bücher erreicht. **Referenzdaten sind Projektdaten** und wandern
+mit dem Buch.
+
+Ein zurückgelesener Tab machte daraus eine **dritte Quelle** neben
+Repo-`projekt.json` und Projekt-`projekt.json`. Bei drei Quellen weiß niemand
+mehr, welcher Wert gilt — und `pipeline.py technik` könnte einen im Repo
+korrigierten Modellnamen nicht mehr nachziehen, weil der Tab ihn beim nächsten
+Sync wieder überschreibt.
+
+Die Sichtbarkeit, um die es ging, bleibt: Die Belegung steht im Spreadsheet
+neben Glossar und Figurenblatt, und die letzte Zeile des Tabs sagt, dass
+Änderungen dort nicht wirken. Geändert wird in `projekt.json`; `pipeline.py
+modelle` zeigt dasselbe im Terminal.
+
+Der Selbsttest hält drei Dinge fest: `Modelle` steht nicht in `TABS` (sonst
+läse `sync` ihn zurück), nicht in `OPTIONAL`, und ohne `sheets_id` schreibt der
+Schritt gar nichts — der Rückfallpfad bleibt unberührt.
+
+---
+
 ## Verworfen — und warum
 
 **API-Frontier-Modell als Primärübersetzer** (zunächst). Die Kostenrechnung

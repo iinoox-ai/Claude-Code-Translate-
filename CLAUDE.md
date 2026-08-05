@@ -148,6 +148,13 @@ bevor Modellkosten entstehen. Die JSONs von Hand zu editieren ist im
 Sheets-Betrieb sinnlos — sie werden überschrieben. Ohne `sheets_id` gilt
 das alte JSON-Direktverhalten (Rückfallpfad, nicht entfernen).
 
+**Der Tab `Modelle` ist die eine Ausnahme in der Richtung.** Er wird
+geschrieben (`referenz_sync.py --modelle`) und **nie zurückgelesen**:
+Modellnamen sind Code-Daten, sie wandern mit dem Repo (`gemeinsam.TECHNIK`),
+Referenzdaten wandern mit dem Buch. Ein zurückgelesener Tab machte die
+Modellwahl zur dritten Quelle neben Repo- und Projekt-`projekt.json`.
+Sichtbar im Spreadsheet, geändert in `projekt.json`.
+
 **Zwei Ausnahmen.** `stilprofil.json` hat kein Tab und bekommt keines: Es ist
 kein Datensatz, sondern ein halbes Dutzend benannter Felder plus die
 verschachtelte `perspektive`. In eine Tabelle gepresst wäre es unlesbar und
