@@ -105,8 +105,13 @@ OPTIONAL = {"Kapitel"}
 
 # Paket 6 pflegt diesen Tab; hier steht er nur, damit --vorlage ihn
 # gleich mit anlegt und niemand ihn spaeter von Hand nachtraegt.
-TAB_ZITATE = ("ZitateReview",
-              ["marke", "quelle", "wortlaut", "uebersetzer", "freigegeben"])
+#
+# Die Spalten kommen aus gemeinsam, nicht von hier: Bis August 2026 legte
+# die Vorlage den Tab mit fuenf ausgedachten Ueberschriften an, die
+# Zitatrecherche schrieb danach ihre eigenen acht hinein. Aufgefallen ist
+# das nie — sie loescht den Tab vor dem Schreiben. Wer die Vorlage las,
+# hatte trotzdem ein falsches Bild vom Tab.
+TAB_ZITATE = ("ZitateReview", G.ZITAT_SPALTEN)
 
 
 def aktiv(cfg):

@@ -106,6 +106,21 @@ STANDARD = {
     # Anbieter-SDK benutzen, wenn sie installiert ist. 'false' erzwingt den
     # requests-Pfad — der bleibt der Rueckfall und muss lauffaehig bleiben.
     "sdk_nutzen":                True,
+    # Antwort im Stream abholen statt in einem Stueck. Wirkt nur auf dem
+    # SDK-Pfad: Der requests-Pfad braeuchte einen handgeschriebenen
+    # SSE-Parser, und ein Rueckfallpfad mit eigener Fehlerklasse ist keiner.
+    "streaming":                 True,
+    # Rueckfall bei einer Ablehnung durch den Sicherheitsklassifikator.
+    # 'default' laesst den Anbieter das Ersatzmodell nach Kategorie waehlen,
+    # eine Liste von bis zu drei Modellnamen bestimmt es selbst, '' schaltet
+    # den Rueckfall ab. Das antwortende Modell steht in der Kostenuebersicht.
+    "fallback_modelle":          "default",
+    # Serverseitige Websuche der Zitatrecherche. Die Fassung ab Februar 2026
+    # filtert Treffer vor dem Kontextfenster; 'websuche_filtern: false'
+    # erzwingt den direkten Aufruf ohne diesen Zwischenschritt.
+    "websuche_werkzeug":         "web_search_20260209",
+    "websuche_filtern":          True,
+    "websuche_max":              6,
 
     "chunk_words":               800,
     "chunk_words_variante":      1200,      # Rueckfall, wenn 'varianten' leer ist
@@ -177,6 +192,19 @@ STANDARD = {
     "max_retries":               3,
 }
 
+# Spalten der Zitat-Freigabeliste. Sie stehen hier, weil zwei Module sie
+# brauchen und keines das andere importieren kann: 'zitatrecherche' schreibt
+# und liest die Liste, 'referenz_sync' legt den Tab an — und importiert
+# umgekehrt. Zwei Listen waren zwei Wahrheiten: Die Vorlage legte den Tab
+# mit anderen Ueberschriften an, als der Schritt danach hineinschrieb.
+#
+# 'belege' vor 'freigegeben': Der Mensch liest von links nach rechts, und die
+# Freigabe ist die letzte Entscheidung. Gelesen wird ueber den Spaltennamen,
+# nie ueber die Position.
+ZITAT_SPALTEN = ["index", "sprache", "original", "vorschlag_de",
+                 "uebersetzer", "quelle", "konfidenz", "belege",
+                 "freigegeben"]
+
 # Diese Schluessel werden von der Pipeline selbst gesetzt und duerfen von
 # einer eingespielten projekt.json NICHT ueberschrieben werden (V4).
 GESCHUETZT = {"ratio_min", "ratio_max", "ratio_kalibriert", "sprachpaar"}
@@ -194,7 +222,8 @@ AENDERBAR = {
     "rahmen_marker", "varianten", "technik_ausnahmen",
     "timeout_connect", "max_retries",
     "backend_standard", "max_tokens_api", "timeout_read_api", "cache_ttl",
-    "sdk_nutzen",
+    "sdk_nutzen", "streaming", "fallback_modelle",
+    "websuche_werkzeug", "websuche_filtern", "websuche_max",
 } | {f"modell_{r}" for r in ROLLEN} | {f"effort_{r}" for r in ROLLEN}
 
 
@@ -494,10 +523,15 @@ def empfehlung(rolle):
 # wenn ein Anbieter umbenennt — die kalibrierten Pruefgrenzen eines
 # laufenden Buchs duerfen davon nicht beruehrt werden.
 #
+# Dasselbe gilt fuer Transport und Anbieterfassungen: Die Fassung der
+# Websuche altert beim Anbieter und haengt nicht am Text. Ein Buch, das eine
+# andere braucht, nennt sie in 'technik_ausnahmen'.
+#
 # Der Ueberschreibschutz der projekt.json bleibt: erkannt wird die
 # Abweichung, uebernommen wird sie nur auf ausdrueckliche Ansage.
 TECHNIK = ({"backend_standard", "max_tokens_api", "timeout_read_api",
-            "cache_ttl", "sdk_nutzen"}
+            "cache_ttl", "sdk_nutzen", "streaming", "fallback_modelle",
+            "websuche_werkzeug", "websuche_filtern", "websuche_max"}
            | {f"modell_{r}" for r in ROLLEN}
            | {f"effort_{r}" for r in ROLLEN})
 
@@ -669,8 +703,12 @@ def token_faktor(manifest=None):
 
 # Alle gebuchten Tokenarten an einer Stelle. Wer eine ergaenzt, ergaenzt sie
 # damit zugleich in Buchung, Differenz und Rollenstand.
+#
+# 'suchen' zaehlt keine Token, sondern Aufrufe der serverseitigen Websuche.
+# Sie kostet je Suche und unabhaengig vom Modell; ohne eigenes Feld waere die
+# Zitatrecherche der einzige Schritt, dessen Rechnung nicht aufgeht.
 USAGE_FELDER = ("ein", "aus", "cache_lesen", "cache_schreiben",
-                "cache_schreiben_1h")
+                "cache_schreiben_1h", "suchen")
 
 
 # Laufkontext der Buchung. Ein Testlauf mit einem anderen Modell darf die
@@ -767,6 +805,11 @@ CACHE_LESE_FAKTOR = 0.1
 CACHE_SCHREIB_FAKTOR = 1.25
 CACHE_SCHREIB_FAKTOR_1H = 2.0
 
+# Preis einer serverseitigen Websuche, 10 $ je 1000. Anders als die
+# Tokenpreise haengt er nicht am Modell und steht deshalb hier und nicht in
+# TARIFE — sonst muesste ihn jeder Modelleintrag wiederholen.
+SUCHE_DOLLAR = 0.010
+
 def kosten_dollar(e, t):
     """Preis einer Buchung. Eine Formel fuer alle Auswertungen.
 
@@ -778,11 +821,12 @@ def kosten_dollar(e, t):
     # Lebensdauer steht daneben und kostet mehr.
     lang = int(e.get("cache_schreiben_1h", 0))
     kurz = max(0, int(e.get("cache_schreiben", 0)) - lang)
-    return (int(e.get("ein", 0)) * t["ein"]
-            + int(e.get("cache_lesen", 0)) * t["ein"] * CACHE_LESE_FAKTOR
-            + kurz * t["ein"] * CACHE_SCHREIB_FAKTOR
-            + lang * t["ein"] * CACHE_SCHREIB_FAKTOR_1H
-            + int(e.get("aus", 0)) * t["aus"]) / 1e6
+    return ((int(e.get("ein", 0)) * t["ein"]
+             + int(e.get("cache_lesen", 0)) * t["ein"] * CACHE_LESE_FAKTOR
+             + kurz * t["ein"] * CACHE_SCHREIB_FAKTOR
+             + lang * t["ein"] * CACHE_SCHREIB_FAKTOR_1H
+             + int(e.get("aus", 0)) * t["aus"]) / 1e6
+            + int(e.get("suchen", 0)) * SUCHE_DOLLAR)
 
 
 def kosten_posten(manifest):
@@ -843,9 +887,15 @@ def kosten_je_rolle(manifest):
 class Backend:
     """Basisklasse. Ein weiterer Anbieter heisst: eine Unterklasse."""
 
-    def chat(self, cfg, system, user, rolle="uebersetzung", modell="",
-             roh=False, werkzeuge=None, schema=None):
+    def chat_meta(self, cfg, system, user, rolle="uebersetzung", modell="",
+                  roh=False, werkzeuge=None, schema=None):
+        """(Text, Befund). Der Befund traegt, was neben dem Text anfiel:
+        das antwortende Modell, die Belege der Websuche, die Zahl der
+        Suchen. Wer nur den Text braucht, ruft 'chat'."""
         raise NotImplementedError
+
+    def chat(self, cfg, system, user, **kw):
+        return self.chat_meta(cfg, system, user, **kw)[0]
 
     def zaehle_tokens(self, cfg, system, user, modell=""):
         """Exakte Eingabetoken beim Anbieter, oder None.
@@ -908,9 +958,15 @@ def sende(post, max_retries, schlafen=time.sleep):
     raise letzter or ApiFehler("Anfrage fehlgeschlagen")
 
 
-# Lebensdauer des Cache-Eintrags. Wird sie vom Anbieter abgelehnt, faellt
-# der Lauf hierueber auf die Voreinstellung zurueck, statt abzubrechen.
+# Zwei Zusicherungen, die der Lauf notfalls aufgibt: die Lebensdauer des
+# Cache-Eintrags und der serverseitige Rueckfall bei einer Ablehnung. Beide
+# sind Versicherungen, keine Voraussetzungen — lehnt der Anbieter eine ab,
+# waere ein Abbruch mitten im Buch der teurere Fehler.
+#
+# Je ein Merker, der nach der ersten Ablehnung stehen bleibt: Ohne ihn liefe
+# jeder weitere Chunk erneut in denselben Fehlversuch und zahlte ihn.
 _TTL_ABGELEHNT = False
+_FALLBACK_ABGELEHNT = False
 
 
 def cache_ttl(cfg):
@@ -947,16 +1003,32 @@ def anthropic_sdk():
     return _SDK
 
 
-def sdk_antwort(klient, payload):
+def sdk_antwort(klient, payload, betas=(), streamen=False):
     """Ein Aufruf ueber die SDK, als dasselbe dict wie der requests-Pfad.
 
     'model_dump' gibt genau die Struktur zurueck, die auch ueber die Leitung
     kaeme. Damit bleibt 'antwort_lesen' der einzige Ort, der Antworten
     versteht — sonst driften die beiden Wege auseinander und nur einer wird
-    getestet."""
+    getestet. Das gilt auch fuer den Stream: 'get_final_message' liefert
+    dieselbe Nachricht wie ein Aufruf ohne Stream, nur eingesammelt.
+
+    Streamen ist keine Bequemlichkeit. Ohne Stream haengt eine stockende
+    Anfrage bis zum Lesetimeout — zehn Minuten, in denen nichts ankommt und
+    niemand weiss, ob noch etwas kommt. Mit Stream haelt die Verbindung sich
+    selbst am Leben, und die SDK verlangt ihn ohnehin, sobald 'max_tokens'
+    gross genug ist, dass die Antwort das HTTP-Zeitfenster sprengen koennte.
+
+    Betakennwoerter gehen ueber den Namensraum 'beta'; ohne sie bleibt der
+    normale Weg, damit ein Lauf ohne Betafunktionen nichts davon mitbekommt.
+    """
     sdk = anthropic_sdk()
+    ziel = klient.beta.messages if betas else klient.messages
+    p = dict(payload, betas=list(betas)) if betas else payload
     try:
-        return klient.messages.create(**payload).model_dump()
+        if streamen:
+            with ziel.stream(**p) as strom:
+                return strom.get_final_message().model_dump()
+        return ziel.create(**p).model_dump()
     except Exception as e:
         raise sdk_fehler(sdk, e) from e
 
@@ -991,8 +1063,151 @@ def ttl_abgelehnt(fehler):
     return t.startswith("HTTP 400") and "ttl" in t.lower()
 
 
+# Der Betaname muss genau dieses Datum tragen: Nur '2026-07-01' nimmt
+# 'default' an, '2026-06-01' kann ausschliesslich die Modellliste. Jeder
+# andere Wert laesst die API das Feld 'fallbacks' mit HTTP 400 ablehnen.
+BETA_FALLBACK = "server-side-fallback-2026-07-01"
+
+
+def fallbacks_wert(cfg):
+    """Der Wert des Feldes 'fallbacks', oder None.
+
+    Eine Ablehnung durch den Sicherheitsklassifikator ist keine Ausnahme,
+    die man wegkonfiguriert: Ein Roman ueber Krieg, Krankheit oder Gewalt
+    trifft sie irgendwann. Ohne Rueckfall kostet sie drei gleich
+    aussichtslose Wiederholungen und danach den Abbruch — mitten im Buch,
+    bei Chunk 300.
+
+    'default' ueberlaesst dem Anbieter die Wahl des Ersatzmodells nach
+    Ablehnungskategorie, eine Liste bestimmt sie selbst. Mehr als drei
+    Modelle nimmt die API nicht an; gekappt wird hier, damit der Anbieter
+    daraus keinen HTTP 400 machen muss."""
+    if _FALLBACK_ABGELEHNT:
+        return None
+    w = cfg.get("fallback_modelle", "")
+    if isinstance(w, str):
+        return "default" if w.strip().lower() == "default" else None
+    if isinstance(w, (list, tuple)):
+        namen = [str(m).strip() for m in w if str(m).strip()][:3]
+        return [{"model": m} for m in namen] or None
+    return None
+
+
+def fallback_abgelehnt(fehler):
+    """Ist dieser Fehler die Ablehnung des serverseitigen Rueckfalls?
+
+    Faengt beides: das unbekannte Betakennwort im Kopf und das abgelehnte
+    Feld im Payload. Beide Meldungen nennen 'fallback' im Wortlaut, und
+    beide sind HTTP 400 — enger geht es nicht, ohne die Meldungstexte des
+    Anbieters festzuschreiben."""
+    t = str(fehler)
+    return t.startswith("HTTP 400") and "fallback" in t.lower()
+
+
+def werkzeug_datum(typ):
+    """Die Datumsziffern einer Werkzeugfassung ('20260209'), oder ''.
+
+    Die Fassungen heissen 'web_search_<JJJJMMTT>'; verglichen wird das
+    Datum, nicht der ganze Name. Ein Stringvergleich ueber den Namen sieht
+    richtig aus und bricht beim ersten Werkzeug mit anderem Praefix."""
+    m = re.search(r"_(\d{8})$", str(typ or ""))
+    return m.group(1) if m else ""
+
+
+# Ab dieser Fassung filtert die Websuche ihre Treffer aus der
+# Codeausfuehrung heraus, bevor sie ins Kontextfenster wandern.
+WEBSUCHE_FILTERND = "20260209"
+
+
+def websuche_werkzeug(cfg):
+    """Werkzeugdefinition der serverseitigen Websuche, oder None.
+
+    Die Fassung steht in projekt.json, nicht im Code: Sie wechselt
+    schneller als dieses Projekt, und ein hartkodierter Name laesst den
+    Schritt eines Tages mit veralteten Treffern laufen, ohne dass jemand
+    es merkt."""
+    typ = str(cfg.get("websuche_werkzeug", "") or "").strip()
+    if not typ:
+        return None
+    w = {"type": typ, "name": "web_search",
+         "max_uses": int(cfg.get("websuche_max", 6) or 6)}
+    # Die filternden Fassungen rufen die Suche standardmaessig aus der
+    # Codeausfuehrung heraus. 'websuche_filtern: false' erzwingt den
+    # direkten Aufruf — noetig fuer Modelle, die das Programmieren von
+    # Werkzeugaufrufen nicht koennen und sonst mit HTTP 400 antworten.
+    if werkzeug_datum(typ) >= WEBSUCHE_FILTERND \
+            and not cfg.get("websuche_filtern", True):
+        w["allowed_callers"] = ["direct"]
+    return [w]
+
+
+def belege(d):
+    """Quellenangaben aus den Zitatmarken einer Antwort.
+
+    Die Websuche haengt an jeden Textblock, den ein Treffer gestuetzt hat,
+    die Fundstelle mit URL, Titel und belegtem Wortlaut. Das ist etwas
+    anderes als die Quellenangabe, die das Modell in seine Antwort
+    schreibt: Die eine ist ein abgerufener Treffer, die andere ein Satz,
+    den das Modell formuliert hat.
+
+    Genau diesen Unterschied soll die Zitatrecherche sichtbar machen —
+    'erfinde nichts' ist eine Anweisung, eine URL ist ein Beleg."""
+    raus, gesehen = [], set()
+    for b in d.get("content") or []:
+        if b.get("type") != "text":
+            continue
+        for z in b.get("citations") or []:
+            url = str(z.get("url") or "").strip()
+            if not url or url in gesehen:
+                continue
+            gesehen.add(url)
+            raus.append({"url": url,
+                         "titel": str(z.get("title") or "").strip(),
+                         "stelle": str(z.get("cited_text") or "").strip()})
+    return raus
+
+
+def rueckfall_gelaufen(d):
+    """Hat ein Ersatzmodell diese Antwort erzeugt?
+
+    Der Modellname allein reicht als Beleg nicht: Ein Alias loest auf einen
+    datierten Namen auf, und jede Antwort waere ein falscher Alarm. Der
+    Beleg ist der Eintrag 'fallback_message' unter den Iterationen. Er
+    steht auch dann da, wenn die API die Anfrage wegen einer frueheren
+    Ablehnung gleich an das Ersatzmodell geleitet hat — dann entsteht gar
+    kein Uebergabeblock, und nur die Iterationen verraten es."""
+    return any((it or {}).get("type") == "fallback_message"
+               for it in ((d.get("usage") or {}).get("iterations") or []))
+
+
+def bedient_von(d, angefragt):
+    """Das Modell, unter dem diese Antwort gebucht gehoert.
+
+    Nach einem Rueckfall ist das nicht das angefragte. Ohne Rueckfall
+    bleibt es beim angefragten Namen, auch wenn die Antwort einen
+    aufgeloesten traegt: Ein zweiter Name fuer dasselbe Modell zerlegte die
+    Kostenzeile und liesse den Tarif ins Leere greifen."""
+    if not rueckfall_gelaufen(d):
+        return angefragt
+    return str(d.get("model") or "").strip() or angefragt
+
+
+def ohne_none(x):
+    """Kopie ohne Schluessel mit dem Wert None.
+
+    Die SDK fuellt ungesetzte Felder mit None; unveraendert
+    zurueckgeschickt lehnt die API sie ab. Betrifft nur den Weg, auf dem
+    eine angehaltene Antwort zurueckgeht — gelesen wird weiter das
+    vollstaendige dict."""
+    if isinstance(x, dict):
+        return {k: ohne_none(v) for k, v in x.items() if v is not None}
+    if isinstance(x, list):
+        return [ohne_none(v) for v in x]
+    return x
+
+
 class AnthropicBackend(Backend):
-    """Messages-API. Drei Eigenheiten sind Absicht, nicht Versehen:
+    """Messages-API. Vier Eigenheiten sind Absicht, nicht Versehen:
 
     - Der System-Prompt traegt einen Cache-Marker. Er ist ueber alle Chunks
       byteweise identisch; wer Bausteine umsortiert, zerstoert die
@@ -1002,6 +1217,9 @@ class AnthropicBackend(Backend):
       Die Tiefe steuert 'effort'. Begruendung in ENTSCHEIDUNGEN.md.
     - Die Cache-Lebensdauer ist eine Versicherung, kein Sparposten. Lehnt
       der Anbieter sie ab, laeuft der Lauf ohne sie weiter.
+    - Eine Ablehnung des Sicherheitsklassifikators faellt auf ein
+      Ersatzmodell zurueck ('fallbacks'), statt den Lauf abzubrechen.
+      Gebucht wird unter dem Modell, das wirklich geantwortet hat.
     """
 
     URL     = "https://api.anthropic.com/v1/messages"
@@ -1030,15 +1248,31 @@ class AnthropicBackend(Backend):
                                             "schema": schema}
         if werkzeuge:
             p["tools"] = werkzeuge
+        rueckfall = fallbacks_wert(cfg)
+        if rueckfall:
+            # Achtung Paket G: Die Stapel-API nimmt 'fallbacks' NICHT an —
+            # ein Stapeleintrag damit kommt als Fehler zurueck. Der
+            # Stapeladapter muss das Feld also entfernen, nicht erben.
+            p["fallbacks"] = rueckfall
         return p
+
+    def betas(self, cfg):
+        """Betakennwoerter fuer diesen Aufruf. Leer heisst: normaler Weg."""
+        return [BETA_FALLBACK] if fallbacks_wert(cfg) else []
 
     def antwort_lesen(self, d, roh=False):
         """(Text, Usage). Wirft bei Ablehnung, statt Leeres zurueckzugeben."""
         if d.get("stop_reason") == "refusal":
-            grund = (d.get("stop_details") or {}).get("category") or "ohne Angabe"
+            s = d.get("stop_details") or {}
+            grund = s.get("category") or "ohne Angabe"
+            # Der Erklaertext ist nicht stabil formuliert und wird deshalb
+            # gezeigt, nicht ausgewertet. Fuer den Menschen vor dem Log ist
+            # er das einzige, was die Kategorie greifbar macht.
+            erklaerung = str(s.get("explanation") or "").strip()
             raise ApiFehler(
-                f"Das Modell hat die Anfrage abgelehnt (Kategorie: {grund}). "
-                f"Der Chunk bleibt unuebersetzt.")
+                f"Das Modell hat die Anfrage abgelehnt (Kategorie: {grund})."
+                + (f" {erklaerung}" if erklaerung else "")
+                + " Der Chunk bleibt unuebersetzt.")
         text = "".join(b.get("text", "") for b in d.get("content", [])
                        if b.get("type") == "text")
         u = d.get("usage") or {}
@@ -1051,7 +1285,9 @@ class AnthropicBackend(Backend):
                  "aus": u.get("output_tokens", 0),
                  "cache_lesen": u.get("cache_read_input_tokens", 0),
                  "cache_schreiben": u.get("cache_creation_input_tokens", 0),
-                 "cache_schreiben_1h": c.get("ephemeral_1h_input_tokens", 0)}
+                 "cache_schreiben_1h": c.get("ephemeral_1h_input_tokens", 0),
+                 "suchen": (u.get("server_tool_use") or {}).get(
+                     "web_search_requests", 0)}
         if d.get("stop_reason") == "max_tokens":
             print("    WARNUNG: Ausgabe am max_tokens-Limit abgeschnitten.")
         return (text if roh else saeubern(text)), usage
@@ -1098,8 +1334,42 @@ class AnthropicBackend(Backend):
         except Exception:
             return None
 
-    def chat(self, cfg, system, user, rolle="uebersetzung", modell="",
-             roh=False, werkzeuge=None, schema=None):
+    # Wie oft eine angehaltene Werkzeugrunde fortgesetzt wird. Die API haelt
+    # eine lange Werkzeugschleife an und antwortet mit 'pause_turn'; wer
+    # nicht fortsetzt, bekommt eine halbe Antwort und liest sie als
+    # Formfehler — bei der Zitatrecherche hiess das: Zitat uebersprungen,
+    # Luecke, die spaeter jemand von Hand sucht. Die Grenze verhindert, dass
+    # eine Schleife ohne Ende Geld kostet.
+    PAUSEN_MAX = 4
+
+    def versicherung_aufgeben(self, cfg, e):
+        """Gibt eine Zusicherung auf, wenn dieser Fehler sie ablehnt.
+
+        True heisst: derselbe Aufruf darf noch einmal laufen, jetzt ohne
+        sie. False heisst: echter Fehler, weiterreichen.
+
+        Der Aufrufer darf in einer Schleife fragen — jede Zusicherung laesst
+        sich nur einmal aufgeben, danach melden 'cache_ttl' und
+        'fallbacks_wert' nichts mehr und die Schleife endet."""
+        if cache_ttl(cfg) and ttl_abgelehnt(e):
+            globals()["_TTL_ABGELEHNT"] = True
+            print(f"    WARNUNG: Cache-Lebensdauer '{cfg.get('cache_ttl')}' "
+                  f"wird abgelehnt — der Lauf geht ohne sie weiter.\n"
+                  f"             'cache_ttl' in projekt.json leeren, dann "
+                  f"verschwindet diese Meldung.")
+            return True
+        if fallbacks_wert(cfg) and fallback_abgelehnt(e):
+            globals()["_FALLBACK_ABGELEHNT"] = True
+            print(f"    WARNUNG: Serverseitiger Rueckfall wird abgelehnt — "
+                  f"der Lauf geht ohne ihn weiter.\n"
+                  f"             Eine Ablehnung bricht ab jetzt den Chunk ab. "
+                  f"'fallback_modelle' in projekt.json leeren, dann "
+                  f"verschwindet diese Meldung.")
+            return True
+        return False
+
+    def chat_meta(self, cfg, system, user, rolle="uebersetzung", modell="",
+                  roh=False, werkzeuge=None, schema=None):
         schluessel = api_schluessel("anthropic")
         if not schluessel:
             sys.exit("FEHLER: ANTHROPIC_API_KEY fehlt.\n"
@@ -1110,36 +1380,74 @@ class AnthropicBackend(Backend):
                       "content-type": "application/json"}
         timeout = (cfg["timeout_connect"], cfg.get("timeout_read_api", 600))
         k = self.klient(cfg)
+        streamen = bool(cfg.get("streaming", True))
+
+        def neues_payload():
+            return self.payload(cfg, system, user, rolle, modell, werkzeuge,
+                                schema)
 
         # Ein Payloadbauer, ein Antwortleser, zwei Transportwege. Wer die
         # SDK an 'payload' vorbei aufruft, hat zwei Wahrheiten darueber,
         # was wirklich rausgeht — und der Selbsttest prueft nur eine.
-        def einmal():
-            p = self.payload(cfg, system, user, rolle, modell, werkzeuge,
-                             schema)
+        def einmal(p):
+            betas = self.betas(cfg)
             if k is not None:
-                return sdk_antwort(k, p)
+                return sdk_antwort(k, p, betas, streamen)
+            kopf = dict(kopfzeilen)
+            if betas:
+                kopf["anthropic-beta"] = ",".join(betas)
             return sende(lambda: requests.post(self.URL, json=p,
-                                               headers=kopfzeilen,
+                                               headers=kopf,
                                                timeout=timeout),
                          cfg["max_retries"]).json()
-        try:
-            r = einmal()
-        except ApiFehler as e:
-            # Die Lebensdauer ist eine Versicherung. Kennt der Anbieter sie
-            # nicht, waere ein Abbruch mitten im Buch der teurere Fehler:
-            # einmal melden, ohne sie weiterlaufen.
-            if not (cache_ttl(cfg) and ttl_abgelehnt(e)):
-                raise
-            globals()["_TTL_ABGELEHNT"] = True
-            print(f"    WARNUNG: Cache-Lebensdauer '{cfg.get('cache_ttl')}' "
-                  f"wird abgelehnt — der Lauf geht ohne sie weiter.\n"
-                  f"             'cache_ttl' in projekt.json leeren, dann "
-                  f"verschwindet diese Meldung.")
-            r = einmal()
-        text, usage = self.antwort_lesen(r, roh)
-        usage_buchen(rolle, modell, usage)
-        return text
+
+        def mit_versicherung(p):
+            while True:
+                try:
+                    return einmal(p)
+                except ApiFehler as e:
+                    if not self.versicherung_aufgeben(cfg, e):
+                        raise
+                    # Die Zusicherung ist jetzt abgeschaltet; das Payload
+                    # muss neu gebaut werden, sonst traegt es sie weiter.
+                    # Der Gespraechsverlauf bleibt, er gehoert nicht dazu.
+                    p = dict(neues_payload(), messages=p["messages"])
+
+        p = neues_payload()
+        text, usage = "", dict.fromkeys(USAGE_FELDER, 0)
+        gefunden, bedient = [], modell
+        for _ in range(self.PAUSEN_MAX + 1):
+            d = mit_versicherung(p)
+            # Gesaeubert wird erst am Ende: saeubern() schneidet Vorreden
+            # und Codezaeune ab, und ein Zaun, der ueber zwei Runden geht,
+            # waere nach zwei Teilreinigungen unpaarig.
+            stueck, u = self.antwort_lesen(d, roh=True)
+            text += stueck
+            for f in USAGE_FELDER:
+                usage[f] += int(u.get(f, 0) or 0)
+            gefunden += belege(d)
+            bedient = bedient_von(d, modell)
+            if d.get("stop_reason") != "pause_turn":
+                break
+            # Die Werkzeugschleife wurde angehalten, nicht beendet. Die
+            # angehaltene Antwort geht unveraendert zurueck, dann laeuft
+            # sie weiter.
+            p = dict(p, messages=list(p["messages"])
+                     + [{"role": "assistant",
+                         "content": ohne_none(d.get("content") or [])}])
+        else:
+            print(f"    WARNUNG: Werkzeugschleife nach {self.PAUSEN_MAX} "
+                  f"Fortsetzungen abgebrochen — die Antwort kann "
+                  f"unvollstaendig sein.")
+
+        if bedient != modell:
+            print(f"    HINWEIS: {modell} hat abgelehnt, geantwortet hat "
+                  f"{bedient}. Die Stelle steht in der Kostenuebersicht "
+                  f"unter diesem Modell.")
+        usage_buchen(rolle, bedient, usage)
+        return (text if roh else saeubern(text)), \
+            {"modell": bedient, "belege": gefunden,
+             "suchen": usage.get("suchen", 0)}
 
 
 class GeminiBackend(Backend):
@@ -1219,8 +1527,8 @@ class GeminiBackend(Backend):
         except Exception:
             return None
 
-    def chat(self, cfg, system, user, rolle="begruendung", modell="",
-             roh=False, werkzeuge=None, schema=None):
+    def chat_meta(self, cfg, system, user, rolle="begruendung", modell="",
+                  roh=False, werkzeuge=None, schema=None):
         # 'schema' wird angenommen und NICHT gesendet: Gemini spricht einen
         # anderen Schema-Dialekt (OpenAPI-Subset, kein JSON Schema). Ein
         # durchgereichtes Schema waere hier ein HTTP 400. Der Parser traegt.
@@ -1239,7 +1547,9 @@ class GeminiBackend(Backend):
                   cfg["max_retries"])
         text, usage = self.antwort_lesen(r.json(), roh)
         usage_buchen(rolle, modell, usage)
-        return text
+        # Kein Rueckfall, keine Belege, keine Suchen: Der Befund ist hier
+        # leer, damit Aufrufer ihn nicht je Anbieter unterscheiden muessen.
+        return text, {"modell": modell, "belege": [], "suchen": 0}
 
 
 BACKENDS = {"anthropic": AnthropicBackend(), "google": GeminiBackend()}
@@ -1254,9 +1564,13 @@ def backend(modell):
     return b
 
 
-def chat(cfg, system, user, rolle="uebersetzung", roh=False, werkzeuge=None,
-         schema=None):
-    """Der einzige Modellaufruf des Projekts.
+def chat_voll(cfg, system, user, rolle="uebersetzung", roh=False,
+              werkzeuge=None, schema=None):
+    """Der einzige Modellaufruf des Projekts. Gibt (Text, Befund).
+
+    Im Befund steht, was neben dem Text anfiel: das Modell, das wirklich
+    geantwortet hat, die Belege der Websuche und die Zahl der Suchen. Wer
+    davon nichts braucht, ruft 'chat' und bekommt nur den Text.
 
     Die Rolle loest Modell, Backend und Effort auf. Es gehen keine
     Sampling-Parameter hinaus: claude-opus-5 hat temperature/top_p/top_k
@@ -1288,8 +1602,15 @@ def chat(cfg, system, user, rolle="uebersetzung", roh=False, werkzeuge=None,
         zusatz["werkzeuge"] = werkzeuge
     if schema:
         zusatz["schema"] = schema
-    return b.chat(cfg, system, user, rolle=rolle, modell=modell, roh=roh,
-                  **zusatz)
+    return b.chat_meta(cfg, system, user, rolle=rolle, modell=modell, roh=roh,
+                       **zusatz)
+
+
+def chat(cfg, system, user, rolle="uebersetzung", roh=False, werkzeuge=None,
+         schema=None):
+    """Wie chat_voll, aber nur der Text. Der Normalfall."""
+    return chat_voll(cfg, system, user, rolle=rolle, roh=roh,
+                     werkzeuge=werkzeuge, schema=schema)[0]
 
 
 def tokens_zaehlen(cfg, rolle, system, user):

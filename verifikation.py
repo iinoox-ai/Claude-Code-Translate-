@@ -10,7 +10,9 @@ pruefen liess (Auftrag Paket 1, verschoben nach Paket 2):
   3. Mini-Echtlauf: ein Kurz-Chunk je Anbieter, mit Token-Usage
   4. Sampling-Doktrin am lebenden Objekt: dasselbe Payload mit
      'temperature' — belegt das dokumentierte HTTP 400, statt es zu glauben
-  5. Google-Tarife gegen die Preisseite
+  5. Ist der serverseitige Rueckfall freigeschaltet? Sonst beendet die
+     erste Ablehnung den Volllauf, und man erfaehrt es bei Chunk 300
+  6. Google-Tarife gegen die Preisseite
 
 Aufruf im Projektordner (Arbeitsverzeichnis), nicht im Code-Verzeichnis:
 
@@ -270,9 +272,60 @@ def pruefe_sampling(e, cfg, anbieter_rollen, tragen):
 
 
 # ==================================================================
+def pruefe_rueckfall(e, cfg, anbieter_rollen, tragen):
+    """Nimmt der Anbieter 'fallbacks' an — fuer diesen Schluessel?
+
+    Die Betafunktion kann unbekannt oder fuer die Organisation nicht
+    freigeschaltet sein. Im Lauf faellt das erst auf, wenn ein Chunk
+    abgelehnt wird: Dann meldet der Lauf einmal 'Rueckfall abgelehnt' und
+    bricht denselben Chunk ab. Ein Aufruf mit einem Token beantwortet die
+    Frage vorher, und zwar fuer den Schluessel, der wirklich benutzt wird.
+    """
+    print("\n--- 5 · Serverseitiger Rueckfall " + "-" * 28)
+    if "anthropic" not in tragen:
+        e.info("Kein Anthropic-Modell aktiv",
+               "Der Rueckfall gibt es nur auf dem Anthropic-Pfad.")
+        return
+    if not G.fallbacks_wert(cfg):
+        e.info("Rueckfall abgeschaltet",
+               "'fallback_modelle' ist leer. Eine Ablehnung des "
+               "Sicherheitsklassifikators beendet dann den Lauf; der "
+               "Resume setzt an derselben Stelle wieder an.")
+        return
+    modell = anbieter_rollen["anthropic"][1]
+    b = G.BACKENDS["anthropic"]
+    probe = dict(cfg)
+    probe["max_tokens_api"] = 1
+    p = b.payload(probe, PROBE_SYSTEM, "Antworte mit OK.", "verifikation",
+                  modell)
+    kopf = {"x-api-key": G.api_schluessel("anthropic"),
+            "anthropic-version": b.VERSION,
+            "content-type": "application/json",
+            "anthropic-beta": ",".join(b.betas(cfg))}
+    try:
+        r = requests.post(b.URL, json=p, headers=kopf, timeout=(10, 120))
+    except Exception as ex:
+        e.warn("Rueckfall nicht pruefbar", str(ex))
+        return
+    if r.status_code == 200:
+        e.ok(f"{modell}: 'fallbacks' wird angenommen",
+             "Eine Ablehnung wird von einem Ersatzmodell beantwortet und "
+             "erscheint in der Kostenuebersicht als eigene Zeile.")
+    elif r.status_code == 400:
+        e.warn("'fallbacks' wird abgelehnt", (r.text or "")[:200]
+               + "\n  Der Lauf meldet das einmal und laeuft ohne "
+                 "Rueckfall weiter — eine Ablehnung bricht dann den "
+                 "Chunk ab. 'fallback_modelle' leeren, dann bleibt die "
+                 "Meldung aus.")
+    else:
+        e.info(f"HTTP {r.status_code} auf die Rueckfallprobe",
+               (r.text or "")[:200])
+
+
+# ==================================================================
 def pruefe_tarife(e):
     """Vergleicht die hinterlegten Google-Tarife mit der Preisseite."""
-    print("\n--- 5 · Google-Tarife " + "-" * 39)
+    print("\n--- 6 · Google-Tarife " + "-" * 39)
     try:
         r = requests.get(PREISSEITE, timeout=(10, 60),
                          headers={"User-Agent": "Mozilla/5.0"})
@@ -333,6 +386,7 @@ def main():
             tragen = pruefe_ping(e, cfg)
             pruefe_echtlauf(e, cfg, anbieter_rollen, tragen)
             pruefe_sampling(e, cfg, anbieter_rollen, tragen)
+            pruefe_rueckfall(e, cfg, anbieter_rollen, tragen)
         pruefe_tarife(e)
 
     print("\n" + "=" * 62)

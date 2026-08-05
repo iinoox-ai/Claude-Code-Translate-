@@ -33,11 +33,18 @@ import referenz_sync as R
 REVIEW = "zitate_review.md"
 TAB = "ZitateReview"
 
-# Serverseitige Websuche. Ohne sie raet das Modell einen Wortlaut
-# zusammen, und genau das ist der Fehler, den dieser Schritt verhindern
-# soll — die Suche ist kein Beiwerk, sie ist der Zweck.
-WERKZEUGE = [{"type": "web_search_20250305", "name": "web_search",
-              "max_uses": 6}]
+# Die serverseitige Websuche steht hier bewusst NICHT als Konstante.
+# 'G.websuche_werkzeug(cfg)' baut sie aus projekt.json, weil die Fassung
+# beim Anbieter altert und schneller wechselt als dieses Projekt: Bis
+# August 2026 rief dieser Schritt die Fassung von Maerz 2025, anderthalb
+# Jahre nach ihrem Erscheinen. Gemerkt haette es niemand — eine alte
+# Fassung antwortet, sie bricht nicht ab. Ein Selbsttest verbietet den
+# Namen deshalb in jedem Skript ausser gemeinsam.STANDARD; auch in einem
+# Kommentar, weil er den Unterschied nicht sehen kann und nicht soll.
+#
+# Ohne Suche raet das Modell einen Wortlaut zusammen, und genau das ist der
+# Fehler, den dieser Schritt verhindern soll. Die Suche ist kein Beiwerk,
+# sie ist der Zweck.
 
 SYSTEM = (
     "Du recherchierst Zitatnachweise fuer eine literarische Uebersetzung "
@@ -85,8 +92,10 @@ BEFUND_SCHEMA = {
     "additionalProperties": False,
 }
 
-SPALTEN = ["index", "sprache", "original", "vorschlag_de", "uebersetzer",
-           "quelle", "konfidenz", "freigegeben"]
+# Datei und Tab werden aus derselben Liste gebaut und ueber die
+# Spaltennamen wieder gelesen. Sie steht in gemeinsam, weil referenz_sync
+# den Tab anlegt und dieses Modul nicht importieren kann.
+SPALTEN = G.ZITAT_SPALTEN
 
 # Unterhalb dieser Konfidenz gilt der Vorschlag als unsicher und wird in
 # der Liste als solcher markiert. Er wird trotzdem gezeigt — der Mensch
@@ -119,13 +128,22 @@ def antwort_lesen(text):
 
 
 def recherchieren(cfg, z):
-    """Ein Aufruf je Zitat. Gibt den Befund als Abbildung zurueck."""
+    """Ein Aufruf je Zitat. Gibt den Befund als Abbildung zurueck.
+
+    Die Belege der Websuche kommen dazu, unter einem eigenen Schluessel:
+    Sie stammen nicht aus der Antwort des Modells, sondern aus den
+    Treffern, die es gelesen hat. 'uebersetzer' und 'quelle' sind
+    formulierte Angaben und koennen falsch sein; eine URL ist nachpruefbar
+    — und nachpruefen ist genau das, was der Mensch vor der Freigabe tut."""
     frage = (f"Zitat:\n{z['text']}\n\n"
              f"Attributionszeile im Buch: {z.get('attribution', '')}\n\n"
              f"Bestimme die Sprache und liefere den Befund als JSON.")
-    antwort = G.chat(cfg, SYSTEM, frage, rolle="zitat", roh=True,
-                     werkzeuge=WERKZEUGE, schema=BEFUND_SCHEMA)
-    return antwort_lesen(antwort)
+    antwort, meta = G.chat_voll(cfg, SYSTEM, frage, rolle="zitat", roh=True,
+                                werkzeuge=G.websuche_werkzeug(cfg),
+                                schema=BEFUND_SCHEMA)
+    befund = antwort_lesen(antwort)
+    befund["belege"] = meta.get("belege") or []
+    return befund
 
 
 def uebernehmen(z, befund):
@@ -145,6 +163,8 @@ def uebernehmen(z, befund):
     except (TypeError, ValueError):
         z["konfidenz"] = 0.0
     z["begruendung"] = str(befund.get("begruendung", "") or "").strip()
+    z["belege"] = [b for b in (befund.get("belege") or [])
+                   if isinstance(b, dict) and b.get("url")]
     if z["status"] == "original_belassen":
         # Das Original ist der Zieltext. Kein Vorschlag, keine Freigabe
         # noetig — hier gibt es nichts zu entscheiden.
@@ -155,13 +175,26 @@ def uebernehmen(z, befund):
     return z
 
 
+# Wie viele Beleg-URLs in die Tabellenzelle passen, ohne die Zeile
+# unlesbar zu machen. Vollstaendig stehen sie im Abschnitt darunter.
+BELEGE_IN_TABELLE = 2
+
+
+def belegzelle(z):
+    """Die Beleg-URLs eines Zitats als eine Tabellenzelle."""
+    urls = [b.get("url", "") for b in (z.get("belege") or []) if b.get("url")]
+    zelle = " ".join(urls[:BELEGE_IN_TABELLE])
+    rest = len(urls) - BELEGE_IN_TABELLE
+    return zelle + (f" (+{rest})" if rest > 0 else "")
+
+
 def zeilen(epigraphen):
     raus = []
     for z in epigraphen:
         raus.append([str(z.get("index", "")), z.get("sprache", ""),
                      z.get("text", "")[:300], z.get("vorschlag_de", ""),
                      z.get("uebersetzer", ""), z.get("quelle", ""),
-                     str(z.get("konfidenz", "")),
+                     str(z.get("konfidenz", "")), belegzelle(z),
                      str(z.get("freigegeben", "nein"))])
     return raus
 
@@ -191,6 +224,13 @@ def review_schreiben(epigraphen):
             L.append(f"- Quelle: {z.get('quelle','?')}")
         if z.get("begruendung"):
             L.append(f"- Begruendung: {z['begruendung']}")
+        # Die Belege stehen getrennt von 'Quelle': Das eine ist ein
+        # gelesener Treffer, das andere eine Angabe des Modells. Wer
+        # freigibt, soll den Unterschied sehen koennen.
+        for b in (z.get("belege") or []):
+            stelle = (b.get("stelle") or "").replace("\n", " ")[:160]
+            L.append(f"- Beleg: {b.get('titel') or b['url']} — {b['url']}"
+                     + (f"\n  > {stelle}" if stelle else ""))
         L.append("")
     open(REVIEW, "w", encoding="utf-8").write("\n".join(L) + "\n")
 
@@ -224,8 +264,14 @@ def review_lesen():
             continue
         if not felder[0].lstrip("-").isdigit():
             continue
-        raus[int(felder[0])] = (felder[-1].lower() in ("ja", "j", "yes"),
-                                felder[3])
+        # Ueber die Spaltennamen, nicht ueber feste Positionen: Eine neue
+        # Spalte hat sonst still die Freigabe aus der falschen Zelle
+        # gelesen — und 'freigegeben' ist die eine Spalte, bei der ein
+        # Lesefehler einen ungeprueften Wortlaut in den Text setzt.
+        raus[int(felder[0])] = (
+            felder[SPALTEN.index("freigegeben")].lower()
+            in ("ja", "j", "yes"),
+            felder[SPALTEN.index("vorschlag_de")])
     return raus
 
 
