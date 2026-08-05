@@ -435,6 +435,107 @@ def selbsttest(cfg, b):
     except Exception as e:
         b.add("FEHLER", "Kostenbuchung nicht pruefbar", repr(e))
 
+    # --- Vorwegschau und Figurennachhall (Paket C) ---------------------
+    # Beide geben dem Chunk Kontext, den er von sich aus nicht hat. Beide
+    # koennen dabei Schaden anrichten: eine Vorwegschau, die mituebersetzt
+    # wird, und ein Nachhall, der ueber eine Ebenenfuge laeuft und Figuren
+    # der einen Erzaehlebene in die andere traegt.
+    try:
+        import uebersetzung as UE
+        fehler = []
+
+        # Vorwegschau endet an der Satzgrenze — ein Fragment liest sich
+        # wie ein abgebrochener Auftrag.
+        t = "Erster Satz. Zweiter Satz! Noch einer laeuft weiter und weiter"
+        if G.anfangswoerter(t, 4) != "Erster Satz. Zweiter Satz!":
+            fehler.append(f"Schnitt nicht an der Satzgrenze: "
+                          f"{G.anfangswoerter(t, 4)!r}")
+        if G.anfangswoerter(t, 500) != t:
+            fehler.append("kurzer Text wird beschnitten")
+        if G.anfangswoerter(t, 0) != "":
+            fehler.append("0 schaltet die Vorwegschau nicht ab")
+        # Ein einziger langer Satz: lieber Fragment als gar nichts.
+        if not G.anfangswoerter("Ein Satz ganz ohne jede Grenze hier", 4):
+            fehler.append("Satz ohne Grenze liefert keinen Ausblick")
+        # Sie darf nicht mit der Rueckschau verwechselt werden.
+        if G.anfangswoerter(t, 4) == G.schlusswoerter(t, 4):
+            fehler.append("Vorwegschau und Rueckschau liefern dasselbe")
+
+        # Der Personenblock: wer nachhallt, muss als solcher erkennbar
+        # sein — sonst sucht das Modell den Namen im Abschnitt.
+        personen = {"Bennett": "er/ihn", "Babette": "sie/sie"}
+        da = UE.block_personen("Bennett ging fort.", personen, {})
+        if "Babette" in da:
+            fehler.append("nicht genannte Figur steht ohne Nachhall im Block")
+        hall = UE.block_personen("Hij ging fort.", personen, {},
+                                 nachhall={"Bennett"})
+        if "Bennett" not in hall:
+            fehler.append("Nachhall bringt die Figur nicht in den Block")
+        if "zuletzt erwähnt" not in hall:
+            fehler.append("nachhallende Figur ist nicht als solche markiert")
+        if "zuletzt erwähnt" in da:
+            fehler.append("anwesende Figur wird als nachhallend markiert")
+        if UE.figuren_im_chunk("Bennett und Babette.", personen) != \
+                {"Bennett", "Babette"}:
+            fehler.append("Figurenerkennung im Chunk falsch")
+
+        # Die Fugenregel ist der Kern: Die Vorwegschau darf die
+        # Ebenenfuge NICHT unterlaufen. Sonst sieht der letzte Chunk der
+        # einen Ebene den Anfang der naechsten — mit anderem Tempus und
+        # anderer Person — und genau davor schuetzt die Fuge.
+        ch = [("Eerste stuk. Nog een zin.", False),
+              ("Tweede stuk. Nog een zin.", False),
+              ("Derde stuk. Nog een zin.", False),
+              ("Een citaat blijft staan.", True),
+              ("Vijfde stuk. Nog een zin.", False)]
+        fugen = {2}                       # vor Chunk 2 liegt eine Fuge
+        if not UE.vorwegschau(ch, 0, fugen, 50).startswith("Tweede"):
+            fehler.append("Vorwegschau innerhalb der Ebene fehlt")
+        if UE.vorwegschau(ch, 1, fugen, 50) != "":
+            fehler.append("Vorwegschau laeuft ueber die Ebenenfuge hinweg")
+        if UE.vorwegschau(ch, 2, fugen, 50) != "":
+            fehler.append("geschuetztes Zitat wird als Ausblick gegeben")
+        if UE.vorwegschau(ch, 4, fugen, 50) != "":
+            fehler.append("letzter Chunk liefert einen Ausblick")
+        if UE.vorwegschau(ch, 0, fugen, 0) != "":
+            fehler.append("abgeschaltete Vorwegschau liefert trotzdem Text")
+
+        # Der Prompt muss die Vorwegschau ankuendigen, sonst uebersetzt
+        # das Modell sie mit — und die Laengenpruefung verwirft den Chunk.
+        p_ueb, _ = UE.prompts(cfg)
+        if "SO GEHT ES DANACH WEITER" not in p_ueb:
+            fehler.append("System-Prompt kennt den Vorwegschau-Block nicht")
+        if "NICHT übersetzen" not in p_ueb and "niemals erneut" not in p_ueb:
+            fehler.append("System-Prompt verbietet das Mituebersetzen nicht")
+
+        # Der Revisionsprompt muss die Rueckschau kennen. Ohne den Block
+        # glaettet Pass 2 genau die Anschluesse weg, die Pass 1 hergestellt
+        # hat — und ohne die Absatzregel bricht er die Absatztreue, an der
+        # Leseausgabe, Zitateinsatz und Tempusmessung haengen.
+        _, p_rev = UE.prompts(cfg)
+        if "ENDE DES VORIGEN ABSCHNITTS" not in p_rev:
+            fehler.append("Revisionsprompt kennt die Rueckschau nicht")
+        if "Absätze" not in p_rev and "Absätzen" not in p_rev:
+            fehler.append("Revisionsprompt nennt die Absatzregel nicht")
+
+        # Die drei neuen Schalter muessen verstellbar sein — sonst haelt
+        # eine eingespielte projekt.json sie nicht.
+        for k in ("context_words_voraus", "rueckschau_quelle",
+                  "figuren_nachhall"):
+            if k not in G.AENDERBAR:
+                fehler.append(f"{k} ist nicht verstellbar")
+            if k not in G.STANDARD:
+                fehler.append(f"{k} fehlt in STANDARD")
+
+        if fehler:
+            b.add("FEHLER", "Vorwegschau oder Nachhall fehlerhaft",
+                  "; ".join(fehler))
+        else:
+            b.add("OK", "Vorwegschau schneidet an Satzgrenzen, Nachhall "
+                        "markiert abwesende Figuren")
+    except Exception as e:
+        b.add("FEHLER", "Vorwegschau nicht pruefbar", repr(e))
+
     # --- Erzaehlebenen: die zweite Quelle der Fugen --------------------
     # Der 'rahmen_marker' setzt voraus, dass der Autor die Wechsel
     # ausgezeichnet hat. Beim Buch 1919 tat er das nicht: fuenf Ebenen im
@@ -2171,7 +2272,11 @@ def pruefe_kosten(cfg, b, text):
         if rolle in CHUNKROLLEN:
             s = system_token.get(rolle, 0)
             # Der System-Prompt wird einmal geschrieben und n−1 mal gelesen.
-            ein = (chunk_token + KOPF_TOKEN + 2 * cfg["context_words"] * faktor) * n
+            # Je Chunk: Quelltext + Referenzbloecke + Rueckschau (Quelle
+            # und eigene Fassung) + Vorwegschau.
+            kontext = (2 * cfg["context_words"]
+                       + int(cfg.get("context_words_voraus", 0) or 0)) * faktor
+            ein = (chunk_token + KOPF_TOKEN + kontext) * n
             schreiben, lesen = s, s * (n - 1)
             aus = chunk_token * n * DENKFAKTOR
             zusatz = f"{n} Chunks, System-Prompt {s:,.0f} Token"

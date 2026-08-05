@@ -235,10 +235,17 @@ PERSONEN nennt die zu verwendenden Pronomen. GLOSSAR nennt Entsprechungen, \
 die durchgehend gelten. ANREDE nennt Abweichungen von der Vorgabe. ACHTUNG IN \
 DIESEM ABSCHNITT nennt die Fallen dieses Abschnitts.
 
-Das Ende des vorigen Abschnitts und deine eigene Übersetzung davon sind NUR \
-KONTEXT: für Konsistenz bei Namen, Terminologie, Tempus, Stimme und Stil und \
-für einen nahtlosen Übergang. Übersetze den Kontext niemals erneut und \
-wiederhole keinen Teil davon.
+Das Ende des vorigen Abschnitts, deine eigene Übersetzung davon und der \
+Anfang des nächsten Abschnitts sind NUR KONTEXT: für Konsistenz bei Namen, \
+Terminologie, Tempus, Stimme und Stil und für einen nahtlosen Übergang. \
+Übersetze den Kontext niemals erneut und wiederhole keinen Teil davon.
+
+Der Block SO GEHT ES DANACH WEITER steht dort, damit du am Abschnittsende \
+nicht blind bist: Er zeigt, worauf ein angefangener Satzbogen zuläuft, ob eine \
+Figur gleich noch spricht, ob eine Anrede erst danach aufgelöst wird. Er ist \
+KEIN Auftrag. Deine Ausgabe endet mit dem letzten Satz des Abschnitts ZU \
+ÜBERSETZENDER TEXT — auch dann, wenn der Satzbogen dort mitten in der Bewegung \
+abbricht.
 
 Gib AUSSCHLIESSLICH die deutsche Übersetzung des mit ZU ÜBERSETZENDER TEXT \
 markierten Abschnitts aus. Keine Vorrede, keine Anmerkungen, kein Kommentar, \
@@ -283,6 +290,19 @@ ZIELFORM
 
 Ist der Entwurf schon gut, gib ihn mit minimalen Änderungen zurück.
 
+ANSCHLUSS
+
+Steht ein Block ENDE DES VORIGEN ABSCHNITTS, ist er NUR KONTEXT: Er zeigt, \
+worauf der erste Satz des Entwurfs antwortet. Prüfe den Übergang — Tempus, \
+Anrede, ein aufgenommenes Stichwort — und überarbeite ihn niemals mit. \
+Wiederhole keinen Teil davon.
+
+ABSATZSTRUKTUR
+
+Die Zahl der Absätze bleibt, wie sie im Entwurf steht. Absätze \
+zusammenzuziehen oder zu teilen macht die Fassung an anderer Stelle \
+unbrauchbar, und deine Überarbeitung wird dann verworfen.
+
 Gib AUSSCHLIESSLICH den überarbeiteten deutschen Text aus. Keine Vorrede, \
 keine Anmerkungen, kein Kommentar."""
 
@@ -302,9 +322,44 @@ keine Anmerkungen, kein Kommentar."""
 
 
 # ==================================================================
-def block_personen(chunk, personen, figuren):
+def vorwegschau(chunks, i, fugen, n_woerter):
+    """Der Anfang des naechsten Chunks als Kontext — oder nichts.
+
+    Sie endet an der Ebenenfuge: Dort beginnt eine andere Erzaehlebene mit
+    anderem Tempus und anderer Person, und ihr Anfang waere kein Ausblick,
+    sondern eine Irrefuehrung. Genau davor schuetzt die Fuge, und die
+    Vorwegschau darf sie nicht unterlaufen.
+
+    Ein geschuetztes Zitat wird ebenfalls uebersprungen: Es bleibt im
+    Original stehen und sagt ueber die Fortsetzung nichts.
+
+    Spaetere Stapelfugen (Paket G) sind KEINE Ebenenfugen — dort laeuft
+    die Vorwegschau weiter, weil sie nur eine technische Grenze ist."""
+    if n_woerter <= 0 or i + 1 >= len(chunks):
+        return ""
+    if (i + 1) in fugen or chunks[i + 1][1]:
+        return ""
+    return G.anfangswoerter(chunks[i + 1][0], n_woerter)
+
+
+def figuren_im_chunk(chunk, personen):
+    """Namen aus personen.json, die in diesem Chunk vorkommen."""
+    return {n for n in personen
+            if re.search(r"\b" + re.escape(n) + r"'?s?\b", chunk)}
+
+
+def block_personen(chunk, personen, figuren, nachhall=()):
+    """Personenblock fuer den User-Prompt.
+
+    'nachhall' sind Figuren aus den vorigen Chunks derselben Erzaehlebene.
+    Grund: Eine Figur, die in Chunk 12 eingefuehrt und in Chunk 13 nur
+    noch »hij« ist, verschwindet sonst aus dem Block — und mit ihr das
+    Pronomen und die Sprechweise, die genau dann gebraucht werden. Der
+    Nachhall wird an Ebenenfugen zurueckgesetzt und sonst nicht: Innerhalb
+    einer Ebene bleibt die Figur dieselbe."""
+    da = figuren_im_chunk(chunk, personen)
     treffer = {n: p for n, p in personen.items()
-               if re.search(r"\b" + re.escape(n) + r"'?s?\b", chunk)}
+               if n in da or n in nachhall}
     if not treffer:
         return ""
     zeilen = []
@@ -317,6 +372,10 @@ def block_personen(chunk, personen, figuren):
             z += f" — {rolle[:180]}"
         if sprache:
             z += f" [Sprechweise: {sprache[:140]}]"
+        # Wer nur nachhallt, wird als solcher gekennzeichnet: Sonst sucht
+        # das Modell den Namen im Abschnitt und findet ihn nicht.
+        if n not in da:
+            z += " (zuletzt erwähnt, hier nur als Pronomen)"
         zeilen.append(z)
     return "=== PERSONEN ===\n" + "\n".join(zeilen) + "\n\n"
 
@@ -673,9 +732,27 @@ def main():
 
     letzte = ""
     if zu_tun and zu_tun[0] > 0:
-        vorige = G.teil_lesen("uebersetzung", zu_tun[0] - 1, praefix)
+        art = ("entwurf" if cfg.get("rueckschau_quelle") == "entwurf"
+               else "uebersetzung")
+        vorige = G.teil_lesen(art, zu_tun[0] - 1, praefix)
         if vorige and zu_tun[0] not in fugen:
             letzte = G.schlusswoerter(vorige, cfg["context_words"])
+
+    # Figurennachhall: Namen aus den letzten Chunks DERSELBEN Ebene. Beim
+    # Fortsetzen wird er aus den vorhandenen Quellchunks rekonstruiert —
+    # sonst faengt ein wiederaufgenommener Lauf ohne Gedaechtnis an.
+    nachhall_tiefe = int(cfg.get("figuren_nachhall", 0) or 0)
+    nachhall = []
+    if nachhall_tiefe and zu_tun:
+        letzte_fuge = max([f for f in fugen if f <= zu_tun[0]], default=0)
+        ab = max(letzte_fuge, zu_tun[0] - nachhall_tiefe)
+        for k in range(ab, zu_tun[0]):
+            if not chunks[k][1]:
+                nachhall.append(figuren_im_chunk(chunks[k][0], personen))
+
+    voraus_n = int(cfg.get("context_words_voraus", 0) or 0)
+    if voraus_n and not args.test:
+        print(f"Vorwegschau:        {voraus_n} Wörter, endet an jeder Fuge")
 
     kosten_vorher = G.kosten_schnappschuss() if praefix else None
     start = time.time()
@@ -691,20 +768,25 @@ def main():
 
         if i in fugen:
             letzte, vorher = "", ""
-            print("--- Auszugswechsel: Kontext zurückgesetzt ---")
+            nachhall.clear()          # neue Ebene, neues Figurengedaechtnis
+            print("--- Ebenenfuge: Kontext und Figurengedächtnis "
+                  "zurückgesetzt ---")
         else:
             vorher = (G.schlusswoerter(chunks[i-1][0], cfg["context_words"])
                       if i > 0 and not chunks[i-1][1] else "")
+
+        voraus = vorwegschau(chunks, i, fugen, voraus_n)
 
         print(f"[{i+1}/{n}] {len(quelle.split())} Wörter", flush=True)
         t0 = time.time()
 
         for versuch in range(1, cfg["max_retries"] + 1):
             try:
+                erinnert = set().union(*nachhall) if nachhall else set()
                 kopf = (block_ebene(ebene_je_chunk[i], perspektive)
                         + block_kapitel(kapitel_je_chunk[i], kapitel)
                         + block_fallen(quelle, cfg)
-                        + block_personen(quelle, personen, figuren)
+                        + block_personen(quelle, personen, figuren, erinnert)
                         + block_glossar(quelle, glossar)
                         + block_anrede(quelle, personen, anrede)
                         + block_leitmotive(quelle, leitmotive))
@@ -716,6 +798,13 @@ def main():
                     user += ("=== ENDE DES VORIGEN ABSCHNITTS, DEINE "
                              "ÜBERSETZUNG (nur Kontext, nicht wiederholen) "
                              "===\n" + letzte + "\n\n")
+                # Die Vorwegschau steht VOR dem Auftrag, nicht dahinter:
+                # Was zuletzt im Prompt steht, liest ein Modell als das,
+                # was zu tun ist. Hinter dem Auftrag waere sie eine
+                # Einladung, weiterzuuebersetzen.
+                if voraus:
+                    user += ("=== SO GEHT ES DANACH WEITER (nur Kontext, "
+                             "NICHT übersetzen) ===\n" + voraus + "\n\n")
                 user += "=== ZU ÜBERSETZENDER TEXT ===\n" + quelle
 
                 entwurf = G.chat(cfg, p_ueb, user, rolle="uebersetzung")
@@ -732,30 +821,69 @@ def main():
                 print(f"    Pass 1  {time.time()-t0:5.0f}s  ({r:.2f}x)",
                       flush=True)
 
+                na = len(G.absaetze(quelle))
                 endfassung = entwurf
                 if revision:
                     t1 = time.time()
-                    body = (kopf
-                            + "=== NIEDERLÄNDISCHER AUSGANGSTEXT ===\n"
-                            + quelle + "\n\n"
-                            + "=== DEUTSCHER ENTWURF ===\n" + entwurf)
+                    # Die Rueckschau gehoert auch in die Revision. Ohne
+                    # sie glaettet Pass 2 genau die Anschluesse weg, die
+                    # Pass 1 muehsam hergestellt hat: Der Reviser sieht
+                    # nur Quelle und Entwurf und weiss nicht, worauf der
+                    # erste Satz antwortet.
+                    body = kopf
+                    if letzte:
+                        body += ("=== ENDE DES VORIGEN ABSCHNITTS, DEINE "
+                                 "ÜBERSETZUNG (nur Kontext, nicht "
+                                 "wiederholen) ===\n" + letzte + "\n\n")
+                    body += ("=== NIEDERLÄNDISCHER AUSGANGSTEXT ===\n"
+                             + quelle + "\n\n"
+                             + "=== DEUTSCHER ENTWURF ===\n" + entwurf)
                     rev = G.chat(cfg, p_rev, body, rolle="revision")
                     r2 = G.verhaeltnis(quelle, rev)
-                    if rev and cfg["ratio_min"] <= r2 <= cfg["ratio_max"]:
+                    # Die Revision wird verworfen, wenn sie das Verhaeltnis
+                    # ODER die Absatzzahl verletzt. Verwerfen ist hier
+                    # billiger als der neue Versuch weiter unten: Der
+                    # Entwurf liegt schon vor und ist brauchbar.
+                    n_rev = len(G.absaetze(rev)) if rev else 0
+                    if not rev or not (cfg["ratio_min"] <= r2
+                                       <= cfg["ratio_max"]):
+                        warnen(f"Chunk {i+1}: Revision verworfen ({r2:.2f}x)")
+                    elif n_rev != na:
+                        warnen(f"Chunk {i+1}: Revision verworfen, "
+                               f"Absätze {na} -> {n_rev}")
+                    else:
                         endfassung = rev
                         print(f"    Pass 2  {time.time()-t1:5.0f}s  "
                               f"({r2:.2f}x)", flush=True)
-                    else:
-                        warnen(f"Chunk {i+1}: Revision verworfen ({r2:.2f}x)")
 
-                messwerte.append(G.verhaeltnis(quelle, endfassung))
-                na, nb = len(G.absaetze(quelle)), len(G.absaetze(endfassung))
+                nb = len(G.absaetze(endfassung))
                 if na != nb:
-                    warnen(f"Chunk {i+1}: Absätze {na} -> {nb}")
+                    # Eine verschobene Absatzzahl ist kein Schoenheits-
+                    # fehler: Die Leseausgabe stellt Quelle und Fassung
+                    # absatzweise nebeneinander, die Zitate werden nach
+                    # Absatzposition eingesetzt, und qa.py misst das
+                    # Tempus je Ebene ueber die Absatzzuordnung. Alles
+                    # drei verrutscht ab hier. Deshalb ein neuer Versuch,
+                    # solange einer uebrig ist.
+                    if versuch < cfg["max_retries"]:
+                        warnen(f"Chunk {i+1}: Absätze {na} -> {nb} -> "
+                               f"neuer Versuch")
+                        raise RuntimeError("Absatzzahl")
+                    warnen(f"Chunk {i+1}: Absätze {na} -> {nb} übernommen")
+                messwerte.append(G.verhaeltnis(quelle, endfassung))
 
                 G.teil_schreiben("entwurf", i, entwurf, praefix)
                 G.teil_schreiben("uebersetzung", i, endfassung, praefix)
-                letzte = G.schlusswoerter(endfassung, cfg["context_words"])
+                # Woraus die Rueckschau gebildet wird, ist eine offene
+                # Frage: die Revision ist besser, der Entwurf ist das,
+                # woran der naechste Chunk stilistisch anschliesst.
+                # Umschaltbar, gemessen wird im Testlauf.
+                rueck = (entwurf if cfg.get("rueckschau_quelle") == "entwurf"
+                         else endfassung)
+                letzte = G.schlusswoerter(rueck, cfg["context_words"])
+                if nachhall_tiefe:
+                    nachhall.append(figuren_im_chunk(quelle, personen))
+                    del nachhall[:-nachhall_tiefe]
                 json.dump({"total": n, "fingerprint": fingerprint,
                            "chunk_words": chunk_words, "rev": revision},
                           open(state_p, "w"))

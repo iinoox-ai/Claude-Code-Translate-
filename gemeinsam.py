@@ -118,6 +118,19 @@ STANDARD = {
          "modell_uebersetzung": "claude-fable-5"},
     ],
     "context_words":             250,
+    # Vorwegschau: die ersten Woerter des NAECHSTEN Chunks als Kontext.
+    # Die Rueckschau allein laesst den Uebersetzer am Chunkende blind
+    # werden — ein angefangener Satzbogen, eine Anrede, die erst danach
+    # aufgeloest wird. 0 schaltet sie ab.
+    "context_words_voraus":      150,
+    # Woraus die Rueckschau gebildet wird: 'revision' (die Endfassung des
+    # vorigen Chunks) oder 'entwurf' (Pass 1). Siehe ENTSCHEIDUNGEN.md.
+    "rueckschau_quelle":         "revision",
+    # Wie viele Chunks eine einmal genannte Figur im Personenblock
+    # nachhallt. 0 = nur wer im Chunk vorkommt. Zurueckgesetzt wird der
+    # Nachhall NUR an Ebenenfugen — innerhalb einer Erzaehlebene bleibt
+    # die Figur dieselbe.
+    "figuren_nachhall":          3,
     "revision_pass":             True,
 
     "lektorat_passes":           ["det", "stil", "korrektorat", "det"],
@@ -165,6 +178,7 @@ GESCHUETZT = {"ratio_min", "ratio_max", "ratio_kalibriert", "sprachpaar"}
 # Nur diese Schluessel darf ein externes Rueckspiel aendern (V4).
 AENDERBAR = {
     "chunk_words", "chunk_words_variante", "context_words",
+    "context_words_voraus", "rueckschau_quelle", "figuren_nachhall",
     "revision_pass", "lektorat_passes",
     "diminutive", "tempus", "anrede_vorgabe",
     "quotes", "eszett", "varietaet", "dash",
@@ -1733,6 +1747,27 @@ def schlusswoerter(text, n):
     s = " ".join(w[-n:])
     m = re.search(r'(?<=[.!?\u2026])' + SCHLIESSER + r'\s+', s)
     return (s[m.end():] if m else s).strip()
+
+
+def anfangswoerter(text, n):
+    """Die ersten n Woerter, an einer Satzgrenze abgeschnitten.
+
+    Gegenstueck zu 'schlusswoerter'. Der Schnitt an der Satzgrenze ist
+    hier wichtiger als dort: Ein mitten im Satz endender Ausblick liest
+    sich wie ein abgebrochener Auftrag, und das Modell neigt dann dazu,
+    ihn zu Ende zu uebersetzen — genau das, was der Ausblick nicht will.
+
+    Bleibt nach dem Schnitt nichts uebrig (ein einziger langer Satz),
+    wird der ungeschnittene Anfang genommen: lieber ein Satzfragment als
+    gar kein Ausblick."""
+    if n <= 0:
+        return ""
+    w = text.split()
+    if len(w) <= n:
+        return text.strip()
+    s = " ".join(w[:n])
+    treffer = list(re.finditer(r'[.!?…]' + SCHLIESSER + r'(?=\s|$)', s))
+    return (s[:treffer[-1].end()] if treffer else s).strip()
 
 
 def verhaeltnis(a, b):

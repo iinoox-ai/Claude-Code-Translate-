@@ -8,6 +8,7 @@
   "chunk_words": 800,
   "chunk_words_variante": 1200,
   "context_words": 250,
+  "context_words_voraus": 150,
   "dash": "halbgeviert",
   "diminutive": "aufloesen",
   "effort_begruendung": "niedrig",
@@ -23,6 +24,7 @@
   "eszett": true,
   "export_bewertung": true,
   "export_glossar": true,
+  "figuren_nachhall": 3,
   "glossar_quelle": "extern",
   "lektorat_passes": [
     "det",
@@ -50,6 +52,7 @@
   "ratio_max": 1.2,
   "ratio_min": 0.9,
   "revision_pass": true,
+  "rueckschau_quelle": "revision",
   "sdk_nutzen": true,
   "sprachpaar": "nl-de",
   "tempus": "quellnah",

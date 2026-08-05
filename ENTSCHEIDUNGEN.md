@@ -1131,6 +1131,91 @@ fängt.
 
 ---
 
+## Der Chunk bekommt Kontext in beide Richtungen
+
+**Entschieden (August 2026), Paket C.** Bis hierher sah ein Chunk nur nach
+hinten: das Ende des vorigen Quellabschnitts und die eigene Übersetzung davon.
+Nach vorn war er blind — und zwar genau an der Stelle, an der er eine
+Entscheidung treffen muss, die erst der nächste Abschnitt auflöst.
+
+### `context_words_voraus` (150)
+
+Der Anfang des nächsten Chunks steht als **Ausblick** im User-Prompt. Er zeigt,
+worauf ein angefangener Satzbogen zuläuft, ob eine Figur gleich noch spricht,
+ob eine Anrede erst danach aufgelöst wird.
+
+Drei Regeln, die keine Details sind:
+
+- **Er endet an der Ebenenfuge.** Dort beginnt eine andere Erzählebene mit
+  anderem Tempus und anderer Person; ihr Anfang wäre kein Ausblick, sondern
+  eine Irreführung. Genau davor schützt die Fuge, und der Ausblick darf sie
+  nicht unterlaufen. Spätere **Stapelfugen** (Paket G) sind keine Ebenenfugen —
+  dort läuft er weiter, weil sie nur eine technische Grenze sind.
+- **Er steht VOR dem Auftrag, nicht dahinter.** Was zuletzt im Prompt steht,
+  liest ein Modell als das, was zu tun ist. Hinter „ZU ÜBERSETZENDER TEXT" wäre
+  der Ausblick eine Einladung, weiterzuübersetzen — und die Längenprüfung
+  verwürfe den Chunk.
+- **Er schneidet an der Satzgrenze.** Ein mitten im Satz endender Ausblick
+  liest sich wie ein abgebrochener Auftrag.
+
+Geschützte Zitatchunks werden übersprungen: Sie bleiben im Original stehen und
+sagen über die Fortsetzung nichts.
+
+### Die Rückschau gehört auch in die Revision
+
+Pass 2 sah bisher nur Quelle und Entwurf. Er wusste damit nicht, worauf der
+erste Satz antwortet — und glättete genau die Anschlüsse weg, die Pass 1
+mühsam hergestellt hatte. Der Block steht jetzt auch im Revisionsbody, mit
+derselben Kennzeichnung als reiner Kontext.
+
+### `figuren_nachhall` (3)
+
+Eine Figur, die in Chunk 12 eingeführt wird und in Chunk 13 nur noch »hij« ist,
+verschwand aus dem Personenblock — mitsamt Pronomen und Sprechweise, also genau
+dann, wenn beides gebraucht wird. Sie hallt jetzt drei Chunks nach und ist im
+Block als **»zuletzt erwähnt, hier nur als Pronomen«** gekennzeichnet; sonst
+sucht das Modell den Namen im Abschnitt und findet ihn nicht.
+
+**Zurückgesetzt wird der Nachhall nur an Ebenenfugen.** Innerhalb einer
+Erzählebene bleibt die Figur dieselbe; über die Fuge hinweg wäre sie eine Figur
+der falschen Ebene. Beim Fortsetzen eines abgebrochenen Laufs wird der Nachhall
+aus den vorhandenen Quellchunks rekonstruiert — sonst finge ein
+wiederaufgenommener Lauf ohne Gedächtnis an.
+
+### Eine verschobene Absatzzahl löst einen neuen Versuch aus
+
+Bisher nur eine Warnung. Das war zu wenig: Die Leseausgabe stellt Quelle und
+Fassung **absatzweise** nebeneinander, die Zitate werden nach Absatzposition
+eingesetzt, und `qa.py` misst das Tempus je Ebene über die Absatzzuordnung.
+Alles drei verrutscht ab einem verschobenen Chunk.
+
+**Die Revision wird verworfen, der Entwurf wiederholt.** Bricht Pass 2 die
+Absatzzahl, ist Verwerfen billiger und zielgenauer als ein neuer Versuch — der
+Entwurf liegt vor und ist brauchbar. Bricht Pass 1 sie, hilft nur der neue
+Versuch. Beide Prompts sagen die Regel jetzt ausdrücklich.
+
+### `rueckschau_quelle`: offen, deshalb ein Schalter
+
+Woraus die Rückschau gebildet wird, ist **nicht entschieden**. Die Revision ist
+die bessere Prosa; der Entwurf ist das, woran der nächste Chunk stilistisch
+tatsächlich anschließt, wenn die Revision einmal verworfen wird. Voreinstellung
+`revision`, umschaltbar auf `entwurf`.
+
+Gemessen ist das noch nicht. Vergleichbar wird es, sobald die Varianten des
+Testlaufs beliebige Schalter tragen (Paket D) — heute tragen sie nur
+`chunk_words` und Modellnamen. Bis dahin ist es ein Schalter ohne Messung, und
+das steht hier, damit niemand die Voreinstellung für ein Ergebnis hält.
+
+### Was noch aussteht
+
+`ratio_min` und `ratio_max` sind unter den alten Prompts kalibriert. Der
+Ausblick verändert weder Quelle noch Zieltext, wohl aber die Neigung des
+Modells, am Chunkende auszuholen. **Nach dem nächsten Testlauf neu
+kalibrieren** — `uebersetzung.py --test` setzt die Grenzen selbst, wenn
+mindestens drei Chunks verwertbar sind.
+
+---
+
 ## Verworfen — und warum
 
 **API-Frontier-Modell als Primärübersetzer** (zunächst). Die Kostenrechnung
