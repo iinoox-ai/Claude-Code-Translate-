@@ -25,6 +25,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 
 import gemeinsam as G
 
@@ -131,18 +132,25 @@ def _technik_melden(ziel, quelle):
     return zeilen
 
 
-def _anmeldeprobe(code=CODE):
-    """Sieht ein UNTERPROZESS die Google-Anmeldung? Genau das zaehlt.
+def _anmeldeprobe(code=CODE, arbeit=None):
+    """Sieht ein Unterprozess die Anmeldung — DORT, wo die Schritte laufen?
 
-    Geprueft wird ueber referenz_sync.anmeldung_taugt und nicht ueber
-    'default() wirft nicht': In Colab findet default() immer die
+    Zwei Dinge, die beide schon falsch waren:
+
+    Erstens wird ueber referenz_sync.anmeldung_taugt geprueft und nicht
+    ueber 'default() wirft nicht'. In Colab findet default() immer die
     Compute-Engine-Anmeldung der VM, an der kein Dienstkonto haengt.
-    Diese Probe haette also 'SICHTBAR' gemeldet, und der Fehler waere
-    erst im Schritt aufgetaucht — als angebliches Problem des
-    Spreadsheets."""
+
+    Zweitens — und das ist der Fehler, der zuletzt drei Anlaeufe
+    gekostet hat — laeuft die Probe im ARBEITSVERZEICHNIS des Laufs,
+    nicht im Code-Verzeichnis. Sie stand bisher im Code-Verzeichnis und
+    meldete 'SICHTBAR', waehrend der Preflight im Projektordner 'keine
+    Anmeldung' bekam. Eine Probe, die woanders steht als der Geprueften,
+    prueft nichts. Der Import braucht dann den Pfad ausdruecklich."""
     import subprocess
     import sys
-    pruef = ("import google.auth, referenz_sync as R\n"
+    pruef = (f"import sys; sys.path.insert(0, {code!r})\n"
+             "import google.auth, referenz_sync as R\n"
              "try:\n"
              "    creds, _ = google.auth.default()\n"
              "    gut = R.anmeldung_taugt(creds)\n"
@@ -151,7 +159,49 @@ def _anmeldeprobe(code=CODE):
              "except Exception as e:\n"
              "    print('UNSICHTBAR', e)\n")
     return subprocess.run([sys.executable, "-c", pruef],
-                          capture_output=True, text=True, cwd=code)
+                          capture_output=True, text=True,
+                          cwd=arbeit or os.getcwd())
+
+
+# Wohin die Anmeldung der Zelle geschrieben wird, damit jeder
+# Unterprozess sie findet. Nicht ins Code-Verzeichnis (das ist ein
+# Git-Auscheck) und nicht nach Drive (das ist der Projektordner, der in
+# Exportpakete wandert) — in das temporaere Verzeichnis der VM, das mit
+# der Sitzung verschwindet.
+ADC_DATEI = os.path.join(tempfile.gettempdir(), "colab_anmeldung.json")
+
+
+def anmeldung_exportieren():
+    """Die Anmeldung des Kernels als Datei, mit absolutem Pfad in der
+    Umgebung. Gibt den Pfad zurueck oder '' — dann ging es nicht.
+
+    Der Grund ist gemessen: Dieselbe Anmeldung war aus dem
+    Code-Verzeichnis sichtbar und aus dem Projektordner nicht. Was
+    google.auth.default() findet, haengt an Dingen, die wir nicht in der
+    Hand haben. Ein absoluter Pfad in GOOGLE_APPLICATION_CREDENTIALS
+    haengt an nichts: Er wird als erstes geprueft, gilt fuer jedes
+    Arbeitsverzeichnis und vererbt sich an jeden Unterprozess.
+
+    Geschrieben wird der 'authorized_user'-Satz — dieselben drei Felder,
+    die auch Googles eigene ADC-Datei traegt. Die Datei liegt in /tmp
+    der VM, gehoert nur dem Benutzer und verschwindet mit der Sitzung.
+    Sie erscheint in keinem Bericht, in keinem Log und in keinem
+    Exportpaket."""
+    import json
+    import stat
+    import google.auth
+    creds, _ = google.auth.default()
+    satz = {"type": "authorized_user",
+            "client_id": getattr(creds, "client_id", None),
+            "client_secret": getattr(creds, "client_secret", None),
+            "refresh_token": getattr(creds, "refresh_token", None)}
+    if not all(satz.values()):
+        return ""
+    with open(ADC_DATEI, "w", encoding="utf-8") as f:
+        json.dump(satz, f)
+    os.chmod(ADC_DATEI, stat.S_IRUSR | stat.S_IWUSR)
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = ADC_DATEI
+    return ADC_DATEI
 
 
 def anmeldung_faellig(code=CODE):
@@ -188,17 +238,30 @@ def sheets_anmelden(code=CODE):
     auth.authenticate_user()
     print("Angemeldet.")
 
-    # Geprueft wird ueber referenz_sync.anmeldung_taugt und nicht ueber
-    # 'default() wirft nicht': In Colab findet default() immer die
-    # Compute-Engine-Anmeldung der VM, an der kein Dienstkonto haengt.
-    # Diese Zelle haette also 'SICHTBAR' gemeldet, und der Fehler waere
-    # erst im Schritt aufgetaucht — als angebliches Problem des
-    # Spreadsheets.
-    r = _anmeldeprobe(code)
-    if "SICHTBAR" in r.stdout:
-        print("Unterprozesse sehen die Anmeldung — referenz_sync laeuft "
-              "jetzt ueber colab_start.lauf(...).")
+    # Geprueft wird im Arbeitsverzeichnis des Laufs, nicht im
+    # Code-Verzeichnis. Die Probe lief frueher mit cwd=code und meldete
+    # 'sichtbar', waehrend der Preflight im Projektordner 'keine
+    # Anmeldung' bekam — dreimal hintereinander, und die gruene Zelle
+    # hat jedes Mal in die falsche Richtung gezeigt.
+    if "SICHTBAR" in _anmeldeprobe(code).stdout:
+        print("Unterprozesse sehen die Anmeldung "
+              f"(geprueft in {os.getcwd()}).")
         return True
+
+    # Nicht sichtbar: die Anmeldung ausdruecklich weiterreichen, statt
+    # sie von google.auth.default() suchen zu lassen. Ein absoluter Pfad
+    # in GOOGLE_APPLICATION_CREDENTIALS wird als erstes geprueft und
+    # gilt in jedem Arbeitsverzeichnis.
+    pfad = anmeldung_exportieren()
+    if pfad:
+        r = _anmeldeprobe(code)
+        if "SICHTBAR" in r.stdout:
+            print(f"Unterprozesse sehen die Anmeldung "
+                  f"(ueber {os.path.basename(pfad)}, weitergereicht).")
+            return True
+    else:
+        r = _anmeldeprobe(code)
+
     print("Die Anmeldung gilt nur in dieser Zelle, nicht in "
           "Unterprozessen.\n"
           "Fuer den Sync stattdessen im Kernel arbeiten:\n"

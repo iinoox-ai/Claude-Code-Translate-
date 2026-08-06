@@ -2868,6 +2868,39 @@ installiert, requests-Pfad"
         import colab_start as CS2
         if "anmeldung_faellig" not in CS2.vorbereiten.__code__.co_names:
             fehler.append("vorbereiten() prueft die Anmeldung nicht")
+        # Die Anmeldeprobe muss dort stehen, wo die Schritte laufen. Mit
+        # cwd=code meldete sie 'sichtbar', waehrend der Preflight im
+        # Projektordner 'keine Anmeldung' bekam — die gruene Zelle zeigte
+        # dreimal in die falsche Richtung.
+        # Gefragt ist die Probe selbst, nicht die Datei: 'cwd=code' ist
+        # fuer die git-Aufrufe daneben genau richtig.
+        if "cwd=code" in inspect.getsource(CS2._anmeldeprobe):
+            fehler.append("Anmeldeprobe laeuft im Code- statt im "
+                          "Arbeitsverzeichnis")
+        # Und eine weitergereichte Benutzeranmeldung darf nicht als
+        # Dienstkonto gelesen werden. Nur pruefbar, wo die Bibliothek da
+        # ist — auf einem nackten VPS traegt der requests-Pfad, und der
+        # Selbsttest darf daran nicht scheitern.
+        try:
+            import google.oauth2.credentials        # noqa: F401
+            da = True
+        except Exception:
+            da = False
+        if da:
+            with tempfile.TemporaryDirectory() as tmp:
+                p = os.path.join(tmp, "adc.json")
+                json.dump({"type": "authorized_user", "client_id": "a",
+                           "client_secret": "b", "refresh_token": "c"},
+                          open(p, "w", encoding="utf-8"))
+                try:
+                    c = RS._aus_datei(p)
+                    if getattr(c, "refresh_token", None) != "c":
+                        fehler.append(f"Benutzeranmeldung falsch gelesen: "
+                                      f"{c}")
+                except Exception as e:
+                    fehler.append(f"Benutzeranmeldung nicht lesbar: {e!r}")
+        elif '"authorized_user"' not in quelltext("referenz_sync.py"):
+            fehler.append("Anmeldedatei wird nicht nach Typ unterschieden")
         # Und die Vorbereitung darf den stillen Zweig nicht stillschweigen.
         vb = quelltext("vorbereitung.py")
         if "Kein Spreadsheet" not in vb:
