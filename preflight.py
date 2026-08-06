@@ -1178,6 +1178,24 @@ installiert, requests-Pfad"
                         "HTTP 429: rate limited", "Netzwerkfehler: timeout"):
             if G.fallback_abgelehnt(G.ApiFehler(harmlos)):
                 fehler.append(f"'{harmlos}' schaltet den Rueckfall ab")
+        # Die dritte Form: Die API lehnt das ZIEL ab, ohne das Wort
+        # 'fallback' zu benutzen. Beim Buch Oliver stand in der Vorgabe
+        # ein Modell, das als Rueckfallziel nicht zugelassen ist — die
+        # Versicherung griff nicht, und JEDER Aufruf scheiterte mit
+        # HTTP 400, nicht nur der eine Chunk.
+        mit_liste = dict(cfg, fallback_modelle=["claude-sonnet-5"])
+        zielfehler = G.ApiFehler(
+            "HTTP 400: {'type': 'invalid_request_error', 'message': "
+            "\"'claude-sonnet-5' is not a valid target model\"}")
+        if not G.fallback_abgelehnt(zielfehler, mit_liste):
+            fehler.append("abgelehntes Rueckfallziel wird nicht erkannt")
+        # Aber nur das KONFIGURIERTE Modell zaehlt: Ein anderer Name im
+        # Text ist ein gewoehnlicher Payloadfehler.
+        fremd = G.ApiFehler("HTTP 400: 'claude-opus-9' is not a valid model")
+        if G.fallback_abgelehnt(fremd, mit_liste):
+            fehler.append("ein fremder Modellname schaltet den Rueckfall ab")
+        if G.fallback_abgelehnt(zielfehler):
+            fehler.append("ohne Konfiguration reicht ein Modellname allein")
 
         # (3) Eine Ablehnung nennt Kategorie und Erklaerung. Die Kategorie
         # allein sagt niemandem, warum ausgerechnet dieser Absatz auffiel.

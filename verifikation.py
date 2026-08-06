@@ -280,6 +280,61 @@ def pruefe_sampling(e, cfg, anbieter_rollen, tragen):
                    (r.text or "")[:200])
 
 
+# Was als Rueckfallziel in Frage kommt. Welche davon das Konto annimmt,
+# ist nicht dokumentiert und wird deshalb ausprobiert statt geraten.
+ZIELKANDIDATEN = ("claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5")
+
+
+def kandidaten_pruefen(e, cfg, anbieter_rollen):
+    """Probiert aus, welche Modelle die API als Rueckfallziel annimmt.
+
+    Beim Buch Oliver stand in der Vorgabe ein Modell, das die API als
+    Ziel ablehnt. Folge: HTTP 400 bei JEDEM Aufruf — nicht nur bei dem
+    einen Chunk, den der Rueckfall haette retten sollen. Ein geratenes
+    Ziel ist gefaehrlicher als gar keines.
+
+    Die Probe kostet je Kandidat einen Aufruf mit ein paar Token."""
+    if "anthropic" not in anbieter_rollen:
+        return
+    modell = anbieter_rollen["anthropic"][1]
+    b = G.BACKENDS["anthropic"]
+    probe = dict(cfg)
+    probe["max_tokens_api"] = PING_TOKENS
+    kopf = {"x-api-key": G.api_schluessel("anthropic"),
+            "anthropic-version": b.VERSION,
+            "content-type": "application/json",
+            "anthropic-beta": G.BETA_FALLBACK}
+    taugt = []
+    for ziel in ZIELKANDIDATEN:
+        if ziel == modell:
+            continue          # ein Rueckfall auf sich selbst ist keiner
+        p = b.payload(dict(probe, fallback_modelle=""), PROBE_SYSTEM,
+                      "Antworte mit OK.", "verifikation", modell)
+        p["fallbacks"] = [{"model": ziel}]
+        try:
+            r = requests.post(b.URL, json=p, headers=kopf, timeout=(10, 120))
+        except Exception as ex:
+            e.warn(f"Rueckfallziel {ziel} nicht pruefbar", str(ex))
+            continue
+        if r.status_code == 200:
+            taugt.append(ziel)
+        elif r.status_code != 400:
+            e.info(f"Rueckfallziel {ziel}: HTTP {r.status_code}",
+                   (r.text or "")[:160])
+    if taugt:
+        e.ok("Diese Modelle nimmt das Konto als Rueckfallziel an",
+             ", ".join(taugt) + "\n  Eintragen in projekt.json:\n"
+             f'      "fallback_modelle": {list(taugt[:1])!r}\n'
+             "  Dann wird eine Ablehnung beantwortet statt den Chunk zu "
+             "kosten.")
+    else:
+        e.info("Kein Rueckfallziel angenommen",
+               "Das Konto nimmt keines der geprueften Modelle als Ziel an.\n"
+               "  'fallback_modelle' bleibt am besten leer — ein "
+               "abgelehntes Ziel\n"
+               "  laesst sonst JEDEN Aufruf mit HTTP 400 scheitern.")
+
+
 # ==================================================================
 def pruefe_rueckfall(e, cfg, anbieter_rollen, tragen):
     """Nimmt der Anbieter 'fallbacks' an — fuer diesen Schluessel?
@@ -333,8 +388,9 @@ def pruefe_rueckfall(e, cfg, anbieter_rollen, tragen):
             return
         e.info("Rueckfall abgeschaltet",
                "'fallback_modelle' ist leer. Eine Ablehnung des "
-               "Sicherheitsklassifikators beendet dann den Lauf; der "
+               "Sicherheitsklassifikators bricht dann den Chunk ab; der "
                "Resume setzt an derselben Stelle wieder an.")
+        kandidaten_pruefen(e, cfg, anbieter_rollen)
         return
     modell = anbieter_rollen["anthropic"][1]
     b = G.BACKENDS["anthropic"]
