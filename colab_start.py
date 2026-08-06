@@ -294,33 +294,43 @@ def sheets_anmelden(code=CODE):
     auth.authenticate_user()
     print("Angemeldet.")
 
-    # IMMER weiterreichen, nicht erst wenn die Probe scheitert.
+    # Erst messen, dann handeln.
     #
-    # Der Export war zuerst ein Notnagel: Probe gruen -> nichts tun.
-    # Damit blieb die Anmeldung genau dann verzeichnisabhaengig, wenn sie
-    # gerade zufaellig funktionierte — und die Probe sieht nur den
-    # Ordner, in dem sie steht. Wer danach auf ein anderes Buch wechselt,
-    # steht wieder vor demselben Fehler, und die gruene Zelle von vorhin
-    # sagt nichts darueber aus.
+    # Hier stand kurzzeitig ein unbedingter Export — eine Kompensation
+    # dafuer, dass die Probe kein Nein sagen konnte und die Suche in die
+    # falsche Richtung lief. Mit einer Probe, die misst, ist die
+    # Reihenfolge wieder die richtige: Traegt die Anmeldung ohnehin bis
+    # in den Unterprozess, gibt es nichts weiterzureichen.
     #
-    # Eine Anmeldung, die je Sitzung gilt, muss in JEDEM Ordner der
-    # Sitzung gelten. Ein absoluter Pfad in
-    # GOOGLE_APPLICATION_CREDENTIALS tut das; was google.auth.default()
-    # von sich aus findet, tut es nachweislich nicht.
-    pfad = anmeldung_exportieren()
+    # Und in Colab traegt sie: 'authenticate_user()' bedient den
+    # Metadatendienst der VM mit dem Token des Benutzers, und dieser
+    # Dienst ist prozessunabhaengig — jeder Unterprozess auf derselben VM
+    # erreicht ihn, aus jedem Arbeitsverzeichnis.
     r = _anmeldeprobe(code)
     if probe_gut(r):
-        print("Unterprozesse sehen die Anmeldung"
-              + (f" ueber {os.path.basename(pfad)} — unabhaengig vom "
-                 f"Projektordner,\ngilt fuer diese Colab-Sitzung, auch "
-                 f"nach einem Wechsel des Buches." if pfad else
-                 f" (geprueft in {os.getcwd()})."))
+        print("Unterprozesse sehen die Anmeldung — sie gilt fuer diese "
+              "Colab-Sitzung,\nin jedem Projektordner.")
         return True
+
+    # Nicht sichtbar: ausdruecklich weiterreichen, wo das geht. Eine
+    # Anmeldung des Metadatendienstes laesst sich nicht in eine Datei
+    # schreiben — sie hat kein Auffrischungstoken, sondern einen Dienst.
+    pfad = anmeldung_exportieren()
+    if pfad:
+        r = _anmeldeprobe(code)
+        if probe_gut(r):
+            print(f"Unterprozesse sehen die Anmeldung ueber "
+                  f"{os.path.basename(pfad)} — weitergereicht,\n"
+                  f"gilt in jedem Projektordner dieser Sitzung.")
+            return True
 
     print("Die Anmeldung gilt nur in dieser Zelle, nicht in "
           "Unterprozessen.\n"
-          "Fuer den Sync stattdessen im Kernel arbeiten:\n"
-          "    colab_start.sync_im_kernel()")
+          "Fuer den Sheets-Zugriff stattdessen im Kernel arbeiten:\n"
+          "    colab_start.sync_im_kernel(PROJEKT)                        "
+          "# Tab -> JSON\n"
+          "    colab_start.sync_im_kernel(PROJEKT, erstbefuellung=True)   "
+          "# JSON -> Tab")
     print(f"  ({(r.stdout + r.stderr).strip()[:200]})")
     return False
 

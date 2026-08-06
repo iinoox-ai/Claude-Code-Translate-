@@ -158,34 +158,49 @@ def _im_kernel():
 
 
 def anmeldung_taugt(creds):
-    """Ist das eine echte Anmeldung — oder nur der Rueckfall der VM?
+    """Traegt diese Anmeldung wirklich? Geprueft wird durch BENUTZEN.
 
-    'google.auth.default()' findet in Colab IMMER etwas: Die Laufzeit ist
-    eine Google-VM mit Metadatendienst, und der liefert eine
-    Compute-Engine-Anmeldung. Nur haengt an ihr kein Dienstkonto. Das
-    Objekt laesst sich bauen, der Aufruf gibt es zurueck, und erst beim
-    ersten Zugriff kommt
+    Frueher stand hier eine Pruefung auf die KLASSE: eine
+    compute_engine-Anmeldung galt in Colab als untauglich. Der Anlass
+    war echt — vor der Anmeldung liefert der Metadatendienst der VM eine
+    Anmeldung ohne Dienstkonto, und der erste Zugriff scheitert mit
 
         Failed to retrieve http://metadata.google.internal/…/service-
-        accounts/default/ from the Google Compute Engine metadata
-        service. Status: 404
+        accounts/default/ … Status: 404
 
-    — eine Meldung, die nach einem Problem des Spreadsheets aussieht und
-    keines ist. Ohne diese Pruefung nahm '_credentials' den Rueckfall fuer
-    eine Anmeldung, kam nie beim Colab-Zweig an und meldete am Ende
-    'Stimmt die ID, und ist das Dokument freigegeben?', obwohl beides
-    stimmte.
+    also mit einer Meldung, die nach einem Problem des Spreadsheets
+    aussieht und keines ist.
 
-    Ausserhalb von Colab ist dieselbe Anmeldung voellig in Ordnung: Auf
-    einer echten GCE-Maschine mit Dienstkonto ist sie der normale Weg.
-    Verworfen wird sie deshalb nur dort, wo sie nichts bedeutet."""
-    if not G.ist_colab():
-        return True
+    Der Schluss daraus war falsch. NACH 'authenticate_user()' bedient
+    Colab denselben Metadatendienst mit dem Token des Benutzers:
+    'google.auth.default()' liefert weiterhin eine
+    compute_engine-Anmeldung, und die traegt. Dieselbe Klasse, zwei
+    Bedeutungen — die Klasse kann den Unterschied nicht kennen.
+
+    Die Folge war, dass wir die funktionierende Anmeldung selbst
+    weggeworfen haben: Zelle 1 meldete 'nur die Metadaten-Anmeldung der
+    VM', obwohl der Benutzer angemeldet war. Der Metadatendienst ist
+    dabei prozessunabhaengig — jeder Unterprozess auf derselben VM
+    erreicht ihn. Es gab nie etwas weiterzureichen.
+
+    Deshalb wird jetzt aufgefrischt statt geraten. Das kostet einen
+    HTTP-Aufruf gegen die VM und beantwortet genau die Frage, um die es
+    geht: Komme ich damit an Daten?"""
+    if creds is None:
+        return False
     try:
-        import google.auth.compute_engine as ce
-        return not isinstance(creds, ce.Credentials)
+        import google.auth.transport.requests as gt
+        anfrage = gt.Request()
     except Exception:
+        # Ohne die Bibliothek gibt es nichts aufzufrischen — und ohne sie
+        # gibt es auch keinen Sheets-Zugriff. Der Aufruf bleibt trotzdem
+        # stehen, damit die Pruefung eine Pruefung bleibt.
+        anfrage = None
+    try:
+        creds.refresh(anfrage)
         return True
+    except Exception:
+        return False
 
 
 BEREICHE = ["https://www.googleapis.com/auth/spreadsheets",
