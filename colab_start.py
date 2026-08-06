@@ -391,10 +391,22 @@ def schluessel_diagnose(code=CODE):
         if form:
             print(f"  Form:     {form}")
 
-    # Der entscheidende Test: derselbe Schluessel, aber roh aus dem
-    # Secret und an unserem Lesepfad vorbei. Antwortet der Anbieter hier,
-    # liegt es an unserem Code; antwortet er nicht, am Schluessel.
-    print("\n--- Direkter Aufruf, an unserem Lesepfad vorbei")
+    # Was der Unterprozess sieht. Alle Schritte laufen als Unterprozess,
+    # und dort gibt es kein google.colab.userdata — nur die Umgebung.
+    print("\n--- Was ein Unterprozess sieht")
+    pruef = (
+        "import hashlib, os\n"
+        "for var in ('ANTHROPIC_API_KEY', 'GEMINI_API_KEY'):\n"
+        "    w = ''.join((os.environ.get(var) or '').split())\n"
+        "    fp = hashlib.sha256(w.encode()).hexdigest()[:8] if w else '-'\n"
+        "    print(f'  {var}: {len(w)} Zeichen, Fingerabdruck {fp}')\n")
+    r = _lauf([sys.executable, "-c", pruef], cwd=code)
+    print((r.stdout or r.stderr).rstrip() or "  keine Ausgabe")
+
+    # Und jetzt die Matrix: dieselbe Anfrage auf den Wegen, die unser
+    # Code wirklich geht. Genau einer davon scheitert, und welcher es
+    # ist, sagt keine Fehlermeldung des Anbieters.
+    print("\n--- Dieselbe Anfrage auf vier Wegen")
     try:
         from google.colab import userdata
         roh = "".join(str(userdata.get("ANTHROPIC_API_KEY") or "").split())
@@ -404,24 +416,44 @@ def schluessel_diagnose(code=CODE):
     if not roh:
         print("  Kein Secret ANTHROPIC_API_KEY vorhanden.")
         return
+
     import requests
-    r = requests.post(
-        "https://api.anthropic.com/v1/messages",
-        json={"model": "claude-opus-5", "max_tokens": 4,
-              "messages": [{"role": "user", "content": "OK"}]},
-        headers={"x-api-key": roh, "anthropic-version": "2023-06-01",
-                 "content-type": "application/json"},
-        timeout=(10, 60))
-    print(f"  HTTP {r.status_code}")
-    if r.status_code == 200:
-        print("  Der Schluessel ist gueltig. Dann verdirbt ihn etwas auf "
-              "dem Weg —\n  vermutlich ein alter Wert in der Umgebung "
-              "(siehe oben).")
-    else:
-        print(f"  {(r.text or '')[:300]}")
-        print("  Der Anbieter weist den Schluessel auch direkt zurueck. "
-              "Dann liegt es\n  nicht an diesem Code, sondern am "
-              "Schluessel oder am Konto.")
+    nachricht = {"model": "claude-opus-5", "max_tokens": 4,
+                 "messages": [{"role": "user", "content": "OK"}]}
+    kopf = {"x-api-key": roh, "anthropic-version": "2023-06-01",
+            "content-type": "application/json"}
+
+    def melde(name, fn):
+        try:
+            print(f"  {name:<34} {fn()}")
+        except Exception as ex:
+            print(f"  {name:<34} {type(ex).__name__}: "
+                  f"{str(ex)[:120]}")
+
+    melde("requests, ohne Beta", lambda: "HTTP " + str(requests.post(
+        G.BACKENDS['anthropic'].URL, json=nachricht, headers=kopf,
+        timeout=(10, 60)).status_code))
+    melde("requests, mit Beta-Kopfzeile", lambda: "HTTP " + str(requests.post(
+        G.BACKENDS['anthropic'].URL,
+        json=dict(nachricht, fallbacks=[{"model": "claude-sonnet-5"}]),
+        headers=dict(kopf, **{"anthropic-beta": G.BETA_FALLBACK}),
+        timeout=(10, 60)).status_code))
+
+    sdk = G.anthropic_sdk()
+    if not sdk:
+        print("  SDK nicht installiert — die beiden SDK-Wege entfallen.")
+        return
+    klient = sdk.Anthropic(api_key=roh, timeout=60, max_retries=0)
+    melde("SDK, messages.create",
+          lambda: "ok, " + klient.messages.create(**nachricht).model)
+    melde("SDK, beta.messages.create",
+          lambda: "ok, " + klient.beta.messages.create(
+              **dict(nachricht, fallbacks=[{"model": "claude-sonnet-5"}]),
+              betas=[G.BETA_FALLBACK]).model)
+
+    print("\n  Scheitert nur eine Zeile, steht dort die Ursache. Scheitert "
+          "keine,\n  liegt es am Unterprozess (siehe darueber) und nicht "
+          "am Aufruf.")
 
 
 def lauf(skript="pipeline.py", *argumente, code=CODE, projekt=None):
