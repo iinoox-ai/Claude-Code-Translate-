@@ -84,8 +84,14 @@ nicht von Hand gefüllt — sie werden angelegt und dann von der Vorbereitung
 beschrieben. Anlegen:
 
 ```python
+colab_start.sheets_anmelden(code=CODE)                       # zuerst!
 colab_start.lauf("referenz_sync.py", "--vorlage", code=CODE)
 ```
+
+**Die Anmeldung muss vor jedem Sheets-Aufruf stehen** — sie gilt je
+Colab-Sitzung, nicht je Buch, und `--vorlage` ist der erste Aufruf, der sie
+braucht. Ohne sie bricht der Schritt mit `Keine Google-Anmeldung vorhanden` ab
+(Abschnitt 6 erklärt, warum die Meldung so genau ist).
 
 Das legt jeden fehlenden Tab mit seiner Kopfzeile an und lässt vorhandene in
 Ruhe. Gefüllt werden sie später: `vorbereitung.py` erzeugt Glossar, Personen,
