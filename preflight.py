@@ -193,6 +193,20 @@ def selbsttest(cfg, b):
         d1, d2 = (umbruchdiagnose(eine_zeile, 1), umbruchdiagnose(mitten, 1))
         if "EINE ZEILE JE ABSATZ" not in d1:
             fehler.append("Zeile-je-Absatz wird nicht erkannt")
+        # Die Abhilfe muss der Umgebung entsprechen, in der sie gelesen
+        # wird: In Colab tippt niemand einen Shell-Befehl. Der erste
+        # Anlauf nannte nur den Shell-Befehl, und das Notebook mit der
+        # passenden Zelle war beim Leser noch das alte.
+        if "preflight.py --umbrueche" not in d1:
+            fehler.append("Abhilfe nennt den Befehl nicht")
+        echt_colab = G.ist_colab
+        try:
+            G.ist_colab = lambda: True
+            in_colab = umbruchdiagnose(eine_zeile, 1)
+        finally:
+            G.ist_colab = echt_colab
+        if "colab_start.lauf(" not in in_colab or "Zelle 8" not in in_colab:
+            fehler.append("in Colab wird kein ausfuehrbarer Weg genannt")
         if "MITTEN IM SATZ" not in d2:
             fehler.append("Umbruch mitten im Satz wird nicht erkannt")
         if umbruchdiagnose("A.\n\nB.\n\nC.", 3):
@@ -3486,12 +3500,26 @@ def umbruchdiagnose(text, n_absaetze):
     kopf = (f"\n           Der Text hat {len(zeilen)} nichtleere Zeilen, "
             f"aber nur {n_absaetze} Absaetze.")
     if anteil >= 0.7:
+        # In Colab tippt niemand einen Shell-Befehl — dort wird eine Zelle
+        # ausgefuehrt. Und die Zelle steht im Notebook, das gerade offen
+        # ist: Ein 'git pull' erneuert die Datei im Code-Verzeichnis, nicht
+        # das geoeffnete Notebook. Wer den Runner vor der Aenderung
+        # geoeffnet hat, sucht Zelle 8 vergeblich — deshalb steht der
+        # Aufruf gleich daneben.
+        weg = ("           colab_start.lauf(\"preflight.py\", "
+               "\"--umbrueche\", code=CODE)\n"
+               "           (Zelle 8 im Runner. Fehlt sie, ist das "
+               "geoeffnete Notebook aelter\n"
+               "           als der Code — die Zeile darueber tut in jeder "
+               "Zelle dasselbe.)"
+               ) if G.ist_colab() else (
+               "           python3 preflight.py --umbrueche")
         return (kopf + f"\n           {anteil:.0%} davon enden auf einem "
                 f"Satzzeichen: Es ist EINE ZEILE JE ABSATZ,\n"
-                "           nur ohne Leerzeile dazwischen. Abhilfe:\n"
-                "           python3 preflight.py --umbrueche\n"
-                "           (verdoppelt jeden Umbruch, legt vorher "
-                "input.txt.bak an)")
+                "           nur ohne Leerzeile dazwischen. Abhilfe — "
+                "einmal ausfuehren:\n" + weg +
+                "\n           Verdoppelt jeden Umbruch, legt vorher "
+                "input.txt.bak an. Danach Zelle 2 erneut.")
     return (kopf + f"\n           Nur {anteil:.0%} enden auf einem "
             f"Satzzeichen: Der Text ist MITTEN IM SATZ umbrochen\n"
             "           (typisch fuer eine PDF-Extraktion). Die "
