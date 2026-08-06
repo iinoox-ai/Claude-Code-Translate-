@@ -60,17 +60,31 @@ willst) — die ID oder die volle Adresse aus der Browserzeile:
 "sheets_id": "1a2B3c4D5e6F7g8H9i0JklMnoPqrStUvWxYz"
 ```
 
-**Ein anderes Modell für dieses Buch** — beide Rollen setzen, sonst übersetzt
-das eine und revidiert das andere:
+**Die Modellwahl für dieses Buch festhalten.** Übersetzung und Revision laufen
+mit `claude-opus-5` — dort wird nicht gespart, weil jeder Fehler dieses Passes
+durch alles Weitere getragen wird. Wer verhindern will, dass eine spätere
+Repo-Änderung sie nachzieht, beansprucht sie für dieses Buch:
 
 ```json
-"modell_uebersetzung": "claude-sonnet-5",
-"modell_revision": "claude-sonnet-5",
+"modell_uebersetzung": "claude-opus-5",
+"modell_revision": "claude-opus-5",
 "technik_ausnahmen": ["modell_uebersetzung", "modell_revision"]
 ```
 
 Ohne `technik_ausnahmen` zieht der Technik-Abgleich die Werte aus dem Repo
-nach und setzt deine Wahl still zurück.
+nach und setzt deine Wahl still zurück. Mit ihr bleiben sie stehen.
+
+**Wer wirklich andere Modelle will**, ersetzt die Namen — aber dann bitte
+beide: Sonst übersetzt das eine Modell und revidiert das andere. Was die
+Belegung je Rolle kostet und warum sie so ist, zeigt
+
+```python
+colab_start.lauf("pipeline.py", "modelle", code=CODE)
+```
+
+Und Vorsicht: `technik_ausnahmen` **schützt** die Abweichung. Ein aus Versehen
+übernommener Wert bleibt damit auch bei `pipeline.py technik --uebernehmen`
+stehen.
 
 **Rahmenmarker** — dazu gleich mehr, siehe den nächsten Abschnitt.
 

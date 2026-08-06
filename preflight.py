@@ -1387,6 +1387,27 @@ installiert, requests-Pfad"
             finally:
                 os.chdir(alt_cwd)
 
+        # Modellnamen in der Doku muessen die eingestellten sein. Die
+        # Anleitung zeigte als Beispiel fuer 'technik_ausnahmen'
+        # 'modell_uebersetzung: claude-sonnet-5' — in einem Block, den
+        # sie selbst zum Kopieren anbietet. Wer ihn uebernahm, tauschte
+        # das wichtigste Modell der Pipeline aus, und 'technik_ausnahmen'
+        # schuetzte den Fehler dann auch noch vor dem Abgleich.
+        # Ausgenommen ist die Historie: ARBEITSAUFTRAG.md haelt den Stand
+        # vom Juli 2026 fest und soll ihn festhalten. Ein Dokument, das
+        # beschreibt was war, darf nicht mitwandern.
+        for d in _glob_md():
+            if os.path.basename(d) == "ARBEITSAUFTRAG.md":
+                continue
+            for rolle, name in re.findall(
+                    r'"modell_(\w+)"\s*:\s*"([^"]+)"',
+                    quelltext(d)):
+                soll = vorlage.get(f"modell_{rolle}")
+                if soll and name != soll:
+                    fehler.append(
+                        f"{os.path.basename(d)}: modell_{rolle} steht dort "
+                        f"als '{name}', eingestellt ist '{soll}'")
+
         # Kein verwaistes Dokument. NEUES_BUCH.md lag ein halbes Jahr im
         # Repo, ohne dass irgendein anderes es erwaehnt haette — die
         # Datei, die man zuerst braucht, war die einzige unauffindbare.
