@@ -216,18 +216,48 @@ def anmeldung_exportieren():
     import json
     import stat
     import google.auth
-    creds, _ = google.auth.default()
+    creds = _kernel_anmeldung()
     satz = {"type": "authorized_user",
             "client_id": getattr(creds, "client_id", None),
             "client_secret": getattr(creds, "client_secret", None),
             "refresh_token": getattr(creds, "refresh_token", None)}
-    if not all(satz.values()):
+    fehlt = [k for k, v in satz.items() if not v and k != "type"]
+    if fehlt:
+        # Nicht still zurueckkehren. Ein leerer Rueckgabewert sah in der
+        # Zelle genauso aus wie ein geglueckter Export, und die naechste
+        # Fehlersuche begann wieder bei null.
+        print(f"  Anmeldung nicht weiterreichbar: {type(creds).__module__}."
+              f"{type(creds).__name__} ohne {', '.join(fehlt)}")
         return ""
     with open(ADC_DATEI, "w", encoding="utf-8") as f:
         json.dump(satz, f)
     os.chmod(ADC_DATEI, stat.S_IRUSR | stat.S_IWUSR)
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = ADC_DATEI
     return ADC_DATEI
+
+
+def _kernel_anmeldung():
+    """Die Benutzeranmeldung DES KERNELS, mit den Bereichen, die wir
+    brauchen.
+
+    'google.auth.default()' ohne Bereiche liefert in Colab die
+    Compute-Engine-Anmeldung der VM — die, an der kein Dienstkonto
+    haengt. Mit ausdruecklichen Bereichen greift der Weg ueber
+    'authenticate_user()'. Beide Varianten werden versucht, die
+    brauchbarere gewinnt: Was hier herauskommt, ist das, was
+    weitergereicht wird."""
+    import referenz_sync as R
+    import google.auth
+    letzte = None
+    for kwargs in ({"scopes": R.BEREICHE}, {}):
+        try:
+            creds, _ = google.auth.default(**kwargs)
+        except Exception:
+            continue
+        letzte = creds
+        if R.anmeldung_taugt(creds):
+            return creds
+    return letzte
 
 
 def anmeldung_faellig(code=CODE):

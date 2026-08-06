@@ -2911,6 +2911,20 @@ installiert, requests-Pfad"
         if "anmeldung_exportieren()" not in quelle_an:
             fehler.append("sheets_anmelden reicht die Anmeldung nicht "
                           "weiter")
+        # 'default()' ohne Bereiche liefert in Colab die
+        # Compute-Engine-Anmeldung der VM. Beide Leser muessen es mit
+        # Bereichen versuchen, sonst holen sie den Rueckfall der VM und
+        # halten ihn fuer eine Anmeldung.
+        for modul, funk in (("referenz_sync.py", "_credentials"),
+                            ("colab_start.py", "_kernel_anmeldung")):
+            if "scopes" not in quelltext(modul).split(f"def {funk}")[1][:1400]:
+                fehler.append(f"{funk} fragt default() ohne Bereiche")
+        # Und ein gescheiterter Export darf nicht still sein: Er sah in
+        # der Zelle aus wie ein geglueckter.
+        if "return \"\"" in inspect.getsource(CS2.anmeldung_exportieren) \
+                and "print(" not in inspect.getsource(
+                    CS2.anmeldung_exportieren):
+            fehler.append("gescheiterter Export meldet sich nicht")
         elif "probe_gut(" not in quelle_an:
             fehler.append("sheets_anmelden liest die Probe nicht ueber "
                           "probe_gut")

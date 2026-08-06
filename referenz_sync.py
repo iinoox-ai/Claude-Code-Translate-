@@ -220,13 +220,17 @@ def _credentials():
     pfad = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
     if pfad:
         return _aus_datei(pfad)
-    try:
-        import google.auth
-        creds, _ = google.auth.default()
-        if anmeldung_taugt(creds):
-            return creds
-    except Exception:
-        pass
+    # Mit Bereichen zuerst: 'default()' ohne sie liefert in Colab die
+    # Compute-Engine-Anmeldung der VM, an der kein Dienstkonto haengt.
+    # Mit ihnen greift der Weg ueber 'authenticate_user()'.
+    for kwargs in ({"scopes": BEREICHE}, {}):
+        try:
+            import google.auth
+            creds, _ = google.auth.default(**kwargs)
+            if anmeldung_taugt(creds):
+                return creds
+        except Exception:
+            continue
     if G.ist_colab() and _im_kernel():
         from google.colab import auth
         import google.auth
