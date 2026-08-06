@@ -533,9 +533,14 @@ def cmd_run(cfg, args):
                               "anpassen (die Dateien liegen in Drive,")
                         print("   ein Download ist nicht noetig)")
                         print("3. Dann in einer Zelle:")
-                    print(f"     !python3 $CODE/pipeline.py weiter")
-                    print("   Das gibt die Pause frei; danach Zelle 1 "
-                          "erneut ausfuehren.")
+                    # Zelle 3 ist 'pipeline.py weiter', und 'weiter' gibt
+                    # die Pause frei UND laeuft weiter. Hier stand frueher
+                    # eine Shell-Zeile plus 'danach Zelle 1 erneut' —
+                    # Zelle 1 ist die Google-Anmeldung, und ein zweiter
+                    # Schritt ist ueberhaupt nicht noetig.
+                    print("     Zelle 3 im Runner")
+                    print("   Sie gibt die Pause frei und laeuft weiter. "
+                          "Mehr ist nicht zu tun.")
                 else:
                     if name == "PAUSE_review":
                         print("1. Referenzdateien pruefen: Glossar, "
