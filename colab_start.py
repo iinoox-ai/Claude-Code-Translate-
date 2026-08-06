@@ -131,6 +131,45 @@ def _technik_melden(ziel, quelle):
     return zeilen
 
 
+def _anmeldeprobe(code=CODE):
+    """Sieht ein UNTERPROZESS die Google-Anmeldung? Genau das zaehlt.
+
+    Geprueft wird ueber referenz_sync.anmeldung_taugt und nicht ueber
+    'default() wirft nicht': In Colab findet default() immer die
+    Compute-Engine-Anmeldung der VM, an der kein Dienstkonto haengt.
+    Diese Probe haette also 'SICHTBAR' gemeldet, und der Fehler waere
+    erst im Schritt aufgetaucht — als angebliches Problem des
+    Spreadsheets."""
+    import subprocess
+    import sys
+    pruef = ("import google.auth, referenz_sync as R\n"
+             "try:\n"
+             "    creds, _ = google.auth.default()\n"
+             "    gut = R.anmeldung_taugt(creds)\n"
+             "    print('SICHTBAR' if gut else\n"
+             "          'UNSICHTBAR nur die Metadaten-Anmeldung der VM')\n"
+             "except Exception as e:\n"
+             "    print('UNSICHTBAR', e)\n")
+    return subprocess.run([sys.executable, "-c", pruef],
+                          capture_output=True, text=True, cwd=code)
+
+
+def anmeldung_faellig(code=CODE):
+    """Braucht dieser Projektordner eine Anmeldung, die noch fehlt?
+
+    Die Anmeldung gilt je Colab-SITZUNG, nicht je Buch — nach jedem
+    Neustart der Laufzeit ist sie wieder faellig. Wer das nicht weiss,
+    startet den Lauf, sieht ihn drei Schritte weit kommen und dann an
+    einer Meldung ueber Unterprozesse scheitern.
+
+    Ohne sheets_id ist nichts faellig: Der Rueckfallpfad braucht kein
+    Google."""
+    import referenz_sync as R
+    if not G.ist_colab() or not R.aktiv(G.lade_config(pflicht=False)):
+        return False
+    return "SICHTBAR" not in _anmeldeprobe(code).stdout
+
+
 def sheets_anmelden(code=CODE):
     """Einmal je Sitzung IN EINER ZELLE ausfuehren, nicht im Unterprozess.
 
@@ -155,16 +194,7 @@ def sheets_anmelden(code=CODE):
     # Diese Zelle haette also 'SICHTBAR' gemeldet, und der Fehler waere
     # erst im Schritt aufgetaucht — als angebliches Problem des
     # Spreadsheets.
-    pruef = ("import google.auth, referenz_sync as R\n"
-             "try:\n"
-             "    creds, _ = google.auth.default()\n"
-             "    gut = R.anmeldung_taugt(creds)\n"
-             "    print('SICHTBAR' if gut else\n"
-             "          'UNSICHTBAR nur die Metadaten-Anmeldung der VM')\n"
-             "except Exception as e:\n"
-             "    print('UNSICHTBAR', e)\n")
-    r = subprocess.run([sys.executable, "-c", pruef],
-                       capture_output=True, text=True, cwd=code)
+    r = _anmeldeprobe(code)
     if "SICHTBAR" in r.stdout:
         print("Unterprozesse sehen die Anmeldung — referenz_sync laeuft "
               "jetzt ueber colab_start.lauf(...).")
@@ -294,15 +324,43 @@ def vorbereiten(projekt=PROJEKT_STANDARD, code=CODE, still=False):
     schluessel = secrets_laden()
     os.chdir(projekt)
 
+    # Erst nach dem os.chdir: 'anmeldung_faellig' liest die projekt.json
+    # des Buches, und die steht im Arbeitsverzeichnis.
+    faellig = not erstlauf and anmeldung_faellig(code)
+
     stand = {"code": code, "arbeit": projekt, "zweig": zweig,
              "commit": commit, "drive_frisch_gemountet": frisch,
              "schluessel": schluessel, "meldungen": meldungen,
-             "erstlauf": erstlauf, "bereit": not erstlauf}
+             "erstlauf": erstlauf, "anmeldung_faellig": faellig,
+             "bereit": not erstlauf and not faellig}
     if not still:
         bericht(stand, git_hinweis)
         if erstlauf:
             erstlauf_hinweis(projekt)
+        elif faellig:
+            print(ANMELDUNG_FAELLIG)
     return stand
+
+
+ANMELDUNG_FAELLIG = """
+==============================================================
+  ZELLE 1 FEHLT — Google-Anmeldung
+==============================================================
+
+Dieses Buch arbeitet mit einem Spreadsheet ('sheets_id' ist gesetzt),
+und in dieser Colab-Sitzung ist niemand bei Google angemeldet. Der Lauf
+startet deshalb NICHT — er kaeme drei Schritte weit und scheiterte dann
+an einer Meldung ueber Unterprozesse.
+
+Die Anmeldung gilt je SITZUNG, nicht je Buch: Nach jedem Neustart der
+Laufzeit ist sie wieder faellig, auch bei einem Ordner, der gestern noch
+lief.
+
+  Zelle 1 ausfuehren, danach diese hier erneut.
+
+(Soll das Buch ohne Spreadsheet laufen, 'sheets_id' in projekt.json
+leeren — dann werden die Referenzdaten als JSON-Dateien gepflegt.)
+"""
 
 
 ERSTLAUF = """

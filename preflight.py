@@ -2837,6 +2837,17 @@ installiert, requests-Pfad"
             pruefe_sheets({"sheets_id": "1" + "x" * 30}, b_voll)
         finally:
             RS._buch = alt_buch
+        # Und der Preflight darf an einer fehlenden Anmeldung nicht
+        # STERBEN. 'R.sicherstellen' tat genau das: sys.exit mitten in
+        # der Ausgabe, vor der Zeile, die den Fall aufklaert. Fuer einen
+        # Schritt, der gleich ein Modell ruft, ist das richtig — fuer den
+        # Preflight ist es das Gegenteil seiner Aufgabe.
+        # Am Zeilenanfang gesucht, nicht als Teilzeichenkette: Sonst
+        # findet die Pruefung ihren eigenen Suchstring und meldet immer.
+        if re.search(r"^\s*R\.sicherstellen\(", quelltext("preflight.py"),
+                     re.M):
+            fehler.append("Preflight stirbt an sicherstellen(), statt zu "
+                          "berichten")
         text_leer = " ".join(str(z) for z in b_leer.zeilen)
         text_voll = " ".join(str(z) for z in b_voll.zeilen)
         if "sheets_id" not in text_leer or "leer" not in text_leer:
@@ -2844,8 +2855,19 @@ installiert, requests-Pfad"
         if "Spreadsheet" not in text_voll:
             fehler.append(f"gesetzte sheets_id wird nicht gemeldet: "
                           f"{text_voll}")
-        if "FEHL" in text_voll:
-            fehler.append("fehlende Anmeldung laesst den Preflight scheitern")
+        if "Zelle 1" not in text_voll:
+            fehler.append(f"fehlende Anmeldung schickt nicht zu Zelle 1: "
+                          f"{text_voll}")
+        # Zelle 2 darf einen Lauf nicht starten, der die Anmeldung
+        # braucht und nicht hat. Er kaeme drei Schritte weit.
+        if os.path.exists(nb):
+            z2 = "".join(zellen[6]["source"])
+            if "pipeline.py" in z2 and '"bereit"' not in z2:
+                fehler.append("Zelle 2 startet den Lauf ohne die "
+                              "Bereitschaftspruefung")
+        import colab_start as CS2
+        if "anmeldung_faellig" not in CS2.vorbereiten.__code__.co_names:
+            fehler.append("vorbereiten() prueft die Anmeldung nicht")
         # Und die Vorbereitung darf den stillen Zweig nicht stillschweigen.
         vb = quelltext("vorbereitung.py")
         if "Kein Spreadsheet" not in vb:
@@ -3683,6 +3705,7 @@ def pruefe_sheets(cfg, b):
     falsche Ort zum Abbrechen — er laeuft auch als erster Schritt eines
     Laufes, den man gerade erst angestossen hat."""
     import referenz_sync as RS
+    b.abschnitt("Referenzdaten")
     roh = str(cfg.get("sheets_id", "")).strip()
     if not roh:
         b.add("INFO", "Referenzdaten: JSON-Dateien (kein Spreadsheet)",
@@ -3703,10 +3726,21 @@ def pruefe_sheets(cfg, b):
         buch = RS._buch(cfg)
         da = {blatt.title for blatt in buch.worksheets()}
     except Exception as e:
-        b.add("WARN", "Spreadsheet jetzt nicht pruefbar",
-              f"{str(e).splitlines()[0]}\n"
-              f"           Der Lauf versucht es beim ersten "
-              f"Sheets-Schritt erneut.")
+        text = str(e)
+        if "Anmeldung" in text:
+            # Der haeufigste Fall, und er hat nichts mit dem Spreadsheet
+            # zu tun. Zelle 1 gilt je Colab-Sitzung, nicht je Buch — nach
+            # jedem Neustart der Laufzeit ist sie wieder faellig.
+            b.add("FEHLER", "Google-Anmeldung fehlt",
+                  "Das Spreadsheet ist eingestellt, aber niemand ist "
+                  "angemeldet.\n"
+                  "           In Colab: Zelle 1 ausfuehren "
+                  "(colab_start.sheets_anmelden), dann diesen\n"
+                  "           Lauf erneut. Die Anmeldung gilt je "
+                  "Sitzung, nicht je Buch.")
+        else:
+            b.add("FEHLER", "Spreadsheet nicht erreichbar",
+                  text.replace("\n", "\n           "))
         return
     soll = [t for t, *_ in RS.TABS] + [RS.TAB_ZITATE[0], RS.TAB_MODELLE[0]]
     fehlen = [t for t in soll if t not in da]
@@ -3717,6 +3751,18 @@ def pruefe_sheets(cfg, b):
     else:
         b.add("OK", f"Spreadsheet erreichbar, alle {len(soll)} Tabs "
                     f"vorhanden")
+    # Und der Inhalt: zeilengenau, bevor ein Modell gerufen wird. Ohne
+    # das pruefte der Preflight im Sheets-Betrieb die JSONs des letzten
+    # Laufs und meldete Ordnung, waehrend im Sheet ein Fehler stand.
+    try:
+        RS.sync(cfg, still=True)
+        b.add("OK", "Referenzdaten aus dem Spreadsheet gelesen und "
+                    "geprueft")
+    except RS.SyncFehler as e:
+        b.add("FEHLER", "Referenzdaten im Spreadsheet fehlerhaft",
+              str(e).replace("\n", "\n           ")
+              + "\n           Im Spreadsheet korrigieren, dann erneut. "
+                "Es wurde nichts geschrieben.")
 
 
 def umbrueche_richten():
@@ -4526,8 +4572,13 @@ def main():
     # Netz. Ohne diesen Aufruf pruefte der Preflight im Sheets-Betrieb die
     # JSONs des letzten Laufs und meldete Ordnung, waehrend im Sheet ein
     # Fehler stand — also genau dort, wo er ihn finden soll.
-    import referenz_sync as R
-    R.sicherstellen(cfg)
+    #
+    # 'sicherstellen' beendet den Prozess bei jedem Problem. Fuer einen
+    # Schritt, der gleich ein Modell ruft, ist das richtig; fuer den
+    # Preflight ist es falsch. Er starb mitten in der Ausgabe, noch vor
+    # der Zeile, die sagt, ob das Spreadsheet ueberhaupt in Betrieb ist
+    # — die Zeile, die den Fall haette aufklaeren koennen.
+    pruefe_sheets(cfg, b)
 
     backends = G.benutzte_backends(cfg)
     pruefe_belegung(cfg, b)
