@@ -198,12 +198,60 @@ def selbsttest(cfg, b):
         if umbruchdiagnose("A.\n\nB.\n\nC.", 3):
             fehler.append("gesunder Text bekommt eine Umbruchdiagnose")
 
+        # '--umbrueche' schreibt die Quelldatei. Es muss den Befund
+        # selbst pruefen: Auf einen mitten im Satz umbrochenen Text
+        # angewandt, machte die Verdopplung aus jeder halben Zeile einen
+        # Absatz — und zerstoerte, was noch zu retten war.
+        import contextlib
+        import io as _io
+        import tempfile
+        alt_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                os.chdir(tmp)
+                for name, quelle, soll in (("Zeile je Absatz", eine_zeile, 0),
+                                           ("mitten im Satz", mitten, 1)):
+                    open(G.F["quelle"], "w", encoding="utf-8").write(quelle)
+                    with contextlib.redirect_stdout(_io.StringIO()):
+                        rc = umbrueche_richten()
+                    if rc != soll:
+                        fehler.append(f"'--umbrueche' bei '{name}': "
+                                      f"Rueckgabe {rc} statt {soll}")
+                    gesichert = os.path.exists(G.F["quelle"] + ".bak")
+                    if gesichert != (soll == 0):
+                        fehler.append(f"'--umbrueche' bei '{name}': "
+                                      f"Sicherung {'' if gesichert else 'nicht '}"
+                                      f"angelegt")
+                    if soll == 0:
+                        neu = open(G.F["quelle"], encoding="utf-8").read()
+                        if len(G.absaetze(neu)) != 59:
+                            fehler.append(f"'--umbrueche' macht "
+                                          f"{len(G.absaetze(neu))} statt 59 "
+                                          f"Absaetze")
+                        if open(G.F["quelle"] + ".bak",
+                                encoding="utf-8").read() != quelle:
+                            fehler.append("Sicherung ist nicht das Original")
+                        # Zweiter Aufruf: Die Sicherung traegt jetzt das
+                        # Original. Wird sie ueberschrieben, ist es weg.
+                        with contextlib.redirect_stdout(_io.StringIO()):
+                            umbrueche_richten()
+                        if open(G.F["quelle"] + ".bak",
+                                encoding="utf-8").read() != quelle:
+                            fehler.append("zweiter Aufruf ueberschreibt die "
+                                          "Sicherung")
+                    for rest in (G.F["quelle"], G.F["quelle"] + ".bak"):
+                        if os.path.exists(rest):
+                            os.remove(rest)
+            finally:
+                os.chdir(alt_cwd)
+
         if fehler:
             b.add("FEHLER", "Schluesselpruefung fehlerhaft", "; ".join(fehler))
         else:
             b.add("OK", "Zurueckgewiesene Schluessel sind ein Fehler, "
                         "vertauschte Geheimnisse werden an der Form erkannt, "
-                        "Umbruchdiagnose unterscheidet beide Faelle")
+                        "Umbruchdiagnose unterscheidet beide Faelle, "
+                        "'--umbrueche' richtet nur den Fall, den sie meint")
 
         # Absatztrennung unabhaengig vom Zeilenende. Eine Datei aus Word
         # trennt mit '\r\n\r\n'; ohne Normalisierung wurden aus dem Buch
@@ -3440,14 +3488,10 @@ def umbruchdiagnose(text, n_absaetze):
     if anteil >= 0.7:
         return (kopf + f"\n           {anteil:.0%} davon enden auf einem "
                 f"Satzzeichen: Es ist EINE ZEILE JE ABSATZ,\n"
-                "           nur ohne Leerzeile dazwischen. Abhilfe — "
-                "jeden Umbruch verdoppeln:\n"
-                "           python3 -c \"import io;p='input.txt';"
-                "s=io.open(p,encoding='utf-8').read();"
-                "io.open(p+'.bak','w',encoding='utf-8').write(s);"
-                "io.open(p,'w',encoding='utf-8')"
-                ".write(s.replace('\\r\\n','\\n').replace('\\n','\\n\\n'))\"\n"
-                "           (legt input.txt.bak an, bevor sie schreibt)")
+                "           nur ohne Leerzeile dazwischen. Abhilfe:\n"
+                "           python3 preflight.py --umbrueche\n"
+                "           (verdoppelt jeden Umbruch, legt vorher "
+                "input.txt.bak an)")
     return (kopf + f"\n           Nur {anteil:.0%} enden auf einem "
             f"Satzzeichen: Der Text ist MITTEN IM SATZ umbrochen\n"
             "           (typisch fuer eine PDF-Extraktion). Die "
@@ -3456,6 +3500,55 @@ def umbruchdiagnose(text, n_absaetze):
             "zurueckgewinnen.\n"
             "           Abhilfe ist ein Export, der Absaetze als "
             "Absaetze erhaelt (docx, epub).")
+
+
+def umbrueche_richten():
+    """'--umbrueche': aus einer Zeile je Absatz einen Absatz je Absatz.
+
+    Der Befund stand schon im Bericht, die Abhilfe war ein Einzeiler zum
+    Abtippen. Ein Einzeiler, der die Quelldatei ueberschreibt, ist die
+    falsche Form: Er laesst sich vertippen, und beim zweiten Buch tippt
+    ihn wieder jemand ab.
+
+    Der Befehl macht deshalb genau das, was die Diagnose sagt — und
+    nichts, wenn sie etwas anderes sagt. Mitten im Satz umbrochener Text
+    (PDF-Extraktion) wuerde durch die Verdopplung endgueltig unbrauchbar:
+    aus jeder halben Zeile wuerde ein Absatz. Deshalb prueft er den
+    Befund erneut, statt dem Aufrufer zu glauben.
+
+    Die Sicherung wird nie ueberschrieben. Beim zweiten Aufruf enthielte
+    sie sonst die bereits umgebaute Fassung, und das Original waere weg."""
+    pfad = G.F["quelle"]
+    if not os.path.exists(pfad):
+        print(f"  {pfad} nicht gefunden (cwd: {os.getcwd()})")
+        return 1
+    text = open(pfad, "rb").read().decode("utf-8")
+    paras = G.absaetze(text)
+    if len(paras) >= 20:
+        print(f"  {pfad} hat {len(paras)} Absaetze — hier ist nichts zu "
+              f"richten.")
+        return 1
+    befund = umbruchdiagnose(text, len(paras))
+    if "EINE ZEILE JE ABSATZ" not in befund:
+        print(f"  {pfad} ist nicht zeilenweise nach Absaetzen gegliedert.")
+        print(befund.replace("\n           ", "\n  ") or
+              "  Zu wenige Zeilen fuer eine Aussage.")
+        return 1
+
+    sicherung = pfad + ".bak"
+    if os.path.exists(sicherung):
+        print(f"  {sicherung} gibt es schon — ich ueberschreibe sie nicht.")
+        print(f"  Bitte erst wegraeumen oder umbenennen.")
+        return 1
+    neu = text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\n\n")
+    with open(sicherung, "w", encoding="utf-8") as f:
+        f.write(text)
+    with open(pfad, "w", encoding="utf-8") as f:
+        f.write(neu)
+    print(f"  {sicherung} angelegt (das Original, unveraendert).")
+    print(f"  {pfad}: {len(paras)} -> {len(G.absaetze(neu))} Absaetze.")
+    print(f"  Weiter mit:  python3 pipeline.py run")
+    return 0
 
 
 def pruefe_api(cfg, b, backends, ping):
@@ -4189,9 +4282,15 @@ def main():
                     help="nur den Selbsttest, ohne Modell")
     ap.add_argument("--streng", action="store_true",
                     help="Begleitdateien muessen vollstaendig sein")
+    ap.add_argument("--umbrueche", action="store_true",
+                    help="eine Zeile je Absatz zu Absaetzen machen "
+                         "(legt input.txt.bak an)")
     args = ap.parse_args()
 
     G.kopf("PREFLIGHT" + (" (kurz)" if args.quick else ""))
+    if args.umbrueche:
+        sys.exit(umbrueche_richten())
+
     cfg = G.lade_config(pflicht=False)
     b = G.Bericht("PREFLIGHT")
 
