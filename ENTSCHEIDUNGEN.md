@@ -1371,11 +1371,50 @@ bezahlt.
 Damit bekommt die Form von `fallback_modelle` eine Bedeutung, die sie vorher
 nicht hatte:
 
+- **`""`** — kein Rückfall. Eine Ablehnung bricht den Chunk ab, der Resume
+  setzt an derselben Stelle an. **Das ist die Vorgabe**, und warum, steht
+  gleich darunter.
 - **`"default"`** — nur serverseitig. Ohne Freischaltung: keine Absicherung.
   Selbst nachbauen lässt es sich nicht, weil nur der Anbieter weiß, welches
   Ersatzmodell zu welcher Ablehnungskategorie passt.
 - **Eine Liste** — serverseitig, wenn die Beta da ist; sonst macht es der
-  Lauf selbst. **Das ist der belastbarere Wert.**
+  Lauf selbst.
+
+### Warum die Vorgabe leer ist
+
+**Nachtrag, gleicher Tag, Buch Oliver.** Ich hatte die Vorgabe auf
+`["claude-sonnet-5"]` gesetzt — mit der Begründung, das Modell antworte
+nachweislich auf diesem Schlüssel. Das stimmte, war aber die falsche Prüfung:
+Ob ein Modell *antwortet*, sagt nichts darüber, ob die API es als
+**Rückfallziel** annimmt.
+
+Sie nimmt es nicht. Die Diagnose auf vier Wegen zeigte es unmissverständlich:
+
+```
+requests, ohne Beta            HTTP 200
+requests, mit Beta-Kopfzeile   HTTP 400
+SDK, messages.create           ok, claude-opus-5
+SDK, beta.messages.create      'claude-sonnet-5' is not a va…
+```
+
+Die Folge war nicht ein verlorener Chunk, sondern **jeder Aufruf**: Das Feld
+`fallbacks` geht in jedes Payload, also scheiterte alles mit HTTP 400. Eine
+Absicherung, die geraten ist, ist gefährlicher als keine — sie kostet nicht
+den Ausnahmefall, sondern den Normalfall.
+
+Zwei Konsequenzen:
+
+- **Die Vorgabe ist leer.** Welche Modelle das Konto als Ziel annimmt, hängt
+  am Konto und steht in keiner Dokumentation. `verifikation.py` probiert es
+  jetzt aus (`ZIELKANDIDATEN`) und gibt die Zeile zum Eintragen aus. Erst
+  messen, dann eintragen.
+- **Die Versicherung war zu eng.** `fallback_abgelehnt()` verlangte das Wort
+  „fallback" im Fehlertext. Die Meldung lautete aber »'claude-sonnet-5' is
+  not a valid …« und enthielt es nicht — also griff die Versicherung nicht,
+  und der Fehler ging als echter Payloadfehler durch. Jetzt zählen auch die
+  **konfigurierten Modellnamen** als Beleg: Sie stehen nur deshalb im
+  Payload, weil wir sie hineingeschrieben haben. Ein fremder Modellname im
+  Text zählt weiterhin nicht.
 
 Der Preis des eigenen Wegs: Die abgelehnte Anfrage wird nicht berechnet (die
 API stellt eine Ablehnung vor der ersten Ausgabe nicht in Rechnung), aber die

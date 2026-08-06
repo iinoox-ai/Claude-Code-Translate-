@@ -131,11 +131,16 @@ STANDARD = {
     # dann macht der Lauf die Wiederholung selbst. 'default' kann das
     # nicht, weil nur der Anbieter weiss, welches Ersatzmodell zu welcher
     # Ablehnungskategorie passt.
-    # Vorgabe ist die Liste und nicht "default": Der serverseitige
-    # Weg ist eine Beta, und beim Buch Alexander war sie fuer den
-    # Schluessel nicht freigeschaltet. Eine Vorgabe, die auf dem
-    # Konto dieses Projekts nicht traegt, ist die falsche Vorgabe.
-    "fallback_modelle":          ["claude-sonnet-5"],
+    # Die Vorgabe ist LEER, und das ist eine Lehre aus dem Buch Oliver:
+    # Dort stand hier ein geratenes Ersatzmodell, das die API als
+    # Rueckfallziel nicht annimmt — und damit scheiterte JEDER Aufruf mit
+    # HTTP 400, nicht nur der eine Chunk, den es haette retten sollen.
+    #
+    # Welche Modelle als Ziel zugelassen sind, haengt am Konto und laesst
+    # sich nur messen: 'python3 verifikation.py' probiert es aus und
+    # nennt die Zeile zum Eintragen. Eine Vorgabe, die niemand geprueft
+    # hat, ist hier gefaehrlicher als gar keine.
+    "fallback_modelle":          "",
     # Serverseitige Websuche der Zitatrecherche. Die Fassung ab Februar 2026
     # filtert Treffer vor dem Kontextfenster; 'websuche_filtern: false'
     # erzwingt den direkten Aufruf ohne diesen Zwischenschritt.
@@ -1238,15 +1243,35 @@ def eigene_rueckfaelle(cfg):
     return [str(m).strip() for m in w if str(m).strip()][:3]
 
 
-def fallback_abgelehnt(fehler):
+def fallback_abgelehnt(fehler, cfg=None):
     """Ist dieser Fehler die Ablehnung des serverseitigen Rueckfalls?
 
-    Faengt beides: das unbekannte Betakennwort im Kopf und das abgelehnte
-    Feld im Payload. Beide Meldungen nennen 'fallback' im Wortlaut, und
-    beide sind HTTP 400 — enger geht es nicht, ohne die Meldungstexte des
-    Anbieters festzuschreiben."""
+    Drei Formen, alle HTTP 400:
+
+    - das unbekannte Betakennwort im Kopf,
+    - das abgelehnte Feld 'fallbacks' im Payload,
+    - ein Ersatzmodell, das die API als Ziel nicht annimmt.
+
+    Die dritte fehlte und hat beim Buch Oliver jeden einzelnen Aufruf
+    scheitern lassen: Die Vorgabe nannte ein Modell, das als Rueckfallziel
+    nicht zugelassen ist, die Meldung lautete »'claude-sonnet-5' is not a
+    valid …«, und das Wort 'fallback' kam darin nicht vor. Die
+    Versicherung griff also nicht, und der Fehler ging als echter
+    Payloadfehler durch — bei jedem Chunk.
+
+    Deshalb zaehlen jetzt auch die konfigurierten Modellnamen als Beleg.
+    Sie stehen nur deshalb im Payload, weil wir sie hineingeschrieben
+    haben; nennt die Fehlermeldung eines davon, ist es unser Feld."""
     t = str(fehler)
-    return t.startswith("HTTP 400") and "fallback" in t.lower()
+    if not t.startswith("HTTP 400"):
+        return False
+    klein = t.lower()
+    if "fallback" in klein or BETA_FALLBACK in klein:
+        return True
+    w = (cfg or {}).get("fallback_modelle", "")
+    namen = [str(m).strip().lower() for m in w] if isinstance(
+        w, (list, tuple)) else []
+    return any(n and n in klein for n in namen)
 
 
 def werkzeug_datum(typ):
@@ -1503,7 +1528,7 @@ class AnthropicBackend(Backend):
                   f"             'cache_ttl' in projekt.json leeren, dann "
                   f"verschwindet diese Meldung.")
             return True
-        if fallbacks_wert(cfg) and fallback_abgelehnt(e):
+        if fallbacks_wert(cfg) and fallback_abgelehnt(e, cfg):
             globals()["_FALLBACK_ABGELEHNT"] = True
             print(f"    WARNUNG: Serverseitiger Rueckfall wird abgelehnt — "
                   f"der Lauf geht ohne ihn weiter.\n"
