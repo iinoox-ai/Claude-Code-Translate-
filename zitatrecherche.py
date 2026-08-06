@@ -245,7 +245,11 @@ def review_in_tab(cfg, epigraphen):
 
     Ohne diese Richtung waere der Tab eine leere Tabelle, die niemand
     fuellt, und die Meldung 'im Spreadsheet zu pflegen' waere unwahr."""
-    blatt = R._buch(cfg).worksheet(TAB)
+    # Die Zitatrecherche ist der ERSTE Schritt, der das Spreadsheet
+    # anfasst — vier Schritte vor der Vorbereitung. Ohne das Anlegen
+    # scheiterte sie an einem Tab, den bis dahin niemand gebraucht hat.
+    # Das Lesen in freigabe_einlesen() legt bewusst nichts an.
+    blatt = R.blatt_sichern(R._buch(cfg), TAB, SPALTEN)
     blatt.clear()
     R._blatt_schreiben(blatt, [SPALTEN] + zeilen(epigraphen))
     return len(epigraphen)

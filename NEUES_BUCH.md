@@ -88,10 +88,15 @@ colab_start.sheets_anmelden(code=CODE)                       # zuerst!
 colab_start.lauf("referenz_sync.py", "--vorlage", code=CODE)
 ```
 
-**Die Anmeldung muss vor jedem Sheets-Aufruf stehen** — sie gilt je
-Colab-Sitzung, nicht je Buch, und `--vorlage` ist der erste Aufruf, der sie
-braucht. Ohne sie bricht der Schritt mit `Keine Google-Anmeldung vorhanden` ab
-(Abschnitt 6 erklärt, warum die Meldung so genau ist).
+**Nötig ist das nicht** — jeder Schritt, der in einen Tab schreibt, legt ihn
+an, wenn er fehlt. `--vorlage` nimmt es nur vorweg, damit die Struktur schon
+im Spreadsheet steht, bevor der Lauf beginnt. Wer es überspringt, verliert
+nichts.
+
+**Die Anmeldung dagegen ist Pflicht, und zwar vor jedem Sheets-Aufruf** — sie
+gilt je Colab-Sitzung, nicht je Buch. Ohne sie bricht der Schritt mit
+`Keine Google-Anmeldung vorhanden` ab (Abschnitt 6 erklärt, warum die Meldung
+so genau ist).
 
 Das legt jeden fehlenden Tab mit seiner Kopfzeile an und lässt vorhandene in
 Ruhe. Gefüllt werden sie später: `vorbereitung.py` erzeugt Glossar, Personen,

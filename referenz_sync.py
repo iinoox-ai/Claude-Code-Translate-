@@ -474,31 +474,52 @@ def erstbefuellung(cfg):
     for tabname, spalten, ziel, _, _, zerleger in TABS:
         daten = {k: v for k, v in G.lade_json(G.F[ziel], still=True).items()
                  if not k.startswith("_")}
-        try:
-            blatt = buch.worksheet(tabname)
-        except Exception:
-            if tabname in OPTIONAL:
-                print(f"  {tabname}: kein Tab — erst --vorlage, wenn er "
-                      f"im Spreadsheet gepflegt werden soll")
-                continue
-            raise SyncFehler(f"Tab '{tabname}' fehlt — erst --vorlage.")
-        vorhanden = [z for z in blatt.get_all_values()[1:] if any(z)]
-        if vorhanden:
-            print(f"  {tabname}: {len(vorhanden)} Zeilen vorhanden, "
-                  f"unveraendert")
-            continue
         if not daten:
             # Zwischen 'Datei fehlt' und 'Datei ist leer' unterscheiden.
             # Beides sieht im Sheet gleich aus, hat aber verschiedene
             # Ursachen — falsches Arbeitsverzeichnis gegen nichts zu tun.
+            #
+            # Vor dem Tab geprueft, nicht danach: Ohne Daten wird auch
+            # kein Tab angelegt. Ein leerer Tab in einem bestehenden
+            # Spreadsheet waere schlimmer als keiner — beim naechsten
+            # Sync gilt er als Quelle und die gefuellte JSON-Datei nicht
+            # mehr.
             fehlt = not os.path.exists(G.F[ziel])
             print(f"  {tabname}: {G.F[ziel]} "
                   + ("nicht gefunden — falsches Arbeitsverzeichnis?"
                      if fehlt else "ist leer, nichts zu uebertragen"))
             continue
+        blatt = blatt_sichern(buch, tabname, spalten)
+        vorhanden = [z for z in blatt.get_all_values()[1:] if any(z)]
+        if vorhanden:
+            print(f"  {tabname}: {len(vorhanden)} Zeilen vorhanden, "
+                  f"unveraendert")
+            continue
         zeilen = [spalten] + [zerleger(k, daten[k]) for k in sorted(daten)]
         _blatt_schreiben(blatt, zeilen)
         print(f"  {tabname}: {len(daten)} Zeilen aus {G.F[ziel]} uebertragen")
+
+
+def blatt_sichern(buch, name, spalten):
+    """Den Tab holen — und ihn anlegen, wenn er fehlt.
+
+    '--vorlage' legt alle Tabs auf einmal an, aber es ist ein Befehl von
+    Hand. Wer ihn vergisst, scheitert am ersten Sheets-Schritt, und das
+    ist die Zitatrecherche — vier Schritte vor der Stelle, an der die
+    Referenzdaten ueberhaupt entstehen. Ein Tab, in den gleich
+    geschrieben wird, muss nicht erst bestellt werden.
+
+    Fuer den LESENDEN Weg gilt das ausdruecklich nicht: Dort darf ein Tab
+    aus 'OPTIONAL' fehlen, und dann bleibt die JSON-Datei die Quelle.
+    Angelegt wird nur, wo im selben Atemzug etwas hineingeht."""
+    try:
+        return buch.worksheet(name)
+    except Exception:
+        blatt = buch.add_worksheet(title=name, rows=200,
+                                   cols=max(4, len(spalten)))
+        _blatt_schreiben(blatt, [spalten])
+        print(f"  {name}: Tab angelegt ({', '.join(spalten)})")
+        return blatt
 
 
 def vorlage(cfg):
@@ -510,10 +531,7 @@ def vorlage(cfg):
         if name in da:
             print(f"  {name}: vorhanden, unveraendert")
             continue
-        blatt = buch.add_worksheet(title=name, rows=200,
-                                   cols=max(4, len(spalten)))
-        _blatt_schreiben(blatt, [spalten])
-        print(f"  {name}: angelegt ({', '.join(spalten)})")
+        blatt_sichern(buch, name, spalten)
 
 
 def main():

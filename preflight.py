@@ -2748,13 +2748,19 @@ installiert, requests-Pfad"
                 s.werte = a
 
         class _Buch:
-            def __init__(s, voll=()):
+            def __init__(s, voll=(), ohne=()):
                 s.blaetter = {t: _Blatt(t, [["kopf"], ["schon", "da"]]
                                         if t in voll else [])
-                              for t, *_ in RS.TABS}
+                              for t, *_ in RS.TABS if t not in ohne}
+                s.angelegt = []
 
             def worksheet(s, n):
                 return s.blaetter[n]
+
+            def add_worksheet(s, title, rows, cols):
+                s.angelegt.append(title)
+                s.blaetter[title] = _Blatt(title)
+                return s.blaetter[title]
 
         # G.lade_json wird gleich ersetzt. RS.G IST das Modul gemeinsam —
         # die Wiederherstellung muss deshalb das Original von VORHER
@@ -2783,6 +2789,23 @@ installiert, requests-Pfad"
                 RS.erstbefuellung({"sheets_id": "x" * 30})
             if voll.blaetter["Glossar"].werte != [["kopf"], ["schon", "da"]]:
                 fehler.append("Erstbefuellung ueberschreibt gefuellte Tabs")
+
+            # Ein fehlender Tab wird angelegt, WENN Daten hineingehen —
+            # '--vorlage' ist ein Befehl von Hand, und wer ihn vergisst,
+            # scheiterte bisher am ersten Sheets-Schritt. Ohne Daten wird
+            # NICHT angelegt: Ein leerer Tab gilt beim naechsten Sync als
+            # Quelle, und die gefuellte JSON-Datei nicht mehr.
+            fehlt = _Buch(ohne={"Glossar", "Personen"})
+            RS._buch = lambda cfg: fehlt
+            with contextlib.redirect_stdout(io.StringIO()):
+                RS.erstbefuellung({"sheets_id": "x" * 30})
+            if fehlt.angelegt != ["Glossar"]:
+                fehler.append(f"angelegt wurde {fehlt.angelegt} statt "
+                              f"nur 'Glossar' (Personen hat keine Daten)")
+            elif fehlt.blaetter["Glossar"].werte != [
+                    ["nl", "de", "hinweis"], ["moestuin", "Gemüsegarten", ""]]:
+                fehler.append(f"angelegter Tab bleibt leer: "
+                              f"{fehlt.blaetter['Glossar'].werte}")
         finally:
             RS._buch = echt
             RS.G.lade_json = echt_lade
