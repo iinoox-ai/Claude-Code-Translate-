@@ -326,12 +326,19 @@ def sheets_anmelden(code=CODE):
 
 
 def sync_im_kernel(projekt=PROJEKT_STANDARD, code=CODE, vorlage=False,
-                   nur_pruefen=False):
-    """Rueckfall: den Sync im Notebook-Prozess laufen lassen.
+                   nur_pruefen=False, erstbefuellung=False):
+    """Rueckfall: den Sheets-Zugriff im Notebook-Prozess laufen lassen.
 
-    Nur fuer den Sheets-Zugriff gedacht. Alles andere gehoert weiter in
-    den Unterprozess — dort ist ausgeschlossen, dass ein zwischenzeitlich
-    geholter Codestand von einem alten Import verdeckt wird."""
+    Nur dafuer gedacht. Alles andere gehoert weiter in den Unterprozess —
+    dort ist ausgeschlossen, dass ein zwischenzeitlich geholter Codestand
+    von einem alten Import verdeckt wird.
+
+    Beide Richtungen, damit der Sheets-Betrieb hier vollstaendig ist:
+    'erstbefuellung' traegt die vorhandenen JSONs ins Spreadsheet
+    (JSON -> Tab, ueberschreibt keine gefuellte Zeile), ohne Argument
+    liest der Sync zurueck (Tab -> JSON). Fehlte die Hinrichtung, war der
+    Kernel-Weg genau fuer den Schritt unbrauchbar, mit dem der
+    Sheets-Betrieb anfaengt."""
     import os
     import sys
     os.chdir(projekt)
@@ -349,6 +356,8 @@ def sync_im_kernel(projekt=PROJEKT_STANDARD, code=CODE, vorlage=False,
     try:
         if vorlage:
             R.vorlage(cfg)
+        elif erstbefuellung:
+            R.erstbefuellung(cfg)
         else:
             R.sync(cfg, schreiben=not nur_pruefen)
             if nur_pruefen:

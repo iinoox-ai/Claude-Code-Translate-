@@ -2897,6 +2897,15 @@ installiert, requests-Pfad"
                 CS2.ANTWORT_NEIN in CS2.ANTWORT_JA:
             fehler.append("die Antworten der Probe enthalten einander")
 
+        # Der Kernel-Weg muss BEIDE Richtungen koennen. Er ist der
+        # Rueckfall fuer den Fall, dass ein Unterprozess die Anmeldung
+        # nicht sieht — und war genau fuer den Schritt unbrauchbar, mit
+        # dem der Sheets-Betrieb anfaengt: die Erstbefuellung.
+        kern = inspect.getsource(CS2.sync_im_kernel)
+        for noetig in ("R.vorlage(", "R.erstbefuellung(", "R.sync("):
+            if noetig not in kern:
+                fehler.append(f"sync_im_kernel kann '{noetig}' nicht")
+
         # Gefragt ist die Probe selbst, nicht die Datei: 'cwd=code' ist
         # fuer die git-Aufrufe daneben genau richtig.
         if "cwd=code" in inspect.getsource(CS2._anmeldeprobe):
