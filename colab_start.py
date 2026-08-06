@@ -132,6 +132,31 @@ def _technik_melden(ziel, quelle):
     return zeilen
 
 
+# Die Antworten der Probe. KEINE davon darf in einer anderen enthalten
+# sein — daran ist die Probe wochenlang gescheitert:
+#
+#     'SICHTBAR' in 'UNSICHTBAR nur die Metadaten-Anmeldung' -> True
+#
+# Die Probe konnte einen Fehlschlag also gar nicht melden. Jedes gruene
+# 'Unterprozesse sehen die Anmeldung' war dieser Teilstring, und die
+# Bereitschaftspruefung von Zelle 2 hat auf derselben Zeile aufgesetzt.
+# Deshalb stimmten Zelle 1 und der Preflight nie ueberein, und deshalb
+# ging die Suche zweimal in die falsche Richtung (Arbeitsverzeichnis,
+# Anmeldeweg) — beide Male an einer Messung entlang, die keine war.
+ANTWORT_JA = "ANMELDUNG=ja"
+ANTWORT_NEIN = "ANMELDUNG=nein"
+
+
+def probe_gut(r):
+    """Sagt die Probe ja? Eigene Funktion, damit sie pruefbar ist.
+
+    Kein 'in': Die Antwort steht am Zeilenanfang und wird als ganzes
+    Wort verglichen."""
+    return any(z.strip().split(" ")[0] == ANTWORT_JA
+               for z in (r.stdout or "").splitlines())
+
+
+
 def _anmeldeprobe(code=CODE, arbeit=None):
     """Sieht ein Unterprozess die Anmeldung — DORT, wo die Schritte laufen?
 
@@ -144,7 +169,7 @@ def _anmeldeprobe(code=CODE, arbeit=None):
     Zweitens — und das ist der Fehler, der zuletzt drei Anlaeufe
     gekostet hat — laeuft die Probe im ARBEITSVERZEICHNIS des Laufs,
     nicht im Code-Verzeichnis. Sie stand bisher im Code-Verzeichnis und
-    meldete 'SICHTBAR', waehrend der Preflight im Projektordner 'keine
+    meldete Erfolg, waehrend der Preflight im Projektordner 'keine
     Anmeldung' bekam. Eine Probe, die woanders steht als der Geprueften,
     prueft nichts. Der Import braucht dann den Pfad ausdruecklich."""
     import subprocess
@@ -154,10 +179,11 @@ def _anmeldeprobe(code=CODE, arbeit=None):
              "try:\n"
              "    creds, _ = google.auth.default()\n"
              "    gut = R.anmeldung_taugt(creds)\n"
-             "    print('SICHTBAR' if gut else\n"
-             "          'UNSICHTBAR nur die Metadaten-Anmeldung der VM')\n"
+             f"    print({ANTWORT_JA!r} if gut else\n"
+             f"          {ANTWORT_NEIN!r}, 'nur die Metadaten-Anmeldung "
+             "der VM')\n"
              "except Exception as e:\n"
-             "    print('UNSICHTBAR', e)\n")
+             f"    print({ANTWORT_NEIN!r}, e)\n")
     return subprocess.run([sys.executable, "-c", pruef],
                           capture_output=True, text=True,
                           cwd=arbeit or os.getcwd())
@@ -217,7 +243,7 @@ def anmeldung_faellig(code=CODE):
     import referenz_sync as R
     if not G.ist_colab() or not R.aktiv(G.lade_config(pflicht=False)):
         return False
-    return "SICHTBAR" not in _anmeldeprobe(code).stdout
+    return not probe_gut(_anmeldeprobe(code))
 
 
 def sheets_anmelden(code=CODE):
@@ -253,7 +279,7 @@ def sheets_anmelden(code=CODE):
     # von sich aus findet, tut es nachweislich nicht.
     pfad = anmeldung_exportieren()
     r = _anmeldeprobe(code)
-    if "SICHTBAR" in r.stdout:
+    if probe_gut(r):
         print("Unterprozesse sehen die Anmeldung"
               + (f" ueber {os.path.basename(pfad)} — unabhaengig vom "
                  f"Projektordner,\ngilt fuer diese Colab-Sitzung, auch "
