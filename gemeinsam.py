@@ -457,6 +457,29 @@ SCHLUESSEL = {
     "google":    ("GEMINI_API_KEY",    "GoogleKI"),
 }
 
+# Woran ein Schluessel des jeweiligen Anbieters zu erkennen ist. Geprueft
+# wird die FORM, nie der Wert — der erscheint nirgends.
+SCHLUESSELFORM = {"anthropic": "sk-ant-", "google": "AIza"}
+
+
+def schluesselform(anbieter, wert):
+    """'' wenn die Form passt, sonst was daran auffaellt.
+
+    Ein vertauschtes Geheimnis ist der einzige Fehler, bei dem BEIDE
+    Anbieter gleichzeitig 'invalid api key' melden — und die Meldung des
+    Anbieters sagt einem das nicht. Die Form verraet es ohne Aufruf und
+    ohne den Wert zu zeigen."""
+    if not wert:
+        return ""
+    for fremd, praefix in SCHLUESSELFORM.items():
+        if fremd != anbieter and wert.startswith(praefix):
+            return (f"sieht nach einem Schluessel fuer '{fremd}' aus "
+                    f"(beginnt mit '{praefix}') — Geheimnisse vertauscht?")
+    erwartet = SCHLUESSELFORM.get(anbieter)
+    if erwartet and not wert.startswith(erwartet):
+        return f"beginnt nicht mit '{erwartet}'"
+    return ""
+
 
 def api_schluessel(anbieter, still=True):
     """Liest den Schluessel aus der Umgebung, in Colab aus userdata.
@@ -466,16 +489,22 @@ def api_schluessel(anbieter, still=True):
     var, secret = SCHLUESSEL.get(anbieter, (None, None))
     if not var:
         return None
+    # Alle Leerzeichen raus, nicht nur die am Rand: Ein aus einer Mail
+    # oder einem Dokument kopierter Schluessel bringt gern einen Umbruch
+    # in der Mitte mit. strip() faengt den nicht, der Anbieter antwortet
+    # mit 'invalid api key', und man sucht den Fehler beim Schluessel
+    # selbst statt beim Einfuegen.
     wert = os.environ.get(var)
     if wert:
-        return wert.strip()
+        return "".join(wert.split())
     if ist_colab():
         try:
             from google.colab import userdata
             wert = userdata.get(secret)
             if wert:
-                os.environ[var] = wert.strip()      # fuer Unterprozesse
-                return wert.strip()
+                wert = "".join(wert.split())
+                os.environ[var] = wert              # fuer Unterprozesse
+                return wert
         except Exception as e:
             if not still:
                 print(f"  Colab-Secret '{secret}' nicht lesbar: {e}")
