@@ -2937,10 +2937,14 @@ installiert, requests-Pfad"
         elif "probe_gut(" not in quelle_an:
             fehler.append("sheets_anmelden liest die Probe nicht ueber "
                           "probe_gut")
-        elif quelle_an.index("anmeldung_exportieren()") > \
-                quelle_an.index("probe_gut("):
-            fehler.append("Export haengt an der Probe — dann gilt die "
-                          "Anmeldung nur im geprueften Ordner")
+        # Hier stand die Regel 'Export VOR der Probe'. Sie war eine
+        # Kompensation dafuer, dass die Probe kein Nein sagen konnte —
+        # mit einer Messung, die misst, ist die Reihenfolge wieder die
+        # richtige: erst messen, dann handeln. Was bleibt, ist der
+        # Rueckfall selbst und dass die Zelle auf ihn verweist.
+        if "sync_im_kernel" not in quelle_an:
+            fehler.append("sheets_anmelden nennt den Kernel-Weg nicht, "
+                          "wenn die Probe Nein sagt")
         # Und eine weitergereichte Benutzeranmeldung darf nicht als
         # Dienstkonto gelesen werden. Nur pruefbar, wo die Bibliothek da
         # ist — auf einem nackten VPS traegt der requests-Pfad, und der
@@ -3068,47 +3072,42 @@ installiert, requests-Pfad"
                               "die Zielanrede nicht in den Prompt — "
                               f"Feldnamen weichen ab: {block!r}")
 
-        # Die Anmeldung der VM ist keine Anmeldung. In Colab findet
-        # google.auth.default() immer die Compute-Engine-Anmeldung, an der
-        # kein Dienstkonto haengt: Sie laesst sich bauen und scheitert
-        # erst beim Zugriff — mit einem 404 auf metadata.google.internal,
-        # das nach einem Problem des Spreadsheets aussieht. Genau so ist
-        # jemand auf die Suche nach einer Freigabe geschickt worden, die
-        # laengst erteilt war.
-        import types
-        class _CE:
-            pass
-        ce = types.ModuleType("google.auth.compute_engine")
-        ce.Credentials = _CE
-        ga = types.ModuleType("google.auth")
-        ga.compute_engine = ce
-        gg = types.ModuleType("google")
-        gg.auth = ga
-        alt_module = {k: sys.modules.get(k) for k in
-                      ("google", "google.auth", "google.auth.compute_engine")}
-        echt_colab = G.ist_colab
-        try:
-            sys.modules.update({"google": gg, "google.auth": ga,
-                                "google.auth.compute_engine": ce})
-            G.ist_colab = lambda: True
-            if RS.anmeldung_taugt(_CE()):
-                fehler.append("Metadaten-Anmeldung der VM gilt in Colab als "
-                              "Anmeldung")
-            if not RS.anmeldung_taugt(object()):
-                fehler.append("echte Anmeldung wird in Colab verworfen")
-            # Ausserhalb von Colab ist dieselbe Anmeldung der normale Weg
-            # einer GCE-Maschine mit Dienstkonto.
-            G.ist_colab = lambda: False
-            if not RS.anmeldung_taugt(_CE()):
-                fehler.append("Dienstkonto einer echten GCE-Maschine wird "
-                              "verworfen")
-        finally:
-            G.ist_colab = echt_colab
-            for k, v in alt_module.items():
-                if v is None:
-                    sys.modules.pop(k, None)
-                else:
-                    sys.modules[k] = v
+        # Ob eine Anmeldung traegt, entscheidet sich am ZUGRIFF, nicht
+        # an ihrer Klasse. Hier stand eine Pruefung auf
+        # compute_engine.Credentials: In Colab galt sie als untauglich,
+        # weil der Metadatendienst vor der Anmeldung mit 404 antwortet.
+        #
+        # NACH 'authenticate_user()' bedient Colab denselben Dienst mit
+        # dem Token des Benutzers — dieselbe Klasse, und sie traegt.
+        # Die Klassenpruefung hat die funktionierende Anmeldung
+        # weggeworfen und Zelle 1 'nur die Metadaten-Anmeldung der VM'
+        # melden lassen, waehrend der Benutzer angemeldet war.
+        class _Anmeldung:
+            def __init__(s, geht):
+                s.geht, s.gefrischt = geht, 0
+
+            def refresh(s, request):
+                s.gefrischt += 1
+                if not s.geht:
+                    raise RuntimeError(
+                        "Failed to retrieve http://metadata.google.internal"
+                        "/…/service-accounts/default/ … Status: 404")
+
+        gut, schlecht = _Anmeldung(True), _Anmeldung(False)
+        if not RS.anmeldung_taugt(gut):
+            fehler.append("tragende Anmeldung wird verworfen")
+        if RS.anmeldung_taugt(schlecht):
+            fehler.append("Anmeldung ohne Dienstkonto gilt als Anmeldung")
+        if RS.anmeldung_taugt(None):
+            fehler.append("'keine Anmeldung' gilt als Anmeldung")
+        if gut.gefrischt != 1 or schlecht.gefrischt != 1:
+            fehler.append("die Anmeldung wird nicht durch Benutzen geprueft")
+        # Und die Klasse darf nicht mehr entscheiden: Eine
+        # compute_engine-Anmeldung, die sich auffrischen laesst, ist eine
+        # gueltige Anmeldung.
+        if "compute_engine" in inspect.getsource(RS.anmeldung_taugt) \
+                .split('"""')[-1]:
+            fehler.append("anmeldung_taugt urteilt wieder nach der Klasse")
 
         # Und die Meldung muss auf die Anmeldung zeigen, nicht auf die
         # Freigabe. Eine falsche Fährte kostet hier eine Stunde.
