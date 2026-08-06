@@ -62,8 +62,66 @@ def quelltext(name):
     """Eine Datei aus dem CODE-Verzeichnis, nie relativ zum Arbeitsordner."""
     return open(os.path.join(CODE, name), encoding="utf-8").read()
 
+# Die Module, an denen der Selbsttest etwas umstellt. Nur 'gemeinsam' zu
+# beobachten reichte nicht: Er haengt sich auch an 'pipeline.cmd_run',
+# 'bewertung.blindbewertung' und 'referenz_sync._buch'. Ein vergessenes
+# 'finally' bei '_buch' traefe die echte Sheets-Pruefung danach — sie liefe
+# gegen eine Attrappe und meldete OK. Die Liste haelt der Selbsttest selbst
+# vollstaendig ('Leckpruefung deckt jedes gepatchte Modul ab').
+PATCHZIELE = ("gemeinsam", "pipeline", "bewertung", "referenz_sync")
+
+
+def _patchmodule():
+    """Die Module aus PATCHZIELE, geladen."""
+    import importlib
+    return [importlib.import_module(n) for n in PATCHZIELE]
+
+
+def _modulstand(*module):
+    """Was an diesen Modulen gerade haengt — fuer den Vergleich danach."""
+    stand = {}
+    for m in module:
+        for name, wert in vars(m).items():
+            if name.startswith("__"):
+                continue
+            if callable(wert) or isinstance(wert, (bool, str, int)):
+                stand[(m.__name__, name)] = wert
+    return stand
+
+
+def _leckpruefung(vorher, b, *module):
+    """Hat der Selbsttest etwas im Modul stehen lassen?
+
+    Er stellt an vielen Stellen etwas um — G.chat, G.Stapel,
+    G.api_schluessel, Merker. Alles davon wird im 'finally'
+    zurueckgesetzt, aber ein vergessenes 'finally' faellt nicht auf: Der
+    Selbsttest laeuft weiter durch, und erst die ECHTE Pruefung danach
+    arbeitet mit der Attrappe.
+
+    Genau das ist passiert. Ein 'finally' setzte nur das
+    Arbeitsverzeichnis zurueck, nicht 'api_schluessel'. Der Preflight
+    schickte danach den Wert 'test' an beide Anbieter, beide antworteten
+    mit 'invalid api key', und die Suche ging zwei Stunden lang zu den
+    Schluesseln des Benutzers — die in Ordnung waren.
+
+    Diese Pruefung vergleicht deshalb den Modulstand vor und nach dem
+    Selbsttest. Sie kostet nichts und faengt jedes kuenftige vergessene
+    'finally'."""
+    nachher = _modulstand(*module)
+    geaendert = sorted(f"{mod}.{name}" for (mod, name), alt in vorher.items()
+                       if (mod, name) in nachher and nachher[(mod, name)]
+                       is not alt and nachher[(mod, name)] != alt)
+    if geaendert:
+        b.add("FEHLER", "Der Selbsttest hat etwas stehen lassen",
+              f"{', '.join(geaendert)}\n"
+              f"           Ein 'finally' fehlt. Die echten Pruefungen "
+              f"danach laufen mit einer Attrappe.")
+    return not geaendert
+
+
 def selbsttest(cfg, b):
     import inspect
+    stand_vorher = _modulstand(*_patchmodule())
     b.abschnitt("Selbsttest")
     import lektorat as L
     import uebersetzung as U
@@ -1252,7 +1310,7 @@ installiert, requests-Pfad"
                 "K", (), {"messages": kette,
                           "beta": type("B", (), {"messages": kette})()})()
             with tempfile.TemporaryDirectory() as tmp2:
-                alt2 = os.getcwd()
+                alt2, echt_key = os.getcwd(), G.api_schluessel
                 try:
                     os.chdir(tmp2)
                     G.api_schluessel = lambda *a, **k: "test"
@@ -1284,6 +1342,7 @@ installiert, requests-Pfad"
                                           f"{e.kategorie!r}")
                 finally:
                     os.chdir(alt2)
+                    G.api_schluessel = echt_key
         finally:
             G._FALLBACK_ABGELEHNT = merker
             del b_a.klient
@@ -2939,6 +2998,33 @@ installiert, requests-Pfad"
         b.add("FEHLER", "Leseausgabe wirft Ausnahme", repr(e))
 
     selbsttest_backends(b)
+
+    # Die Leckpruefung sieht nur, was in PATCHZIELE steht. Wer sich an ein
+    # weiteres Modul haengt und die Liste nicht ergaenzt, hat die Pruefung
+    # still umgangen — deshalb liest sie hier der eigene Quelltext nach.
+    try:
+        quelle = quelltext("preflight.py")
+        alias = {a: m for m, a in re.findall(
+            r"import\s+([a-z_][a-z_0-9]*)\s+as\s+(\w+)", quelle)
+            if os.path.exists(os.path.join(CODE, m + ".py"))}
+        offen = sorted({alias[a] for a, _ in re.findall(
+            r"^\s*(\w+)\.(\w+)\s*=(?!=)", quelle, re.M)
+            if a in alias and alias[a] not in PATCHZIELE})
+        if offen:
+            b.add("FEHLER", "Leckpruefung deckt nicht jedes gepatchte Modul ab",
+                  f"{', '.join(offen)} gehoert in PATCHZIELE.\n"
+                  f"           Sonst bleibt dort eine Attrappe unbemerkt "
+                  f"stehen.")
+        else:
+            b.add("OK", "Leckpruefung deckt jedes gepatchte Modul ab")
+    except Exception as e:
+        b.add("FEHLER", "Abdeckung der Leckpruefung nicht pruefbar", repr(e))
+
+    # Ganz zum Schluss: Stehen die Module noch so da wie vorher? Der
+    # Selbsttest stellt an vielen Stellen etwas um; ein vergessenes
+    # 'finally' faellt sonst erst der echten Pruefung danach auf.
+    if _leckpruefung(stand_vorher, b, *_patchmodule()):
+        b.add("OK", "Der Selbsttest hat nichts in den Modulen stehen lassen")
 
 
 # ------------------------------------------------------------------
