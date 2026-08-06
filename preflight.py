@@ -2847,8 +2847,43 @@ installiert, requests-Pfad"
         if "FEHL" in text_voll:
             fehler.append("fehlende Anmeldung laesst den Preflight scheitern")
         # Und die Vorbereitung darf den stillen Zweig nicht stillschweigen.
-        if "Kein Spreadsheet" not in quelltext("vorbereitung.py"):
+        vb = quelltext("vorbereitung.py")
+        if "Kein Spreadsheet" not in vb:
             fehler.append("vorbereitung.py meldet den Rueckfallpfad nicht")
+        # Und sie darf nicht in den teuren Weg schicken: Ein erneuter
+        # Lauf ruft acht Modellaufrufe und schreibt nach '.neu', waehrend
+        # '--erstbefuellung' dieselben Daten kostenlos uebertraegt.
+        if "--erstbefuellung" not in vb:
+            fehler.append("vorbereitung.py nennt den kostenlosen Weg nicht")
+
+        # Ein Ebenenname mit angehaengter Beschreibung wird gerichtet,
+        # ein mehrdeutiger nicht. Der Prompt listete 'Name: Beschreibung'
+        # und verlangte 'genau so schreiben' — das Modell nahm die ganze
+        # Zeile, und ebenen.json entstand nicht.
+        p = {"Haupthandlung": "dritte Person Praesens",
+             "Rueckblenden": "dritte Person Praeteritum"}
+        roh = [{"beginn": "a", "ebene": "Haupthandlung: dritte Person "
+                                        "Praesens"},
+               {"beginn": "b", "ebene": "Rueckblenden — dritte Person"},
+               {"beginn": "c", "ebene": "Haupthandlung"},
+               {"beginn": "d", "ebene": "Traumebene: erste Person"}]
+        gericht, wurde = G.ebenen_namen_richten(roh, p)
+        if [e["ebene"] for e in gericht] != [
+                "Haupthandlung", "Rueckblenden", "Haupthandlung",
+                "Traumebene: erste Person"]:
+            fehler.append(f"Ebenennamen falsch gerichtet: "
+                          f"{[e['ebene'] for e in gericht]}")
+        if len(wurde) != 2:
+            fehler.append(f"gerichtete Namen nicht gemeldet: {wurde}")
+        # Der unbekannte Name bleibt ein Mangel — sonst saesse er mit
+        # der Beschreibung einer anderen Ebene im Prompt.
+        if not G.ebenen_maengel(gericht, p):
+            fehler.append("unbekannte Ebene wird nach dem Richten "
+                          "durchgelassen")
+        # Und der Prompt darf die Verwechslung nicht wieder anbieten.
+        if "genau so schreiben" in quelltext("vorbereitung.py"):
+            fehler.append("Ebenenprompt listet Name und Beschreibung "
+                          "wieder ununterscheidbar")
 
         # Der Tab 'Modelle' wird geschrieben und NIE gelesen. Steht er in
         # TABS, liest ihn 'sync' zurueck und die Modellwahl waere die
