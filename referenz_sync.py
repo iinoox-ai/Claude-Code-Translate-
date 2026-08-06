@@ -188,6 +188,30 @@ def anmeldung_taugt(creds):
         return True
 
 
+BEREICHE = ["https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"]
+
+
+def _aus_datei(pfad):
+    """Eine Anmeldedatei lesen — Dienstkonto ODER Benutzeranmeldung.
+
+    Frueher galt jeder Wert in GOOGLE_APPLICATION_CREDENTIALS als
+    Dienstkonto. Das war richtig, solange die Variable nur von Hand
+    gesetzt wurde. 'colab_start' legt dort jetzt die Anmeldung der Zelle
+    ab (Typ 'authorized_user'), damit jeder Unterprozess sie findet —
+    und der Dienstkontoleser haette sie mit einer Meldung ueber ein
+    fehlendes Feld 'token_uri' abgewiesen.
+
+    Das Format entscheidet, nicht die Herkunft."""
+    with open(pfad, encoding="utf-8") as f:
+        daten = json.load(f)
+    if daten.get("type") == "authorized_user":
+        from google.oauth2.credentials import Credentials
+        return Credentials.from_authorized_user_info(daten, scopes=BEREICHE)
+    import google.oauth2.service_account as sa
+    return sa.Credentials.from_service_account_file(pfad, scopes=BEREICHE)
+
+
 def _credentials():
     """Drei Wege, in dieser Reihenfolge: Dienstkonto, bereits vorhandene
     Anmeldung, interaktive Anmeldung. Der mittlere ist der wichtige —
@@ -195,10 +219,7 @@ def _credentials():
     wurde."""
     pfad = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
     if pfad:
-        import google.oauth2.service_account as sa
-        return sa.Credentials.from_service_account_file(
-            pfad, scopes=["https://www.googleapis.com/auth/spreadsheets",
-                          "https://www.googleapis.com/auth/drive"])
+        return _aus_datei(pfad)
     try:
         import google.auth
         creds, _ = google.auth.default()
