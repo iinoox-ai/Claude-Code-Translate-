@@ -197,16 +197,29 @@ def selbsttest(cfg, b):
         # wird: In Colab tippt niemand einen Shell-Befehl. Der erste
         # Anlauf nannte nur den Shell-Befehl, und das Notebook mit der
         # passenden Zelle war beim Leser noch das alte.
-        if "preflight.py --umbrueche" not in d1:
-            fehler.append("Abhilfe nennt den Befehl nicht")
+        # BEIDE Umgebungen ausdruecklich einstellen, keine davon dem
+        # Zufall ueberlassen. Der erste Anlauf prueffte den Shell-Befehl
+        # gegen die AMBIENTE Umgebung: Auf dem Entwicklungsrechner ist
+        # ist_colab() falsch, der Test lief durch — und schlug in Colab
+        # fehl, wo der andere Zweig greift und den Befehl anders schreibt.
+        # Eine Verzweigung, von der ein Test nur den einen Ast sieht, ist
+        # ungeprueft.
         echt_colab = G.ist_colab
         try:
+            G.ist_colab = lambda: False
+            ohne_colab = umbruchdiagnose(eine_zeile, 1)
             G.ist_colab = lambda: True
             in_colab = umbruchdiagnose(eine_zeile, 1)
         finally:
             G.ist_colab = echt_colab
+        if "python3 preflight.py --umbrueche" not in ohne_colab:
+            fehler.append("ausserhalb Colab fehlt der Shell-Befehl")
         if "colab_start.lauf(" not in in_colab or "Zelle 8" not in in_colab:
             fehler.append("in Colab wird kein ausfuehrbarer Weg genannt")
+        for wo, txt in (("ausserhalb Colab", ohne_colab),
+                        ("in Colab", in_colab)):
+            if "EINE ZEILE JE ABSATZ" not in txt:
+                fehler.append(f"{wo}: Befund fehlt")
         if "MITTEN IM SATZ" not in d2:
             fehler.append("Umbruch mitten im Satz wird nicht erkannt")
         if umbruchdiagnose("A.\n\nB.\n\nC.", 3):
