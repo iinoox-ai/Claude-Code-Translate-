@@ -1981,7 +1981,16 @@ def saetze_de(text):
 
 
 def absaetze(text):
-    return [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    """Absaetze eines Textes, an Leerzeilen getrennt.
+
+    Zeilenenden werden zuerst vereinheitlicht. Das ist kein Luxus: Eine
+    Datei aus Word oder von einem Windows-Rechner trennt ihre Absaetze mit
+    '\\r\\n\\r\\n'. Ohne Normalisierung greift die Trennung dort nicht, und
+    aus einem Buch von 56 000 Woertern werden zehn Absaetze — gemeldet als
+    'Absaetze muessen durch Leerzeilen getrennt sein', obwohl genau das
+    der Fall ist. Der Fehler traf das Buch Alexander im ersten Anlauf."""
+    sauber = text.replace("\r\n", "\n").replace("\r", "\n")
+    return [p.strip() for p in re.split(r"\n\s*\n", sauber) if p.strip()]
 
 
 def varianten(cfg):

@@ -97,6 +97,24 @@ def selbsttest(cfg, b):
         else:
             b.add("OK", "Spatien: vor … erhalten, vor Komma und "
                         "Semikolon getilgt")
+        # Absatztrennung unabhaengig vom Zeilenende. Eine Datei aus Word
+        # trennt mit '\r\n\r\n'; ohne Normalisierung wurden aus dem Buch
+        # Alexander (56 000 Woerter) zehn Absaetze — gemeldet als
+        # 'Absaetze muessen durch Leerzeilen getrennt sein', obwohl genau
+        # das der Fall war.
+        drei = ["Eerste alinea met woorden.", "Tweede alinea, ook met.",
+                "Derde alinea tenslotte."]
+        for name, ende in (("Unix", "\n\n"), ("Windows", "\r\n\r\n"),
+                           ("alter Mac", "\r\r")):
+            if G.absaetze(ende.join(drei)) != drei:
+                b.add("FEHLER", f"Absatztrennung scheitert an "
+                                f"{name}-Zeilenenden",
+                      f"{len(G.absaetze(ende.join(drei)))} statt 3 Absaetze")
+                break
+        else:
+            b.add("OK", "Absatztrennung unabhaengig vom Zeilenende "
+                        "(Unix, Windows, alter Mac)")
+
         b.add("OK", f"Normalisierer laeuft ({sum(zaehler.values())} "
                     f"Aenderungen auf der Probe)")
     except Exception as e:
@@ -3428,7 +3446,13 @@ def pruefe_text(cfg, b):
         return None
 
     if "\r\n" in text:
-        b.add("WARN", "Windows-Zeilenenden", "sed -i 's/\\r$//' input.txt")
+        # Seit G.absaetze() die Zeilenenden vereinheitlicht, ist das kein
+        # Grund mehr fuer eine Fehlmessung — aber die Datei schreibt sich
+        # danach mit gemischten Enden weiter, und das sieht in jedem Diff
+        # nach einer Aenderung aus, die keine ist.
+        b.add("INFO", "Windows-Zeilenenden",
+              "Die Absatztrennung kommt damit zurecht. Sauberer wird es "
+              "mit:\n           sed -i 's/\\r$//' input.txt")
     for z, name in (("\u200b", "Zero-width space"), ("\f", "Form feed"),
                     ("\xa0", "Geschuetztes Leerzeichen")):
         if text.count(z):
@@ -3448,9 +3472,23 @@ def pruefe_text(cfg, b):
     woerter = len(text.split())
     b.add("INFO", "Umfang", f"{woerter} Woerter, {len(paras)} Absaetze")
     if len(paras) < 20:
+        # Die haeufigste Ursache benennen statt sie raten zu lassen: Ein
+        # Text mit vielen Zeilenumbruechen, aber kaum Leerzeilen, ist
+        # zeilenweise umbrochen (Word-Export, PDF-Extraktion) — dort
+        # trennt keine Leerzeile die Absaetze, und der Hinweis
+        # 'muessen durch Leerzeilen getrennt sein' laesst offen, was zu
+        # tun ist.
+        zeilen = text.count("\n")
+        verdacht = ("\n           Der Text hat "
+                    f"{zeilen} Zeilenumbrueche, aber nur {len(paras)} "
+                    f"Absaetze: Er ist vermutlich zeilenweise umbrochen "
+                    f"(Word- oder PDF-Export).\n"
+                    "           Absaetze brauchen eine LEERZEILE "
+                    "dazwischen, kein einfaches Zeilenende."
+                    if zeilen > 4 * len(paras) else "")
         b.add("FEHLER", f"Nur {len(paras)} Absaetze erkannt",
-              "Absaetze muessen durch Leerzeilen getrennt sein.\n"
-              "           head -c 600 input.txt")
+              "Absaetze muessen durch Leerzeilen getrennt sein."
+              + verdacht + "\n           head -c 600 input.txt")
         return None
 
     laengen = sorted(len(p.split()) for p in paras)

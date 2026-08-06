@@ -6,7 +6,7 @@ Holt nach, was sich ohne API-Schluessel und ohne offenes Netz nicht
 pruefen liess (Auftrag Paket 1, verschoben nach Paket 2):
 
   1. Schreibsemantik des Drive-Mounts   — ohne Modellaufruf
-  2. Ein-Token-Ping je Anbieter
+  2. Kurzer Ping je Anbieter
   3. Mini-Echtlauf: ein Kurz-Chunk je Anbieter, mit Token-Usage
   4. Sampling-Doktrin am lebenden Objekt: dasselbe Payload mit
      'temperature' — belegt das dokumentierte HTTP 400, statt es zu glauben
@@ -150,11 +150,16 @@ def kandidaten(anbieter, modell):
               f"eintragen.")
 
 
+# Ein Ping darf klein sein, aber nicht so klein, dass die Antwort
+# abgeschnitten wird.
+PING_TOKENS = 16
+
+
 def pruefe_ping(e, cfg):
     """Pingt JEDES konfigurierte Modell, auch das spaeterer Pakete.
 
     Gibt die Anbieter zurueck, deren Modell der aktiven Rollen traegt."""
-    print("\n--- 2 · Ein-Token-Ping " + "-" * 38)
+    print("\n--- 2 · Kurzer Ping " + "-" * 41)
     aktiv = {m for r, m in ((r, G.modell_fuer(cfg, r))
                             for r in G.aktive_rollen(cfg))}
     tragen = set()
@@ -162,7 +167,11 @@ def pruefe_ping(e, cfg):
         anbieter = G.backend_name(modell)
         wann = "" if modell in aktiv else "  (erst in spaeteren Paketen)"
         probe = dict(cfg)
-        probe["max_tokens_api"] = 1
+        # Nicht 1: In ein einziges Token passt nicht einmal 'OK', und der
+        # Ping endete deshalb jedes Mal am Limit — mit einer Warnung, die
+        # richtig war und trotzdem nur Rauschen. Ein paar Token kosten
+        # nichts und lassen die Antwort zu Ende gehen.
+        probe["max_tokens_api"] = PING_TOKENS
         t0 = time.time()
         try:
             G.BACKENDS[anbieter].chat(probe, "Antworte mit OK.", "OK",
@@ -287,6 +296,23 @@ def pruefe_rueckfall(e, cfg, anbieter_rollen, tragen):
                "Der Rueckfall gibt es nur auf dem Anthropic-Pfad.")
         return
     if not G.fallbacks_wert(cfg):
+        # Zwei sehr verschiedene Faelle, die bisher dieselbe Meldung
+        # bekamen: nicht eingestellt — oder eingestellt und vom Anbieter
+        # abgelehnt. Der Ping weiter oben hat das dann schon herausgefunden
+        # und den Merker gesetzt, und diese Pruefung meldete danach
+        # 'ist leer', obwohl in projekt.json etwas steht.
+        if cfg.get("fallback_modelle"):
+            e.warn("Rueckfall ist eingestellt, wird aber abgelehnt",
+                   "Der Anbieter nimmt 'fallbacks' fuer diesen Schluessel "
+                   "nicht an —\n  die Betafunktion ist fuer diese "
+                   "Organisation nicht freigeschaltet.\n"
+                   "  Folge: Eine Ablehnung des Sicherheitsklassifikators "
+                   "bricht den Chunk ab.\n"
+                   "  Der Resume setzt an derselben Stelle wieder an; "
+                   "verloren geht nur dieser Chunk.\n"
+                   "  Wer die Meldung nicht mehr sehen will, leert "
+                   "'fallback_modelle' in projekt.json.")
+            return
         e.info("Rueckfall abgeschaltet",
                "'fallback_modelle' ist leer. Eine Ablehnung des "
                "Sicherheitsklassifikators beendet dann den Lauf; der "
@@ -295,7 +321,7 @@ def pruefe_rueckfall(e, cfg, anbieter_rollen, tragen):
     modell = anbieter_rollen["anthropic"][1]
     b = G.BACKENDS["anthropic"]
     probe = dict(cfg)
-    probe["max_tokens_api"] = 1
+    probe["max_tokens_api"] = PING_TOKENS
     p = b.payload(probe, PROBE_SYSTEM, "Antworte mit OK.", "verifikation",
                   modell)
     kopf = {"x-api-key": G.api_schluessel("anthropic"),
