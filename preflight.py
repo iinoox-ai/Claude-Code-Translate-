@@ -2858,6 +2858,25 @@ installiert, requests-Pfad"
         if "Zelle 1" not in text_voll:
             fehler.append(f"fehlende Anmeldung schickt nicht zu Zelle 1: "
                           f"{text_voll}")
+        # Ein frisches Spreadsheet ist leer, und das ist der vorgesehene
+        # Zustand: Die Tabs entstehen beim ersten Schreiben, gefuellt
+        # werden sie von der Vorbereitung — beides NACH dem Preflight.
+        # Als FEHLER gemeldet machte das jedes neue Buch unstartbar und
+        # verlangte, im Spreadsheet etwas zu korrigieren, das dort noch
+        # gar nicht stehen kann.
+        leer, alt_buch2 = G.Bericht("z"), RS._buch
+        try:
+            RS._buch = lambda cfg: type("B", (), {
+                "worksheets": lambda s: []})()
+            pruefe_sheets({"sheets_id": "1" + "x" * 30}, leer)
+        finally:
+            RS._buch = alt_buch2
+        text_leer2 = " ".join(str(z) for z in leer.zeilen)
+        if "FEHL" in text_leer2:
+            fehler.append(f"leeres Spreadsheet gilt als Fehler: "
+                          f"{text_leer2}")
+        if "Vorbereitung" not in text_leer2:
+            fehler.append("leeres Spreadsheet wird nicht erklaert")
         # Zelle 2 darf einen Lauf nicht starten, der die Anmeldung
         # braucht und nicht hat. Er kaeme drei Schritte weit.
         if os.path.exists(nb):
@@ -3847,9 +3866,29 @@ def pruefe_sheets(cfg, b):
     else:
         b.add("OK", f"Spreadsheet erreichbar, alle {len(soll)} Tabs "
                     f"vorhanden")
-    # Und der Inhalt: zeilengenau, bevor ein Modell gerufen wird. Ohne
-    # das pruefte der Preflight im Sheets-Betrieb die JSONs des letzten
-    # Laufs und meldete Ordnung, waehrend im Sheet ein Fehler stand.
+
+    # Der Inhalt wird zeilengenau geprueft — aber nur, wo es etwas zu
+    # pruefen gibt.
+    #
+    # Bei einem frischen Buch ist das Spreadsheet leer, und das ist der
+    # vorgesehene Zustand: Die Tabs entstehen, wenn zum ersten Mal etwas
+    # hineingeschrieben wird, und gefuellt werden sie von der
+    # Vorbereitung. Der Preflight laeuft VOR beidem. Ein fehlender Tab
+    # als FEHLER machte damit jedes neue Buch unstartbar — und verlangte
+    # vom Benutzer, im Spreadsheet etwas zu korrigieren, das dort noch
+    # gar nicht stehen kann.
+    pflicht = [t for t, *_ in RS.TABS if t not in RS.OPTIONAL]
+    offen = [t for t in pflicht if t not in da]
+    if offen:
+        b.add("INFO", "Referenzdaten noch nicht im Spreadsheet",
+              f"{', '.join(offen)} — die Tabs entstehen beim ersten "
+              f"Schreiben,\n           gefuellt werden sie von der "
+              f"Vorbereitung (erstbefuellung).\n           Ab PAUSE_review "
+              f"ist das Spreadsheet die Quelle.")
+        return
+    # Ohne das pruefte der Preflight im Sheets-Betrieb die JSONs des
+    # letzten Laufs und meldete Ordnung, waehrend im Sheet ein Fehler
+    # stand — also genau dort, wo er ihn finden soll.
     try:
         RS.sync(cfg, still=True)
         b.add("OK", "Referenzdaten aus dem Spreadsheet gelesen und "
