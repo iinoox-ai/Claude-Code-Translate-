@@ -62,8 +62,51 @@ def quelltext(name):
     """Eine Datei aus dem CODE-Verzeichnis, nie relativ zum Arbeitsordner."""
     return open(os.path.join(CODE, name), encoding="utf-8").read()
 
+def _modulstand(*module):
+    """Was an diesen Modulen gerade haengt — fuer den Vergleich danach."""
+    stand = {}
+    for m in module:
+        for name, wert in vars(m).items():
+            if name.startswith("__"):
+                continue
+            if callable(wert) or isinstance(wert, (bool, str, int)):
+                stand[(m.__name__, name)] = wert
+    return stand
+
+
+def _leckpruefung(vorher, b, *module):
+    """Hat der Selbsttest etwas im Modul stehen lassen?
+
+    Er stellt an vielen Stellen etwas um — G.chat, G.Stapel,
+    G.api_schluessel, Merker. Alles davon wird im 'finally'
+    zurueckgesetzt, aber ein vergessenes 'finally' faellt nicht auf: Der
+    Selbsttest laeuft weiter durch, und erst die ECHTE Pruefung danach
+    arbeitet mit der Attrappe.
+
+    Genau das ist passiert. Ein 'finally' setzte nur das
+    Arbeitsverzeichnis zurueck, nicht 'api_schluessel'. Der Preflight
+    schickte danach den Wert 'test' an beide Anbieter, beide antworteten
+    mit 'invalid api key', und die Suche ging zwei Stunden lang zu den
+    Schluesseln des Benutzers — die in Ordnung waren.
+
+    Diese Pruefung vergleicht deshalb den Modulstand vor und nach dem
+    Selbsttest. Sie kostet nichts und faengt jedes kuenftige vergessene
+    'finally'."""
+    nachher = _modulstand(*module)
+    geaendert = sorted(f"{mod}.{name}" for (mod, name), alt in vorher.items()
+                       if (mod, name) in nachher and nachher[(mod, name)]
+                       is not alt and nachher[(mod, name)] != alt)
+    if geaendert:
+        b.add("FEHLER", "Der Selbsttest hat etwas stehen lassen",
+              f"{', '.join(geaendert)}\n"
+              f"           Ein 'finally' fehlt. Die echten Pruefungen "
+              f"danach laufen mit einer Attrappe.")
+    return not geaendert
+
+
 def selbsttest(cfg, b):
     import inspect
+    stand_vorher = _modulstand(G)
     b.abschnitt("Selbsttest")
     import lektorat as L
     import uebersetzung as U
@@ -1252,7 +1295,7 @@ installiert, requests-Pfad"
                 "K", (), {"messages": kette,
                           "beta": type("B", (), {"messages": kette})()})()
             with tempfile.TemporaryDirectory() as tmp2:
-                alt2 = os.getcwd()
+                alt2, echt_key = os.getcwd(), G.api_schluessel
                 try:
                     os.chdir(tmp2)
                     G.api_schluessel = lambda *a, **k: "test"
@@ -1284,6 +1327,7 @@ installiert, requests-Pfad"
                                           f"{e.kategorie!r}")
                 finally:
                     os.chdir(alt2)
+                    G.api_schluessel = echt_key
         finally:
             G._FALLBACK_ABGELEHNT = merker
             del b_a.klient
@@ -2939,6 +2983,12 @@ installiert, requests-Pfad"
         b.add("FEHLER", "Leseausgabe wirft Ausnahme", repr(e))
 
     selbsttest_backends(b)
+
+    # Ganz zum Schluss: Steht das Modul noch so da wie vorher? Der
+    # Selbsttest stellt an vielen Stellen etwas um; ein vergessenes
+    # 'finally' faellt sonst erst der echten Pruefung danach auf.
+    if _leckpruefung(stand_vorher, b, G):
+        b.add("OK", "Der Selbsttest hat nichts im Modul stehen lassen")
 
 
 # ------------------------------------------------------------------
