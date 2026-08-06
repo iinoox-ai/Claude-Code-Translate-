@@ -122,6 +122,12 @@ Dateien in `teile/`.
 - Eine vorhandene `projekt.json` im Projektordner wird nie überschrieben;
   beim Erstlauf kopiert der Runner die aus dem Repo und sagt es.
 - Colab-Erkennung zentral in `gemeinsam.py`, nirgendwo sonst.
+- **Ein Selbsttest über eine Colab-Verzweigung stellt beide Äste
+  ausdrücklich ein** (`G.ist_colab = lambda: True` / `False`, mit
+  `finally`). Gegen die ambiente Umgebung geprüft, läuft er auf dem
+  Entwicklungsrechner durch und schlägt in Colab fehl — die eine
+  Umgebung, in der er zählt. Ein Ast, den kein Test sieht, ist
+  ungeprüft.
 - Secrets: `ANTHROPIC_API_KEY` und `GoogleKI` (intern `GEMINI_API_KEY`)
   über `google.colab.userdata`; außerhalb Colab normale
   Umgebungsvariablen. Keys erscheinen nie in Dateien, Logs oder Berichten.
