@@ -238,29 +238,28 @@ def sheets_anmelden(code=CODE):
     auth.authenticate_user()
     print("Angemeldet.")
 
-    # Geprueft wird im Arbeitsverzeichnis des Laufs, nicht im
-    # Code-Verzeichnis. Die Probe lief frueher mit cwd=code und meldete
-    # 'sichtbar', waehrend der Preflight im Projektordner 'keine
-    # Anmeldung' bekam — dreimal hintereinander, und die gruene Zelle
-    # hat jedes Mal in die falsche Richtung gezeigt.
-    if "SICHTBAR" in _anmeldeprobe(code).stdout:
-        print("Unterprozesse sehen die Anmeldung "
-              f"(geprueft in {os.getcwd()}).")
-        return True
-
-    # Nicht sichtbar: die Anmeldung ausdruecklich weiterreichen, statt
-    # sie von google.auth.default() suchen zu lassen. Ein absoluter Pfad
-    # in GOOGLE_APPLICATION_CREDENTIALS wird als erstes geprueft und
-    # gilt in jedem Arbeitsverzeichnis.
+    # IMMER weiterreichen, nicht erst wenn die Probe scheitert.
+    #
+    # Der Export war zuerst ein Notnagel: Probe gruen -> nichts tun.
+    # Damit blieb die Anmeldung genau dann verzeichnisabhaengig, wenn sie
+    # gerade zufaellig funktionierte — und die Probe sieht nur den
+    # Ordner, in dem sie steht. Wer danach auf ein anderes Buch wechselt,
+    # steht wieder vor demselben Fehler, und die gruene Zelle von vorhin
+    # sagt nichts darueber aus.
+    #
+    # Eine Anmeldung, die je Sitzung gilt, muss in JEDEM Ordner der
+    # Sitzung gelten. Ein absoluter Pfad in
+    # GOOGLE_APPLICATION_CREDENTIALS tut das; was google.auth.default()
+    # von sich aus findet, tut es nachweislich nicht.
     pfad = anmeldung_exportieren()
-    if pfad:
-        r = _anmeldeprobe(code)
-        if "SICHTBAR" in r.stdout:
-            print(f"Unterprozesse sehen die Anmeldung "
-                  f"(ueber {os.path.basename(pfad)}, weitergereicht).")
-            return True
-    else:
-        r = _anmeldeprobe(code)
+    r = _anmeldeprobe(code)
+    if "SICHTBAR" in r.stdout:
+        print("Unterprozesse sehen die Anmeldung"
+              + (f" ueber {os.path.basename(pfad)} — unabhaengig vom "
+                 f"Projektordner,\ngilt fuer diese Colab-Sitzung, auch "
+                 f"nach einem Wechsel des Buches." if pfad else
+                 f" (geprueft in {os.getcwd()})."))
+        return True
 
     print("Die Anmeldung gilt nur in dieser Zelle, nicht in "
           "Unterprozessen.\n"

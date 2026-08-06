@@ -2877,6 +2877,19 @@ installiert, requests-Pfad"
         if "cwd=code" in inspect.getsource(CS2._anmeldeprobe):
             fehler.append("Anmeldeprobe laeuft im Code- statt im "
                           "Arbeitsverzeichnis")
+        # Die Anmeldung muss IMMER weitergereicht werden, nicht erst
+        # wenn die Probe scheitert. Als Notnagel blieb sie genau dann
+        # verzeichnisabhaengig, wenn sie gerade zufaellig funktionierte —
+        # und beim naechsten Buch stand derselbe Fehler wieder da. Die
+        # Probe sieht nur den Ordner, in dem sie steht.
+        quelle_an = inspect.getsource(CS2.sheets_anmelden)
+        if "anmeldung_exportieren()" not in quelle_an:
+            fehler.append("sheets_anmelden reicht die Anmeldung nicht "
+                          "weiter")
+        elif quelle_an.index("anmeldung_exportieren()") > \
+                quelle_an.index('"SICHTBAR"'):
+            fehler.append("Export haengt an der Probe — dann gilt die "
+                          "Anmeldung nur im geprueften Ordner")
         # Und eine weitergereichte Benutzeranmeldung darf nicht als
         # Dienstkonto gelesen werden. Nur pruefbar, wo die Bibliothek da
         # ist — auf einem nackten VPS traegt der requests-Pfad, und der
