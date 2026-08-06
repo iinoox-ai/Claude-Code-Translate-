@@ -1710,6 +1710,35 @@ installiert, requests-Pfad"
                                   f"Zelle {', '.join(falsch)} — die gibt es "
                                   f"im Runner nicht")
 
+        # Der Erstlauf legt projekt.json an — und darf den Lauf dann NICHT
+        # starten. Vorher entstand die Datei und wurde in derselben
+        # Ausfuehrung benutzt; fuer ein neues Buch gab es damit keinen
+        # Zeitpunkt, zu dem sich 'sheets_id' eintragen liess. Wer den
+        # Sheets-Betrieb wollte, merkte es, als die Vorbereitung die
+        # Referenzdaten schon in die JSON-Dateien geschrieben hatte.
+        import colab_start as CS
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ordner = os.path.join(tmp, "neuesbuch")
+            _, erst = CS.projektordner_richten(ordner, CODE)
+            if not erst:
+                fehler.append("Erstlauf wird nicht als solcher erkannt")
+            _, wieder = CS.projektordner_richten(ordner, CODE)
+            if wieder:
+                fehler.append("vorhandene projekt.json gilt als Erstlauf")
+            for schluessel in ("sheets_id", "rahmen_marker"):
+                if schluessel not in CS.ERSTLAUF:
+                    fehler.append(f"Erstlauf-Hinweis nennt '{schluessel}' "
+                                  f"nicht")
+            if "--vorlage" not in CS.ERSTLAUF:
+                fehler.append("Erstlauf-Hinweis sagt nicht, wie die Tabs "
+                              "entstehen")
+        if os.path.exists(nb):
+            z2 = "".join(zellen[6]["source"])
+            if "pipeline.py" in z2 and '"bereit"' not in z2:
+                fehler.append("Zelle 2 startet den Lauf ohne die "
+                              "Erstlauf-Pruefung")
+
         # Kein verwaistes Dokument. NEUES_BUCH.md lag ein halbes Jahr im
         # Repo, ohne dass irgendein anderes es erwaehnt haette — die
         # Datei, die man zuerst braucht, war die einzige unauffindbare.

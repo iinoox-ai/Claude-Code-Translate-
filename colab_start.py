@@ -232,7 +232,7 @@ def projektordner_richten(projekt, code=CODE):
 
     Eine vorhandene projekt.json wird NIE ueberschrieben — sie traegt die
     kalibrierten Pruefgrenzen des laufenden Projekts."""
-    meldungen = []
+    meldungen, erstlauf = [], False
     if not os.path.isdir(projekt):
         os.makedirs(projekt, exist_ok=True)
         meldungen.append(f"Projektordner neu angelegt: {projekt}")
@@ -250,6 +250,7 @@ def projektordner_richten(projekt, code=CODE):
         meldungen += _technik_melden(ziel, quelle)
     elif os.path.exists(quelle):
         shutil.copy2(quelle, ziel)
+        erstlauf = True
         meldungen.append(f"{G.CONFIG} aus {os.path.basename(quelle)} "
                          f"angelegt (Erstlauf).")
         meldungen.append(f"  Ab jetzt gilt {ziel} — "
@@ -275,26 +276,82 @@ def projektordner_richten(projekt, code=CODE):
         meldungen.append(f"{G.ANWEISUNGEN} als Vorlage kopiert — die drei "
                          f"Abschnitte sind leer und werden nach dem "
                          f"Testlauf gefuellt.")
-    return meldungen
+    return meldungen, erstlauf
 
 
 # ==================================================================
 def vorbereiten(projekt=PROJEKT_STANDARD, code=CODE, still=False):
     """Mountet Drive, aktualisiert das Repo, laedt Secrets, wechselt ins
-    Arbeitsverzeichnis. Gibt die Eckdaten als dict zurueck."""
+    Arbeitsverzeichnis. Gibt die Eckdaten als dict zurueck.
+
+    'bereit' im Rueckgabewert ist False, wenn projekt.json gerade erst
+    angelegt wurde. Dann ist noch nichts eingetragen — und die Zelle
+    darf den Lauf nicht starten (siehe erstlauf_hinweis)."""
     frisch = drive_mounten()
     zweig, commit, git_hinweis = repo_aktualisieren(code)
-    meldungen = projektordner_richten(projekt, code)
+    meldungen, erstlauf = projektordner_richten(projekt, code)
     meldungen.append(sdk_sicherstellen())
     schluessel = secrets_laden()
     os.chdir(projekt)
 
     stand = {"code": code, "arbeit": projekt, "zweig": zweig,
              "commit": commit, "drive_frisch_gemountet": frisch,
-             "schluessel": schluessel, "meldungen": meldungen}
+             "schluessel": schluessel, "meldungen": meldungen,
+             "erstlauf": erstlauf, "bereit": not erstlauf}
     if not still:
         bericht(stand, git_hinweis)
+        if erstlauf:
+            erstlauf_hinweis(projekt)
     return stand
+
+
+ERSTLAUF = """
+==============================================================
+  ERSTLAUF — projekt.json ist neu und noch leer
+==============================================================
+
+Der Lauf startet absichtlich NICHT. Was jetzt einzutragen ist, wird
+gleich zu Beginn gelesen: 'sheets_id' braucht die Vorbereitung, um die
+Referenzdaten ins Spreadsheet zu stellen, und 'rahmen_marker' entscheidet
+ueber die Chunkgrenzen. Beides nachtraeglich zu setzen heisst, die
+betroffenen Schritte zu wiederholen.
+
+  {ziel}
+
+Einzutragen:
+
+  sheets_id       Die ID aus der Adresse des Spreadsheets — der Teil
+                  zwischen '/d/' und '/edit'. Leer lassen heisst: die
+                  JSON-Dateien sind die Quelle, ohne Google.
+  rahmen_marker   Das Zeichen, mit dem der Autor die Erzaehlebenen
+                  auszeichnet. Steht keines im Text, leer lassen — die
+                  Vorbereitung erzeugt dann ebenen.json. Abschnitt 5a in
+                  NEUES_BUCH.md stellt die Frage ausfuehrlich.
+  modell_<rolle>  Nur, wenn dieses Buch von der Empfehlung abweichen soll.
+                  'pipeline.py modelle' stellt beides nebeneinander.
+
+Im Sheets-Betrieb ausserdem: Das Spreadsheet ist noch leer, und das ist
+richtig so. Die Tabs legt
+
+  colab_start.lauf("referenz_sync.py", "--vorlage", code=CODE)
+
+an; gefuellt werden sie von der Vorbereitung, nicht von Hand. Danach
+gehoert die Pflege ins Spreadsheet, nicht in die JSON-Dateien.
+
+Wenn das steht: Zelle 2 einfach noch einmal ausfuehren.
+"""
+
+
+def erstlauf_hinweis(projekt):
+    """Was beim Erstlauf einzutragen ist, bevor der erste Schritt laeuft.
+
+    Frueher legte die Zelle projekt.json an und startete den Lauf in
+    derselben Ausfuehrung. Damit gab es fuer ein neues Buch keinen
+    Zeitpunkt, zu dem sich 'sheets_id' eintragen liess: Die Datei entstand
+    und wurde im selben Atemzug benutzt. Wer den Sheets-Betrieb wollte,
+    merkte es erst, als die Vorbereitung die Referenzdaten schon in die
+    JSONs geschrieben hatte."""
+    print(ERSTLAUF.format(ziel=os.path.join(projekt, G.CONFIG)))
 
 
 def bericht(stand, git_hinweis=""):
