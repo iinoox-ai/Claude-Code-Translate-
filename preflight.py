@@ -2872,6 +2872,31 @@ installiert, requests-Pfad"
         # cwd=code meldete sie 'sichtbar', waehrend der Preflight im
         # Projektordner 'keine Anmeldung' bekam — die gruene Zelle zeigte
         # dreimal in die falsche Richtung.
+        # Die Probe muss ein NEIN auch als Nein lesen koennen. Sie konnte
+        # es wochenlang nicht:
+        #
+        #     'SICHTBAR' in 'UNSICHTBAR nur die Metadaten-Anmeldung'
+        #
+        # ist wahr. Jedes gruene 'Unterprozesse sehen die Anmeldung' war
+        # dieser Teilstring, die Bereitschaftspruefung von Zelle 2 setzte
+        # darauf auf, und zwei Fehlersuchen liefen an einer Messung
+        # entlang, die keine war.
+        class _R:
+            def __init__(s, t): s.stdout = t
+
+        faelle = [(CS2.ANTWORT_JA + " alles gut", True),
+                  (CS2.ANTWORT_NEIN + " nur die Metadaten-Anmeldung", False),
+                  ("UNSICHTBAR nur die Metadaten-Anmeldung der VM", False),
+                  ("", False), ("Traceback: irgendwas", False)]
+        for text, soll in faelle:
+            if CS2.probe_gut(_R(text)) is not soll:
+                fehler.append(f"Anmeldeprobe liest {text[:30]!r} falsch")
+        # Und keine Antwort darf in einer anderen stecken — das war der
+        # Fehler selbst, nicht nur seine Folge.
+        if CS2.ANTWORT_JA in CS2.ANTWORT_NEIN or \
+                CS2.ANTWORT_NEIN in CS2.ANTWORT_JA:
+            fehler.append("die Antworten der Probe enthalten einander")
+
         # Gefragt ist die Probe selbst, nicht die Datei: 'cwd=code' ist
         # fuer die git-Aufrufe daneben genau richtig.
         if "cwd=code" in inspect.getsource(CS2._anmeldeprobe):
@@ -2886,8 +2911,11 @@ installiert, requests-Pfad"
         if "anmeldung_exportieren()" not in quelle_an:
             fehler.append("sheets_anmelden reicht die Anmeldung nicht "
                           "weiter")
+        elif "probe_gut(" not in quelle_an:
+            fehler.append("sheets_anmelden liest die Probe nicht ueber "
+                          "probe_gut")
         elif quelle_an.index("anmeldung_exportieren()") > \
-                quelle_an.index('"SICHTBAR"'):
+                quelle_an.index("probe_gut("):
             fehler.append("Export haengt an der Probe — dann gilt die "
                           "Anmeldung nur im geprueften Ordner")
         # Und eine weitergereichte Benutzeranmeldung darf nicht als
