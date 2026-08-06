@@ -434,12 +434,24 @@ def main():
         print("  Vorhandene Daten wurden nicht ueberschrieben. Pruefen "
               "und von Hand uebernehmen.")
 
-    if R.aktiv(cfg):
-        print("\nsheets_id ist gesetzt — Uebertragung ins Spreadsheet:")
-        try:
-            R.erstbefuellung(cfg)
-        except R.SyncFehler as e:
-            print(f"  {e}")
+    # Der stille Zweig ist der gefaehrliche. Ohne diese Meldung sieht ein
+    # Lauf ohne Spreadsheet genauso aus wie einer mit — und wer eine
+    # sheets_id eingetragen zu haben glaubt, sucht den Fehler im
+    # Spreadsheet statt in projekt.json.
+    if not R.aktiv(cfg):
+        print(f"\nKein Spreadsheet: 'sheets_id' in {G.CONFIG} ist leer.")
+        print(f"  Die Referenzdaten oben liegen als JSON-Dateien in "
+              f"{os.getcwd()}")
+        print("  und werden dort gepflegt. War ein Spreadsheet gemeint, "
+              "gehoert die ID")
+        print(f"  in {G.CONFIG} — danach 'pipeline.py reset --ab "
+              "vorbereitung' und der Schritt laeuft erneut.")
+        return
+    print("\nsheets_id ist gesetzt — Uebertragung ins Spreadsheet:")
+    try:
+        R.erstbefuellung(cfg)
+    except R.SyncFehler as e:
+        print(f"  {e}")
 
 
 if __name__ == "__main__":
