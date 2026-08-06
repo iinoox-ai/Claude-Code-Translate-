@@ -248,6 +248,23 @@ wären eine zu viel.
 Wer Chunking anfasst, hält diese Regel und die zugehörigen Selbsttestfälle
 am Leben.
 
+## Die Chunkeinteilung kommt aus `gemeinsam.quellchunks`
+
+Der Lauf, die Leseausgabe und das Screening stellen Quelle und Fassung
+nebeneinander und müssen deshalb **dieselben** Chunks bekommen. Sie hatten
+drei Nachbauten, die gleich aussahen — bis Paket C den Lauf auf `ebenen.json`
+umstellte und die beiden Leser weiter nur den Rahmenmarker lasen. Danach stand
+überall der falsche Absatz neben dem falschen, und keine Spalte sah für sich
+falsch aus.
+
+`rahmen_gruppen` steht deshalb nur noch in `gemeinsam`; ein Selbsttest
+verbietet den direkten Aufruf in jedem anderen Skript. Die beiden Leser gehen
+über `quellchunks_wie_lauf()`: Sie nimmt `chunk_words` aus
+`uebersetzung_state.json` (nicht aus der aktuellen Konfiguration) und prüft
+die Chunkzahl gegen `total`. Weicht sie ab, **bricht der Schritt ab** —
+`ChunksWeichenAb`. Eine verschobene, aber ausgelieferte Leseausgabe ist
+schlimmer als gar keine.
+
 ## Annotation und Screening fassen den Text nicht an
 
 `annotation.py` läuft nach dem Lektorat und liefert zwei Berichte: eine Zeile
@@ -257,8 +274,40 @@ Spalte in `bericht.html`) und ein Screening über das ganze Buch
 
 **Der Schritt kann nicht editieren, nicht nur „soll nicht":** Jeder
 Schreibzugriff geht durch `annotation.schreiben()`, und die Funktion kennt
-genau zwei erlaubte Ziele. Wer das aufweicht, macht aus einem Bericht einen
-dritten Editierpass — und jeder Pass glättet.
+genau zwei erlaubte Ziele. Der einzige weitere Schreibweg ist
+`annotation.teil_schreiben()`, und der führt ausschließlich nach
+`teile/screening/`. Wer das aufweicht, macht aus einem Bericht einen dritten
+Editierpass — und jeder Pass glättet.
+
+**Das Screening verdichtet, merkt sich und meldet Lücken.** Gleichlautende
+Meldungen fallen im Bericht in eine Zeile (`muster()`); die bisherigen Muster
+gehen als Baustein in den **User-Prompt**, nie in den System-Prompt — der ist
+das zwischengespeicherte Präfix. Ein gescheitertes Bündel wird nicht mehr
+verschluckt: Die Chunknummern stehen im Bericht, und die fertigen Bündel
+liegen in `teile/screening/`, sodass ein erneuter Aufruf nur das Fehlende
+nachholt.
+
+## Stapelbetrieb: Wellen über Ketten
+
+`uebersetzung.py --stapel` läuft über die Stapel-API — halber Preis, aber ein
+Chunk sieht die Fassung des vorigen **nur innerhalb seiner Kette**. Deshalb
+Ketten: seriell innen, nebeneinander außen; je Welle ein Chunk jeder Kette in
+einem Stapel.
+
+- **Geschnitten wird zuerst an den Ebenenfugen** — dort setzt die Rückschau
+  ohnehin zurück, diese Schnitte kosten nichts. Erst `kette_max` erzwingt
+  weitere, und jeder davon ist eine Naht ohne Rückschau. Standard ist `0`.
+- **Der Quellschluss steht auch am Kettenanfang** (Original, hängt an keiner
+  Übersetzung) — **außer an der Ebenenfuge**, dort wäre er eine Irreführung.
+- **`stapel_payload()` ist ein Filter über `payload()`, kein zweiter Bauer.**
+  `STAPEL_VERBOTEN` nennt, was die API ablehnt; `fallbacks` ist dabei.
+- **Was der Stapel nicht liefert, holt der synchrone Weg** — und dort greift
+  der Ablehnungsrückfall dann doch.
+- Gebucht wird unter `…/stapel` mit `STAPEL_FAKTOR`; eine gemeinsame Zeile
+  wären Token zu zwei Preisen.
+
+`pipeline.py wellen` zeigt den Handel vor dem Lauf, `bewertung.py --fugen`
+misst ihn danach.
 
 ## Kosten sind Teil des Ergebnisses
 
@@ -440,8 +489,15 @@ Die Ausschlusslisten (`NICHT_DIMINUTIV`, `HOMOGRAPHEN`, `STOPP`) sind die
 Stellen, an denen bei einem neuen Text nachgebessert wird — nicht die Regeln
 selbst.
 
-## Ein neues Sprachpaar
+## Ein neues Buch, ein neues Sprachpaar
 
-Kopie mit ausgetauschten Sprachdaten. Was sich unterscheidet, steht in
-`SPRACHPAARE.md`; die Reihenfolge der Arbeit beginnt bei der Fehlerklasse und
-endet beim Code, nicht umgekehrt.
+**Buch:** `NEUES_BUCH.md` führt von der Textdatei bis zum Paket. Abschnitt 5a
+stellt die eine Frage, die jedes Buch beantworten muss — *wie sind die
+Erzählebenen ausgezeichnet?* Der Preflight meldet inzwischen, wenn der
+eingestellte `rahmen_marker` im Text nicht vorkommt; die Vorlage
+`projekt.json` im Repo nennt jede Einstellung ausdrücklich, damit sich
+keine mehr still entscheidet (Selbsttest hält beides fest).
+
+**Sprachpaar:** Kopie mit ausgetauschten Sprachdaten. Was sich unterscheidet,
+steht in `SPRACHPAARE.md`; die Reihenfolge der Arbeit beginnt bei der
+Fehlerklasse und endet beim Code, nicht umgekehrt.

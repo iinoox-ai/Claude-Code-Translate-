@@ -47,6 +47,11 @@ TEILE = {
     "uebersetzung": "teile/uebersetzung",
     "entwurf":      "teile/entwurf",
     "lektorat":     "teile/lektorat",
+    # Zwischenstand des Screenings. Kein Text des Buches, sondern die
+    # Befunde je Aufrufbuendel — abgelegt aus demselben Grund wie die
+    # Chunks: Ein Absturz bei Aufruf 30 von 37 soll nicht 30 Aufrufe
+    # kosten. Annotation darf nur hierher schreiben, sonst nirgends.
+    "screening":    "teile/screening",
 }
 
 
@@ -121,6 +126,15 @@ STANDARD = {
     "websuche_werkzeug":         "web_search_20260209",
     "websuche_filtern":          True,
     "websuche_max":              6,
+    # Stapelbetrieb ('uebersetzung.py --stapel'). Laengste Kette, die
+    # seriell bleibt. 0 heisst: nur an den Ebenenfugen trennen — dort
+    # setzt die Rueckschau ohnehin zurueck, diese Schnitte kosten nichts.
+    # Jeder weitere Schnitt ist eine Naht ohne deutsche Rueckschau; was
+    # sie wert ist, misst 'bewertung.py --fugen'. Die Vorgabe ist
+    # bewusst der Wert ohne Qualitaetskosten: Wer schneller fertig sein
+    # will, entscheidet das mit 'pipeline.py wellen' vor Augen.
+    "kette_max":                 0,
+    "stapel_takt":               20,      # Sekunden zwischen zwei Blicken
 
     "chunk_words":               800,
     "chunk_words_variante":      1200,      # Rueckfall, wenn 'varianten' leer ist
@@ -224,6 +238,7 @@ AENDERBAR = {
     "backend_standard", "max_tokens_api", "timeout_read_api", "cache_ttl",
     "sdk_nutzen", "streaming", "fallback_modelle",
     "websuche_werkzeug", "websuche_filtern", "websuche_max",
+    "kette_max", "stapel_takt",
 } | {f"modell_{r}" for r in ROLLEN} | {f"effort_{r}" for r in ROLLEN}
 
 
@@ -531,7 +546,8 @@ def empfehlung(rolle):
 # Abweichung, uebernommen wird sie nur auf ausdrueckliche Ansage.
 TECHNIK = ({"backend_standard", "max_tokens_api", "timeout_read_api",
             "cache_ttl", "sdk_nutzen", "streaming", "fallback_modelle",
-            "websuche_werkzeug", "websuche_filtern", "websuche_max"}
+            "websuche_werkzeug", "websuche_filtern", "websuche_max",
+            "stapel_takt"}
            | {f"modell_{r}" for r in ROLLEN}
            | {f"effort_{r}" for r in ROLLEN})
 
@@ -730,13 +746,19 @@ def lauf_name():
     return _LAUF
 
 
-def kosten_schluessel(lauf, rolle, modell):
-    """Buchungsschluessel. Drei Teile, damit der Leser sie ohne Doku trennt."""
-    return f"{lauf}/{rolle}/{modell}"
+def kosten_schluessel(lauf, rolle, modell, stapel=False):
+    """Buchungsschluessel. Die Teile sind mit '/' getrennt lesbar.
+
+    Der Stapel bekommt einen eigenen Schluessel, weil er einen eigenen
+    Tarif hat — die halben Preise. In derselben Zeile summiert waeren
+    Token zweier Preise, und die Zeile liesse sich nicht mehr rechnen.
+    Das ist derselbe Grund, aus dem der Schluessel ueberhaupt drei Teile
+    hat statt einem."""
+    return f"{lauf}/{rolle}/{modell}" + ("/stapel" if stapel else "")
 
 
-def usage_buchen(rolle, modell, usage):
-    """Summiert Token je (Lauf, Rolle, Modell) in manifest.json.
+def usage_buchen(rolle, modell, usage, stapel=False):
+    """Summiert Token je (Lauf, Rolle, Modell, Weg) in manifest.json.
 
     Nicht je Rolle allein: Wer eine Rolle einmal mit einem anderen Modell
     probiert, haette sonst die gesamte Rolle auf dieses Modell umetikettiert
@@ -748,9 +770,10 @@ def usage_buchen(rolle, modell, usage):
         if os.path.exists(MANIFEST):
             m = json.load(open(MANIFEST, encoding="utf-8"))
         k = m.setdefault("kosten", {})
-        e = k.setdefault(kosten_schluessel(_LAUF, rolle, modell),
+        e = k.setdefault(kosten_schluessel(_LAUF, rolle, modell, stapel),
                          dict({"lauf": _LAUF, "rolle": rolle,
-                               "modell": modell, "aufrufe": 0},
+                               "modell": modell, "aufrufe": 0,
+                               "stapel": bool(stapel)},
                               **dict.fromkeys(USAGE_FELDER, 0)))
         e["aufrufe"] += 1
         for feld in USAGE_FELDER:
@@ -810,13 +833,25 @@ CACHE_SCHREIB_FAKTOR_1H = 2.0
 # TARIFE — sonst muesste ihn jeder Modelleintrag wiederholen.
 SUCHE_DOLLAR = 0.010
 
+# Die Stapel-API rechnet alles zum halben Preis — Eingabe, Ausgabe und
+# Cache. Der Rabatt liegt auf dem Tarif, nicht auf einzelnen Posten;
+# deshalb ein Faktor am Ende und keine zweite Preisformel.
+STAPEL_FAKTOR = 0.5
+
+
 def kosten_dollar(e, t):
     """Preis einer Buchung. Eine Formel fuer alle Auswertungen.
 
     Zwei Formeln waren zwei Wahrheiten: die Variantenkosten in
-    bewertung.py liessen den Cache weg und lagen dadurch zu niedrig."""
+    bewertung.py liessen den Cache weg und lagen dadurch zu niedrig.
+
+    Ob die Buchung ueber den Stapel lief, steht in ihr selbst ('stapel')
+    — nicht im Tarif. Der Tarif gehoert dem Modell, der Rabatt dem Weg."""
     if not t:
         return None
+    if e.get("stapel"):
+        return kosten_dollar({k: v for k, v in e.items() if k != "stapel"},
+                             t) * STAPEL_FAKTOR
     # 'cache_schreiben' ist die Gesamtzahl; der Anteil mit einer Stunde
     # Lebensdauer steht daneben und kostet mehr.
     lang = int(e.get("cache_schreiben_1h", 0))
@@ -833,18 +868,21 @@ def kosten_posten(manifest):
     """Buchungen als (lauf, rolle, modell, werte), Buchproduktion zuerst.
 
     Liest auch das alte Format, in dem der Schluessel nur die Rolle war —
-    dort ist der Lauf unbekannt und bleibt leer, statt 'voll' zu behaupten."""
+    dort ist der Lauf unbekannt und bleibt leer, statt 'voll' zu behaupten.
+    Der vierte Teil '/stapel' unterscheidet den Weg; der Tarif dahinter
+    steht in der Buchung selbst, nicht im Schluessel."""
     raus = []
     for schluessel, e in (manifest or {}).get("kosten", {}).items():
         if not isinstance(e, dict) or schluessel.startswith("_"):
             continue
         teile = schluessel.split("/")
-        alt = len(teile) != 3
+        alt = len(teile) not in (3, 4)
         raus.append((e.get("lauf", "") if alt else teile[0],
                      e.get("rolle") or (schluessel if alt else teile[1]),
                      e.get("modell", "") if alt else teile[2],
                      e))
-    raus.sort(key=lambda x: (x[0] not in ("voll", ""), x[0], x[1], x[2]))
+    raus.sort(key=lambda x: (x[0] not in ("voll", ""), x[0], x[1], x[2],
+                             bool(x[3].get("stapel"))))
     return raus
 
 
@@ -1450,6 +1488,144 @@ class AnthropicBackend(Backend):
              "suchen": usage.get("suchen", 0)}
 
 
+# ==================================================================
+# Stapelverarbeitung (Paket G)
+# ==================================================================
+# Die Stapel-API rechnet zum halben Preis und arbeitet asynchron. Der
+# Preis dafuer ist nicht das Warten — die meisten Stapel sind in unter
+# einer Stunde fertig —, sondern dass ein Chunk die Fassung des
+# vorigen NICHT sehen kann, wenn beide im selben Stapel stehen. Deshalb
+# laeuft der Buchlauf in Wellen ueber Ketten; siehe 'ketten' weiter unten.
+#
+# Was die Stapel-API nicht annimmt, steht hier und nicht verstreut:
+STAPEL_VERBOTEN = ("stream", "fallbacks", "speed", "store",
+                   "previous_thread_event_id", "cache_hint", "context_hint")
+
+
+class StapelFehler(ApiFehler):
+    """Der Stapel selbst ist gescheitert — nicht ein einzelner Eintrag."""
+
+
+def stapel_payload(p):
+    """Ein Messages-Payload, wie die Stapel-API es annimmt.
+
+    Gebaut wird es weiter von 'payload()'. Hier faellt nur weg, was die
+    Stapel-API mit einem Validierungsfehler ablehnt — allen voran
+    'fallbacks': Der serverseitige Rueckfall ist auf diesem Weg nicht zu
+    haben, ein Stapeleintrag damit kommt als Fehler zurueck.
+
+    Zwei Payloadbauer waeren zwei Wahrheiten darueber, was rausgeht. Ein
+    Filter ist keiner."""
+    raus = {k: v for k, v in p.items() if k not in STAPEL_VERBOTEN}
+    # Mindestens ein Token, sonst weist die API den Eintrag ab.
+    raus["max_tokens"] = max(1, int(raus.get("max_tokens", 1)))
+    return raus
+
+
+def stapel_id_saeubern(roh):
+    """custom_id nach der Regel des Anbieters: ^[a-zA-Z0-9_-]{1,64}$.
+
+    Die Kennungen dieses Projekts sind Rolle und Chunknummer und damit
+    ohnehin harmlos — gesaeubert wird trotzdem, weil ein abgelehnter
+    Stapel erst nach dem Absenden auffaellt und dann alle Eintraege
+    kostet, nicht nur den einen."""
+    sauber = re.sub(r"[^A-Za-z0-9_-]", "-", str(roh))[:64]
+    return sauber or "x"
+
+
+class Stapel:
+    """Ein Stapel bei der Anthropic-Messages-Batches-API.
+
+    Drei Schritte, wie die API sie kennt: absenden, auf 'ended' warten,
+    Ergebnisse zeilenweise lesen. Beide Transportwege wie ueberall — die
+    SDK, wenn sie da ist, sonst 'requests'."""
+
+    URL = "https://api.anthropic.com/v1/messages/batches"
+
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.b = BACKENDS["anthropic"]
+        self.klient = self.b.klient(cfg)
+
+    def _kopf(self):
+        return {"x-api-key": api_schluessel("anthropic"),
+                "anthropic-version": self.b.VERSION,
+                "content-type": "application/json"}
+
+    def senden(self, anfragen):
+        """anfragen: [(custom_id, payload)] -> Stapelkennung."""
+        koerper = {"requests": [{"custom_id": stapel_id_saeubern(k),
+                                "params": stapel_payload(p)}
+                               for k, p in anfragen]}
+        if self.klient is not None:
+            try:
+                return self.klient.messages.batches.create(
+                    **koerper).model_dump()["id"]
+            except Exception as e:
+                raise sdk_fehler(anthropic_sdk(), e) from e
+        r = sende(lambda: requests.post(self.URL, json=koerper,
+                                        headers=self._kopf(),
+                                        timeout=(self.cfg["timeout_connect"],
+                                                 120)),
+                  self.cfg["max_retries"])
+        return r.json()["id"]
+
+    def stand(self, kennung):
+        """'in_progress' oder 'ended'."""
+        if self.klient is not None:
+            try:
+                d = self.klient.messages.batches.retrieve(
+                    kennung).model_dump()
+            except Exception as e:
+                raise sdk_fehler(anthropic_sdk(), e) from e
+        else:
+            r = sende(lambda: requests.get(f"{self.URL}/{kennung}",
+                                           headers=self._kopf(),
+                                           timeout=(
+                                               self.cfg["timeout_connect"],
+                                               60)),
+                      self.cfg["max_retries"])
+            d = r.json()
+        return d.get("processing_status", ""), d.get("request_counts") or {}
+
+    def ergebnisse(self, kennung):
+        """Ergibt (custom_id, art, antwort) je Eintrag.
+
+        'art' ist succeeded, errored, canceled oder expired. Nur bei
+        'succeeded' ist 'antwort' eine Nachricht; die anderen drei kosten
+        nichts und muessen wiederholt werden."""
+        if self.klient is not None:
+            try:
+                for e in self.klient.messages.batches.results(kennung):
+                    d = e.model_dump()
+                    yield (d.get("custom_id", ""),
+                           (d.get("result") or {}).get("type", ""),
+                           (d.get("result") or {}).get("message") or {})
+                return
+            except Exception as e:
+                raise sdk_fehler(anthropic_sdk(), e) from e
+        r = sende(lambda: requests.get(f"{self.URL}/{kennung}",
+                                       headers=self._kopf(),
+                                       timeout=(self.cfg["timeout_connect"],
+                                                60)),
+                  self.cfg["max_retries"])
+        url = r.json().get("results_url")
+        if not url:
+            raise StapelFehler(f"Stapel {kennung} hat keine Ergebnisdatei.")
+        antwort = sende(lambda: requests.get(url, headers=self._kopf(),
+                                             timeout=(
+                                                 self.cfg["timeout_connect"],
+                                                 600)),
+                        self.cfg["max_retries"])
+        for zeile in antwort.text.splitlines():
+            if not zeile.strip():
+                continue
+            d = json.loads(zeile)
+            yield (d.get("custom_id", ""),
+                   (d.get("result") or {}).get("type", ""),
+                   (d.get("result") or {}).get("message") or {})
+
+
 class GeminiBackend(Backend):
     """generateContent.
 
@@ -1807,7 +1983,11 @@ def varianten(cfg):
 VARIANTENSCHALTER = ({"chunk_words", "context_words", "context_words_voraus",
                       "rueckschau_quelle", "figuren_nachhall",
                       "revision_pass", "lektorat_passes", "tempus",
-                      "diminutive"}
+                      "diminutive",
+                      # 'kette_max' gehoert dazu, weil die Frage »was
+                      # kostet eine Naht ohne Rueckschau« nur am Text zu
+                      # beantworten ist — nicht am Preisschild.
+                      "kette_max"}
                      | {f"modell_{r}" for r in ROLLEN}
                      | {f"effort_{r}" for r in ROLLEN})
 
@@ -2097,6 +2277,191 @@ def ueberlaengen_melden(chunks, ziel, drucken=print):
             "Vorrang. Erwarte dort eher\n"
             "                    verworfene Laengenverhaeltnisse.")
     return lang
+
+
+def zitat_absaetze(zitate):
+    """Die Absaetze, die ausgeklammert werden — Zitat UND Attribution (F3)."""
+    raus = {}
+    for z in zitate:
+        raus[z["index"]] = z
+        if "index_attribution" in z:
+            raus[z["index_attribution"]] = None      # nur entfernen
+    return raus
+
+
+def ebenengruppen(cfg, paras, drucken=print):
+    """(Gruppen, Ebenennamen) — zwei Quellen, ebenen.json hat Vorrang.
+
+    Der 'rahmen_marker' setzt voraus, dass der Autor die Ebenenwechsel
+    ausgezeichnet hat. Beim Buch 1919 tat er das nicht: fuenf Ebenen im
+    Stilprofil, eine Gruppe ueber 147 Chunks. Die deutsche Rueckschau
+    lief damit ueber jeden Wechsel hinweg, und die buchweite Perfektquote
+    in qa.py konnte das gar nicht sehen.
+
+    Deshalb liest dieser Schritt zuerst ebenen.json. Ist sie da, benennt
+    sie die Gruppen; sonst gilt weiter der Marker. Beides gleichzeitig
+    waere eine Quelle zu viel — der Marker bleibt der Rueckfall, nicht
+    die zweite Meinung.
+
+    Die Funktion steht in gemeinsam und nicht in uebersetzung, weil drei
+    Schritte dieselbe Gruppierung brauchen: der Lauf, die Leseausgabe und
+    das Screening. Zwei Wege dorthin heissen fremde Absaetze
+    nebeneinander — und das sieht niemand, weil beide Spalten fuer sich
+    plausibel aussehen."""
+    ebenen = ebenen_lesen()
+    if ebenen:
+        anfaenge, unbekannt = ebenen_anfaenge(paras, ebenen)
+        for a in unbekannt:
+            drucken(f"    WARNUNG: ebenen.json — »{a}« kommt so nicht im "
+                    f"Text vor, Eintrag übersprungen")
+        if anfaenge:
+            gruppen, namen = ebenen_gruppen(paras, ebenen)
+            benannt = sorted({n for n in namen if n})
+            drucken(f"Erzählebenen:       {len(gruppen)} Abschnitte aus "
+                    f"{F['ebenen']} ({len(benannt)} Ebenen: "
+                    f"{', '.join(benannt)})")
+            return gruppen, namen
+        drucken(f"    WARNUNG: ebenen.json — kein Eintrag passt auf den "
+                f"Text, es gilt der Marker »{cfg['rahmen_marker']}«")
+
+    gruppen = rahmen_gruppen(paras, cfg["rahmen_marker"])
+    if len(gruppen) > 1:
+        drucken(f"Rahmenwechsel:      {len(gruppen)-1} an Marker "
+                f"»{cfg['rahmen_marker']}«")
+    else:
+        # Eine Gruppe ueber das ganze Buch heisst: Die Rueckschau laeuft
+        # ueber jeden Ebenenwechsel. Wenn das Stilprofil mehrere Ebenen
+        # kennt, ist das fast sicher falsch — und es faellt sonst
+        # nirgends auf.
+        p = lade_json(F["stilprofil"], still=True).get("perspektive")
+        if isinstance(p, dict) and len(p) > 1:
+            drucken(f"\nACHTUNG: {len(p)} Erzählebenen im Stilprofil, aber "
+                    f"keine einzige Fuge im Text.")
+            drucken(f"         Der Marker »{cfg['rahmen_marker']}« kommt "
+                    f"nicht vor, {F['ebenen']} fehlt oder ist leer.")
+            drucken(f"         Die deutsche Rückschau läuft damit über jeden "
+                    f"Ebenenwechsel hinweg —")
+            drucken(f"         Tempus und Person der einen Ebene bluten in "
+                    f"die andere.")
+            drucken("         Abhilfe: python3 vorbereitung.py "
+                    "--nur ebenen\n")
+    return gruppen, None
+
+
+def quellchunks(cfg, paras_alle, zitate, chunk_words, drucken=print):
+    """Die Chunkbildung des Laufs, an einer Stelle.
+
+    Gibt (marken, chunks, fugen, ebenen_je_chunk). Wer Quelle und Fassung
+    nebeneinanderstellt — Leseausgabe, Screening —, muss dieselben Chunks
+    bekommen wie der Lauf. Vorher stand die Bildung dreimal im Code, und
+    die drei Fassungen sind auseinandergelaufen: Der Lauf las seit August
+    2026 ebenen.json, die beiden Leser weiter nur den Rahmenmarker. Damit
+    verglich das Screening niederländischen Chunk 40 gegen deutschen
+    Chunk 43 und meldete Auslassungen, die keine waren."""
+    marken = zitat_absaetze(zitate)
+    rest = [p for i, p in enumerate(paras_alle) if i not in marken]
+    gruppen, namen = ebenengruppen(cfg, rest, drucken)
+    perspektive = lade_json(F["stilprofil"], still=True).get("perspektive")
+    if namen is not None:
+        ebenen = namen                       # aus ebenen.json benannt
+    else:
+        ebenen = ebenen_folge(gruppen, cfg["rahmen_marker"], perspektive)
+    chunks, fugen, je_chunk = [], set(), []
+    for gruppe, ebene in zip(gruppen, ebenen):
+        teil = chunks_bauen(gruppe, chunk_words)
+        if chunks:
+            fugen.add(len(chunks))
+        chunks.extend(teil)
+        je_chunk.extend([ebene] * len(teil))
+    return marken, chunks, fugen, je_chunk
+
+
+def ketten(n, fugen, kette_max):
+    """Die Chunks in Ketten, die nebeneinander laufen koennen.
+
+    Der Buchlauf ist seriell, und zwar aus einem Grund: Jeder Chunk sieht
+    die deutsche Fassung des vorigen. Ein Stapel kann das nicht — die
+    Eintraege werden gleichzeitig verarbeitet. Wer den ganzen Text in
+    einen Stapel legt, spart die Haelfte und wirft die Rueckschau weg;
+    das ist kein Handel, das ist ein anderes Verfahren.
+
+    Deshalb Ketten: Innerhalb einer Kette bleibt es seriell, die Ketten
+    laufen nebeneinander. Je Welle geht der naechste Chunk jeder Kette in
+    denselben Stapel.
+
+    Geschnitten wird zuerst an den Ebenenfugen. Dort setzt die Rueckschau
+    ohnehin zurueck — diese Schnitte kosten nichts. Erst wenn ein
+    Abschnitt laenger als 'kette_max' ist, wird zusaetzlich getrennt, und
+    jeder dieser Schnitte ist eine Naht ohne Rueckschau. Genau die misst
+    'bewertung.py --fugen'.
+
+    kette_max <= 0 heisst: nur an den Ebenenfugen trennen."""
+    grenzen = sorted({0, n} | {f for f in fugen if 0 < f < n})
+    raus = []
+    for a, e in zip(grenzen, grenzen[1:]):
+        laenge = e - a
+        if kette_max and kette_max > 0 and laenge > kette_max:
+            # Gleichmaessig aufteilen statt 'kette_max, kette_max, Rest':
+            # Eine Kette mit drei Chunks am Ende bestimmt die Zahl der
+            # Wellen genauso wie eine mit dreissig, und die kurze steht
+            # die meiste Zeit still.
+            teile = -(-laenge // kette_max)
+            schritt = -(-laenge // teile)
+            for s in range(a, e, schritt):
+                raus.append(list(range(s, min(s + schritt, e))))
+        else:
+            raus.append(list(range(a, e)))
+    return raus
+
+
+def wellen(kettenliste):
+    """Je Welle ein Chunk aus jeder Kette, die noch einen hat.
+
+    Die Welle ist der Stapel: Ihre Eintraege haengen nicht voneinander ab,
+    weil sie aus verschiedenen Ketten kommen."""
+    tiefe = max((len(k) for k in kettenliste), default=0)
+    return [[k[i] for k in kettenliste if i < len(k)] for i in range(tiefe)]
+
+
+def zusatzfugen(kettenliste, fugen):
+    """Kettenanfaenge, die keine Ebenenfuge sind — die bezahlten Nähte.
+
+    Der Anfang der ersten Kette zaehlt nicht: Dort faengt das Buch an."""
+    return sorted({k[0] for k in kettenliste if k and k[0] > 0}
+                  - set(fugen))
+
+
+class ChunksWeichenAb(Exception):
+    """Die nachgebauten Quellchunks passen nicht zum Lauf.
+
+    Kein Warnfall: Ab hier stuende in jedem Vergleich der falsche Absatz
+    neben dem falschen, und zwar unauffaellig. Lieber abbrechen."""
+
+
+def quellchunks_wie_lauf(cfg, praefix="", drucken=print):
+    """Die Quellchunks des abgeschlossenen Laufs, nachgebaut und geprueft.
+
+    'chunk_words' kommt aus dem Zustand des Laufs, nicht aus der aktuellen
+    Konfiguration: Wer die Chunkgroesse nach dem Lauf verstellt, bekaeme
+    sonst eine andere Einteilung als die, die uebersetzt wurde.
+
+    Die Zahl wird gegen 'total' geprueft. Diese Pruefung ist der eigentliche
+    Zweck der Funktion — eine abweichende Einteilung faellt sonst nirgends
+    auf, weil Quelle und Fassung jede fuer sich plausibel aussehen."""
+    st = lade_json(praefix + "uebersetzung_state.json", still=True)
+    total = int(st.get("total") or 0)
+    chunk_words = int(st.get("chunk_words") or cfg["chunk_words"])
+    paras = absaetze(open(F["quelle"], encoding="utf-8").read())
+    zitate = lade_json(F["zitate"], still=True).get("epigraphen", [])
+    marken, chunks, fugen, ebenen = quellchunks(cfg, paras, zitate,
+                                                chunk_words, drucken)
+    if total and len(chunks) != total:
+        raise ChunksWeichenAb(
+            f"{len(chunks)} nachgebaute Quellchunks, aber der Lauf hatte "
+            f"{total}.\n  Quelle, ebenen.json oder zitate.json haben sich "
+            f"seit dem Lauf geaendert.\n  Ein Vergleich stellte ab hier "
+            f"fremde Absaetze nebeneinander.")
+    return marken, chunks, fugen, ebenen
 
 
 def schlusswoerter(text, n):

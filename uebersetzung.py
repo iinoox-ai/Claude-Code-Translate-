@@ -425,56 +425,258 @@ def kapitel_zuordnen(chunks, kapitel):
     return zuordnung
 
 
-def ebenengruppen(cfg, paras):
-    """(Gruppen, Ebenennamen) — zwei Quellen, ebenen.json hat Vorrang.
+def stapel_warten(stapel, kennung, takt=20):
+    """Wartet, bis der Stapel 'ended' meldet. Gibt die Zaehlung zurueck.
 
-    Der 'rahmen_marker' setzt voraus, dass der Autor die Ebenenwechsel
-    ausgezeichnet hat. Beim Buch 1919 tat er das nicht: fuenf Ebenen im
-    Stilprofil, eine Gruppe ueber 147 Chunks. Die deutsche Rueckschau
-    lief damit ueber jeden Wechsel hinweg, und die buchweite Perfektquote
-    in qa.py konnte das gar nicht sehen.
+    Die Zeile bei jedem Blick ist kein Geschwaetz: In Colab haelt sie die
+    Sitzung wach, und ohne sie sieht eine halbe Stunde Warten aus wie ein
+    Absturz."""
+    t0 = time.time()
+    while True:
+        stand, zahlen = stapel.stand(kennung)
+        if stand == "ended":
+            return zahlen
+        offen = zahlen.get("processing", "?")
+        print(f"    Stapel {kennung[-8:]}: {offen} offen, "
+                f"{time.time()-t0:.0f}s", flush=True)
+        time.sleep(takt)
 
-    Deshalb liest dieser Schritt zuerst ebenen.json. Ist sie da, benennt
-    sie die Gruppen; sonst gilt weiter der Marker. Beides gleichzeitig
-    waere eine Quelle zu viel — der Marker bleibt der Rueckfall, nicht
-    die zweite Meinung."""
-    ebenen = G.ebenen_lesen()
-    if ebenen:
-        anfaenge, unbekannt = G.ebenen_anfaenge(paras, ebenen)
-        for a in unbekannt:
-            print(f"    WARNUNG: ebenen.json — »{a}« kommt so nicht im "
-                  f"Text vor, Eintrag übersprungen")
-        if anfaenge:
-            gruppen, namen = G.ebenen_gruppen(paras, ebenen)
-            benannt = sorted({n for n in namen if n})
-            print(f"Erzählebenen:       {len(gruppen)} Abschnitte aus "
-                  f"{G.F['ebenen']} ({len(benannt)} Ebenen: "
-                  f"{', '.join(benannt)})")
-            return gruppen, namen
-        print(f"    WARNUNG: ebenen.json — kein Eintrag passt auf den "
-              f"Text, es gilt der Marker »{cfg['rahmen_marker']}«")
 
-    gruppen = G.rahmen_gruppen(paras, cfg["rahmen_marker"])
-    if len(gruppen) > 1:
-        print(f"Rahmenwechsel:      {len(gruppen)-1} an Marker "
-              f"»{cfg['rahmen_marker']}«")
-    else:
-        # Eine Gruppe ueber das ganze Buch heisst: Die Rueckschau laeuft
-        # ueber jeden Ebenenwechsel. Wenn das Stilprofil mehrere Ebenen
-        # kennt, ist das fast sicher falsch — und es faellt sonst
-        # nirgends auf.
-        p = G.lade_json(G.F["stilprofil"], still=True).get("perspektive")
-        if isinstance(p, dict) and len(p) > 1:
-            print(f"\nACHTUNG: {len(p)} Erzählebenen im Stilprofil, aber "
-                  f"keine einzige Fuge im Text.")
-            print(f"         Der Marker »{cfg['rahmen_marker']}« kommt "
-                  f"nicht vor, {G.F['ebenen']} fehlt oder ist leer.")
-            print(f"         Die deutsche Rückschau läuft damit über jeden "
-                  f"Ebenenwechsel hinweg —")
-            print(f"         Tempus und Person der einen Ebene bluten in "
-                  f"die andere.")
-            print(f"         Abhilfe: python3 vorbereitung.py --nur ebenen\n")
-    return gruppen, None
+def stapel_runde(cfg, stapel, auftraege, rolle, system, takt=20):
+    """Eine Stapelrunde. auftraege: {kennung: user}. Gibt {kennung: text}.
+
+    Was nicht durchkommt, fehlt im Ergebnis — der Aufrufer holt es
+    einzeln nach. Das ist mehr als Aufraeumen: Ein abgelehnter Chunk kann
+    auf dem synchronen Weg von einem Ersatzmodell beantwortet werden,
+    'fallbacks' nimmt die Stapel-API naemlich nicht an."""
+    if not auftraege:
+        return {}
+    modell = G.modell_fuer(cfg, rolle)
+    b = G.BACKENDS["anthropic"]
+    anfragen = [(k, b.payload(cfg, system, u, rolle, modell))
+                for k, u in sorted(auftraege.items())]
+    kennung = stapel.senden(anfragen)
+    print(f"    Stapel {kennung[-8:]} abgeschickt: {len(anfragen)} "
+          f"{rolle}", flush=True)
+    stapel_warten(stapel, kennung, takt)
+    raus = {}
+    for kid, art, antwort in stapel.ergebnisse(kennung):
+        if art != "succeeded":
+            print(f"    {kid}: {art} — wird einzeln nachgeholt")
+            continue
+        try:
+            text, usage = b.antwort_lesen(antwort)
+        except G.ApiFehler as e:
+            print(f"    {kid}: {e}")
+            continue
+        # Gebucht unter dem Stapeltarif — halbe Preise. In derselben
+        # Zeile wie die synchronen Aufrufe waeren es Token zweier Preise.
+        G.usage_buchen(rolle, G.bedient_von(antwort, modell), usage,
+                       stapel=True)
+        raus[kid] = text
+    return raus
+
+
+def wellenlauf(cfg, L):
+    """Der Buchlauf ueber den Stapel, in Wellen. Gibt die Messwerte.
+
+    Innerhalb einer Kette bleibt alles wie im seriellen Lauf: Rueckschau,
+    Vorwegschau, Figurennachhall, Absatzpruefung. Was fehlt, ist die
+    deutsche Rueckschau am ANFANG jeder Kette — dort gab es keinen
+    Vorgaenger im selben Stapel. Der niederlaendische Quellschluss steht
+    trotzdem da: Er haengt an keiner Uebersetzung.
+
+    Was der Stapel nicht kann, holt der synchrone Weg: abgelehnte,
+    abgelaufene und fehlerhafte Eintraege laufen einzeln nach. Das ist
+    nicht nur Aufraeumen — auf dem synchronen Weg greift der
+    Ablehnungsrueckfall, den die Stapel-API nicht annimmt."""
+    chunks, fugen = L["chunks"], L["fugen"]
+    praefix, revision = L["praefix"], L["revision"]
+    n = len(chunks)
+    kmax = int(cfg.get("kette_max", 0) or 0)
+    kettenliste = G.ketten(n, fugen, kmax)
+    extra = G.zusatzfugen(kettenliste, fugen)
+    tiefe = max((len(k) for k in kettenliste), default=0)
+    breit = max((len(w) for w in G.wellen(kettenliste)), default=0)
+    print(f"Stapel:     {len(kettenliste)} Ketten, {tiefe} Wellen, "
+          f"breiteste {breit}")
+    print(f"            {len(extra)} zusätzliche Nähte ohne Rückschau "
+            f"(kette_max {kmax or '—'})")
+
+    stapel = G.Stapel(cfg)
+    voraus_n = int(cfg.get("context_words_voraus", 0) or 0)
+    nachhall_tiefe = int(cfg.get("figuren_nachhall", 0) or 0)
+    zustand = [{"letzte": "", "nachhall": []} for _ in kettenliste]
+    messwerte = []
+
+    for t in range(tiefe):
+        auftraege, ctx = {}, {}
+        for ki, kette in enumerate(kettenliste):
+            if t >= len(kette):
+                continue
+            i = kette[t]
+            z = zustand[ki]
+            quelle, geschuetzt = chunks[i]
+            if geschuetzt:
+                G.teil_schreiben("uebersetzung", i, quelle, praefix)
+                G.teil_schreiben("entwurf", i, quelle, praefix)
+                continue
+            if i in fugen:
+                z["letzte"] = ""
+                z["nachhall"].clear()
+            fertig = G.teil_lesen("uebersetzung", i, praefix)
+            if fertig is not None:
+                # Schon uebersetzt. Der Zustand der Kette muss trotzdem
+                # weiterlaufen, sonst faengt der naechste Chunk ohne
+                # Rueckschau an — der Resume kostete sonst Qualitaet.
+                z["letzte"] = G.schlusswoerter(fertig, cfg["context_words"])
+                if nachhall_tiefe:
+                    z["nachhall"].append(
+                        figuren_im_chunk(quelle, L["daten"]["personen"]))
+                    del z["nachhall"][:-nachhall_tiefe]
+                continue
+            erinnert = set().union(*z["nachhall"]) if z["nachhall"] else set()
+            kopf = referenzkopf(cfg, quelle, L["ebenen"][i],
+                                L["kapitelzeilen"][i], erinnert, L["daten"],
+                                L["perspektive"])
+            # Der Quellschluss steht auch am Kettenanfang zur Verfuegung:
+            # Er ist Original und haengt an keiner Uebersetzung. Nur die
+            # eigene Fassung fehlt dort.
+            vorher = (G.schlusswoerter(chunks[i-1][0], cfg["context_words"])
+                      if i > 0 and i not in fugen and not chunks[i-1][1]
+                      else "")
+            kid = f"ueb-{i:04d}"
+            auftraege[kid] = nutzerprompt(
+                kopf, quelle, vorher, z["letzte"],
+                vorwegschau(chunks, i, fugen, voraus_n))
+            ctx[kid] = (ki, i, kopf, quelle)
+
+        if not auftraege:
+            continue
+        print(f"\nWelle {t+1}/{tiefe}: {len(auftraege)} Chunks", flush=True)
+        entwuerfe = stapel_runde(cfg, stapel, auftraege, "uebersetzung",
+                                 L["p_ueb"])
+        # Was der Stapel nicht geliefert hat, einzeln nachholen.
+        for kid in sorted(set(auftraege) - set(entwuerfe)):
+            print(f"    {kid} einzeln …", flush=True)
+            try:
+                entwuerfe[kid] = G.chat(cfg, L["p_ueb"], auftraege[kid],
+                                        rolle="uebersetzung")
+            except Exception as e:
+                print(f"    {kid}: auch einzeln gescheitert — {e}")
+
+        rev_auftraege = {}
+        for kid, entwurf in sorted(entwuerfe.items()):
+            ki, i, kopf, quelle = ctx[kid]
+            r = G.verhaeltnis(quelle, entwurf)
+            if not entwurf or not (cfg["ratio_min"] <= r <= cfg["ratio_max"]):
+                print(f"    Chunk {i+1}: Verhältnis {r:.2f} übernommen")
+            if revision:
+                rev_auftraege[kid] = revisionsbody(
+                    kopf, quelle, entwurf, zustand[ki]["letzte"])
+
+        revisionen = (stapel_runde(cfg, stapel, rev_auftraege, "revision",
+                                   L["p_rev"]) if rev_auftraege else {})
+
+        for kid, entwurf in sorted(entwuerfe.items()):
+            ki, i, _, quelle = ctx[kid]
+            na = len(G.absaetze(quelle))
+            endfassung = entwurf
+            rev = revisionen.get(kid)
+            if rev:
+                r2 = G.verhaeltnis(quelle, rev)
+                n_rev = len(G.absaetze(rev))
+                if not (cfg["ratio_min"] <= r2 <= cfg["ratio_max"]):
+                    print(f"    Chunk {i+1}: Revision verworfen "
+                            f"({r2:.2f}x)")
+                elif n_rev != na:
+                    print(f"    Chunk {i+1}: Revision verworfen, "
+                            f"Absätze {na} -> {n_rev}")
+                else:
+                    endfassung = rev
+            nb = len(G.absaetze(endfassung))
+            if na != nb:
+                # Im seriellen Lauf wird hier wiederholt. In der Welle
+                # waere das eine zweite Runde fuer einen einzelnen Chunk —
+                # billiger und genauso richtig ist der synchrone Weg.
+                print(f"    Chunk {i+1}: Absätze {na} -> {nb}, "
+                        f"einzeln wiederholt")
+                try:
+                    endfassung = G.chat(cfg, L["p_ueb"], auftraege[kid],
+                                        rolle="uebersetzung")
+                except Exception as e:
+                    print(f"    Chunk {i+1}: Wiederholung gescheitert — {e}")
+            messwerte.append(G.verhaeltnis(quelle, endfassung))
+            G.teil_schreiben("entwurf", i, entwurf, praefix)
+            G.teil_schreiben("uebersetzung", i, endfassung, praefix)
+            rueck = (entwurf if cfg.get("rueckschau_quelle") == "entwurf"
+                     else endfassung)
+            zustand[ki]["letzte"] = G.schlusswoerter(rueck,
+                                                     cfg["context_words"])
+            if nachhall_tiefe:
+                zustand[ki]["nachhall"].append(
+                    figuren_im_chunk(quelle, L["daten"]["personen"]))
+                del zustand[ki]["nachhall"][:-nachhall_tiefe]
+        print(f"  Welle {t+1} fertig: {len(entwuerfe)} Chunks",
+              flush=True)
+    return messwerte
+
+
+def referenzkopf(cfg, quelle, ebene, kapitelzeile, erinnert, daten,
+                 perspektive):
+    """Die Referenzbloecke dieses Chunks, in fester Reihenfolge.
+
+    'daten' buendelt Glossar, Personen, Figurenblatt, Anrede, Leitmotive
+    und Kapitel — sechs Argumente, die immer zusammen gereicht werden.
+    Die Reihenfolge der Bloecke ist Prompt und nicht Geschmack: Wer sie
+    umsortiert, aendert den Prompt fuer jeden Chunk."""
+    return (block_ebene(ebene, perspektive)
+            + block_kapitel(kapitelzeile, daten["kapitel"])
+            + block_fallen(quelle, cfg)
+            + block_personen(quelle, daten["personen"], daten["figuren"],
+                             erinnert)
+            + block_glossar(quelle, daten["glossar"])
+            + block_anrede(quelle, daten["personen"], daten["anrede"])
+            + block_leitmotive(quelle, daten["leitmotive"]))
+
+
+def nutzerprompt(kopf, quelle, vorher, letzte, voraus):
+    """Der User-Prompt eines Uebersetzungschunks.
+
+    Die Reihenfolge traegt Bedeutung: Die Vorwegschau steht VOR dem
+    Auftrag, nicht dahinter. Was zuletzt im Prompt steht, liest ein
+    Modell als das, was zu tun ist — hinter dem Auftrag waere sie eine
+    Einladung, einfach weiterzuuebersetzen.
+
+    Die Funktion steht hier und nicht in der Schleife, weil zwei Wege sie
+    brauchen: der serielle Lauf und der Wellenlauf ueber den Stapel. Zwei
+    Montagen waeren zwei Prompts, und nur einer wuerde geprueft."""
+    user = kopf
+    if vorher:
+        user += ("=== ENDE DES VORIGEN ABSCHNITTS, ORIGINAL "
+                 "(nur Kontext) ===\n" + vorher + "\n\n")
+    if letzte:
+        user += ("=== ENDE DES VORIGEN ABSCHNITTS, DEINE ÜBERSETZUNG "
+                 "(nur Kontext, nicht wiederholen) ===\n" + letzte + "\n\n")
+    if voraus:
+        user += ("=== SO GEHT ES DANACH WEITER (nur Kontext, "
+                 "NICHT übersetzen) ===\n" + voraus + "\n\n")
+    return user + "=== ZU ÜBERSETZENDER TEXT ===\n" + quelle
+
+
+def revisionsbody(kopf, quelle, entwurf, letzte):
+    """Der User-Prompt der Revision.
+
+    Die Rueckschau gehoert auch hierher. Ohne sie glaettet Pass 2 genau
+    die Anschluesse weg, die Pass 1 muehsam hergestellt hat: Der Reviser
+    sieht sonst nur Quelle und Entwurf und weiss nicht, worauf der erste
+    Satz antwortet."""
+    body = kopf
+    if letzte:
+        body += ("=== ENDE DES VORIGEN ABSCHNITTS, DEINE ÜBERSETZUNG "
+                 "(nur Kontext, nicht wiederholen) ===\n" + letzte + "\n\n")
+    return (body + "=== NIEDERLÄNDISCHER AUSGANGSTEXT ===\n" + quelle
+            + "\n\n=== DEUTSCHER ENTWURF ===\n" + entwurf)
 
 
 def block_ebene(name, perspektive):
@@ -635,16 +837,6 @@ def testauszuege(paras, n_erzaehlung, n_dialog, n_fallen=0):
                                  "fallendichte": dichte3}
 
 
-def zitat_absaetze(zitate):
-    """Die Absaetze, die ausgeklammert werden — Zitat UND Attribution (F3)."""
-    raus = {}
-    for z in zitate:
-        raus[z["index"]] = z
-        if "index_attribution" in z:
-            raus[z["index_attribution"]] = None      # nur entfernen
-    return raus
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--test", action="store_true")
@@ -652,6 +844,10 @@ def main():
                     help="Name aus 'varianten' in projekt.json; A ist die "
                          "Basis und schreibt nach test/")
     ap.add_argument("--no-revision", action="store_true")
+    ap.add_argument("--stapel", action="store_true",
+                    help="ueber die Stapel-API in Wellen (halber Preis, "
+                         "zusaetzliche Naehte — 'pipeline.py wellen' zeigt "
+                         "den Plan)")
     ap.add_argument("--chunk", type=int, default=None,
                     help="nur diesen Chunk neu rechnen (1-basiert)")
     args = ap.parse_args()
@@ -703,30 +899,29 @@ def main():
         with open(praefix + "teile.json", "w", encoding="utf-8") as f:
             json.dump({"erzaehlung": len(t1), "dialog": len(t2),
                        "fallen": len(t3)}, f, ensure_ascii=False, indent=2)
+        # Der Testlauf schneidet Auszuege statt Erzaehlebenen; die
+        # Chunkbildung darunter ist dieselbe, nur ohne Ebenennamen.
+        G.lauf_setzen(praefix)
+        chunks, fugen, ebene_je_chunk = [], set(), []
+        for gruppe in gruppen:
+            teil = G.chunks_bauen(gruppe, chunk_words)
+            if chunks:
+                fugen.add(len(chunks))
+            chunks.extend(teil)
+            ebene_je_chunk.extend([""] * len(teil))
     else:
+        # Der Buchlauf und die beiden Leser (Leseausgabe, Screening)
+        # bauen ihre Quellchunks ueber DIESELBE Funktion. Zwei Wege
+        # dorthin sind auseinandergelaufen, sobald einer ebenen.json las
+        # und der andere nicht — und dann steht ueberall der falsche
+        # Absatz neben dem falschen, ohne dass es auffaellt.
         praefix = ""
-        marken = zitat_absaetze(zitate)
-        rest = [p for i, p in enumerate(paras_alle) if i not in marken]
-        gruppen, ebenen_namen = ebenengruppen(cfg, rest)
-
-    # Chunks je Gruppe; Fugen merken (Kontext dort zuruecksetzen)
-    G.lauf_setzen(praefix)
-    perspektive = G.lade_json(G.F["stilprofil"], still=True).get("perspektive")
-    if args.test:
-        ebenen = [""] * len(gruppen)
-    elif ebenen_namen is not None:
-        ebenen = ebenen_namen                    # aus ebenen.json benannt
-    else:
-        ebenen = G.ebenen_folge(gruppen, cfg["rahmen_marker"], perspektive)
-    chunks, fugen, ebene_je_chunk = [], set(), []
-    for gruppe, ebene in zip(gruppen, ebenen):
-        teil = G.chunks_bauen(gruppe, chunk_words)
-        if chunks:
-            fugen.add(len(chunks))
-        chunks.extend(teil)
-        ebene_je_chunk.extend([ebene] * len(teil))
+        G.lauf_setzen(praefix)
+        marken, chunks, fugen, ebene_je_chunk = G.quellchunks(
+            cfg, paras_alle, zitate, chunk_words)
 
     n = len(chunks)
+    perspektive = G.lade_json(G.F["stilprofil"], still=True).get("perspektive")
     G.ueberlaengen_melden(chunks, chunk_words)
     glossar = G.lade_json(G.F["glossar"])
     personen = G.lade_json(G.F["personen"])
@@ -734,6 +929,10 @@ def main():
     anrede = G.lade_json(G.F["anrede"])
     leitmotive = G.lade_json(G.F["leitmotive"])
     kapitel = G.lade_json(G.F["kapitel"], still=True)
+    # Die sechs Referenzdateien werden immer zusammen gereicht; als
+    # Buendel bleibt die Signatur von 'referenzkopf' lesbar.
+    daten = {"glossar": glossar, "personen": personen, "figuren": figuren,
+             "anrede": anrede, "leitmotive": leitmotive, "kapitel": kapitel}
     kapitel_je_chunk = kapitel_zuordnen(chunks, kapitel)
     p_ueb, p_rev = prompts(cfg)
     fingerprint = G.config_hash(cfg)
@@ -820,6 +1019,21 @@ def main():
     start = time.time()
     messwerte = []
 
+    if args.stapel and G.backend_name(m_ueb) != "anthropic":
+        sys.exit(f"FEHLER: {m_ueb} hat keine Stapel-API.\n"
+                 f"  Der Stapelbetrieb gilt nur fuer den Anthropic-Pfad; "
+                 f"ohne '--stapel' laeuft alles wie bisher.")
+    if args.stapel:
+        # Der Wellenlauf hat seinen eigenen Zustand je Kette und liest
+        # fertige Chunks selbst — 'zu_tun', 'letzte' und 'nachhall' oben
+        # gelten fuer den seriellen Weg.
+        messwerte = wellenlauf(cfg, {
+            "chunks": chunks, "fugen": fugen, "ebenen": ebene_je_chunk,
+            "kapitelzeilen": kapitel_je_chunk, "daten": daten,
+            "perspektive": perspektive, "p_ueb": p_ueb, "p_rev": p_rev,
+            "praefix": praefix, "revision": revision})
+        zu_tun = []
+
     for zaehler, i in enumerate(zu_tun, 1):
         quelle, geschuetzt = chunks[i]
         if geschuetzt:
@@ -845,29 +1059,10 @@ def main():
         for versuch in range(1, cfg["max_retries"] + 1):
             try:
                 erinnert = set().union(*nachhall) if nachhall else set()
-                kopf = (block_ebene(ebene_je_chunk[i], perspektive)
-                        + block_kapitel(kapitel_je_chunk[i], kapitel)
-                        + block_fallen(quelle, cfg)
-                        + block_personen(quelle, personen, figuren, erinnert)
-                        + block_glossar(quelle, glossar)
-                        + block_anrede(quelle, personen, anrede)
-                        + block_leitmotive(quelle, leitmotive))
-                user = kopf
-                if vorher:
-                    user += ("=== ENDE DES VORIGEN ABSCHNITTS, ORIGINAL "
-                             "(nur Kontext) ===\n" + vorher + "\n\n")
-                if letzte:
-                    user += ("=== ENDE DES VORIGEN ABSCHNITTS, DEINE "
-                             "ÜBERSETZUNG (nur Kontext, nicht wiederholen) "
-                             "===\n" + letzte + "\n\n")
-                # Die Vorwegschau steht VOR dem Auftrag, nicht dahinter:
-                # Was zuletzt im Prompt steht, liest ein Modell als das,
-                # was zu tun ist. Hinter dem Auftrag waere sie eine
-                # Einladung, weiterzuuebersetzen.
-                if voraus:
-                    user += ("=== SO GEHT ES DANACH WEITER (nur Kontext, "
-                             "NICHT übersetzen) ===\n" + voraus + "\n\n")
-                user += "=== ZU ÜBERSETZENDER TEXT ===\n" + quelle
+                kopf = referenzkopf(cfg, quelle, ebene_je_chunk[i],
+                                    kapitel_je_chunk[i], erinnert, daten,
+                                    perspektive)
+                user = nutzerprompt(kopf, quelle, vorher, letzte, voraus)
 
                 entwurf = G.chat(cfg, p_ueb, user, rolle="uebersetzung")
                 if not entwurf:
@@ -892,14 +1087,7 @@ def main():
                     # Pass 1 muehsam hergestellt hat: Der Reviser sieht
                     # nur Quelle und Entwurf und weiss nicht, worauf der
                     # erste Satz antwortet.
-                    body = kopf
-                    if letzte:
-                        body += ("=== ENDE DES VORIGEN ABSCHNITTS, DEINE "
-                                 "ÜBERSETZUNG (nur Kontext, nicht "
-                                 "wiederholen) ===\n" + letzte + "\n\n")
-                    body += ("=== NIEDERLÄNDISCHER AUSGANGSTEXT ===\n"
-                             + quelle + "\n\n"
-                             + "=== DEUTSCHER ENTWURF ===\n" + entwurf)
+                    body = revisionsbody(kopf, quelle, entwurf, letzte)
                     rev = G.chat(cfg, p_rev, body, rolle="revision")
                     r2 = G.verhaeltnis(quelle, rev)
                     # Die Revision wird verworfen, wenn sie das Verhaeltnis

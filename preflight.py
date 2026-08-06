@@ -52,6 +52,12 @@ def _glob_py():
     return glob.glob(os.path.join(CODE, "*.py"))
 
 
+def _glob_md():
+    """Alle Dokumente im CODE-Verzeichnis, mit Pfad."""
+    import glob
+    return sorted(glob.glob(os.path.join(CODE, "*.md")))
+
+
 def quelltext(name):
     """Eine Datei aus dem CODE-Verzeichnis, nie relativ zum Arbeitsordner."""
     return open(os.path.join(CODE, name), encoding="utf-8").read()
@@ -1324,6 +1330,339 @@ installiert, requests-Pfad"
     except Exception as e:
         b.add("FEHLER", "Rueckfall nicht pruefbar", repr(e))
 
+    # --- Die Vorlage im Repo nennt jede Einstellung -------------------
+    # Ein Schluessel, der nur in STANDARD steht, entscheidet sich still:
+    # Wer eine projekt.json fuer ein neues Buch durchsieht, sieht ihn gar
+    # nicht. Genau so stand 'rahmen_marker' unsichtbar auf '#', waehrend
+    # der Autor von 1919 ihn nie benutzt hat.
+    try:
+        fehler = []
+        vorlage = json.load(open(os.path.join(CODE, G.CONFIG),
+                                 encoding="utf-8"))
+        fehlt = sorted(k for k in G.STANDARD if k not in vorlage)
+        if fehlt:
+            fehler.append(f"nicht in der Vorlage: {', '.join(fehlt)}")
+        # Umgekehrt: was die Vorlage nennt, muss es auch geben.
+        unbekannt = sorted(k for k in vorlage
+                           if not k.startswith("_") and k not in G.STANDARD)
+        if unbekannt:
+            fehler.append(f"Vorlage nennt Unbekanntes: "
+                          f"{', '.join(unbekannt)}")
+        # Die Schluessel, die ein neues Buch wirklich entscheiden muss,
+        # brauchen einen Hinweis daneben — sonst liest sie niemand.
+        hinweise = " ".join(str(v) for k, v in vorlage.items()
+                            if k.startswith("_"))
+        for wort in ("rahmen_marker", "ebenen.json", "NEUES_BUCH.md"):
+            if wort not in hinweise:
+                fehler.append(f"Vorlage erklaert '{wort}' nicht")
+        # Und der Preflight muss melden, wenn der eingestellte Marker im
+        # Text gar nicht vorkommt. Das ist die eine Zeile, die den Lauf
+        # 1919 verhindert haette.
+        class _Sammler:
+            def __init__(s): s.zeilen = []
+
+            def abschnitt(s, t): pass
+
+            def add(s, art, t, d=""): s.zeilen.append((art, t))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alt_cwd = os.getcwd()
+            try:
+                os.chdir(tmp)
+                paras = [f"Zin {i} met genoeg woorden hier om te tellen."
+                         for i in range(1, 30)]
+                probe = dict(cfg, rahmen_marker="#")
+                for text, erwartet, was in (
+                        ("\n\n".join(paras), "WARN", "fehlender Marker"),
+                        ("\n\n".join(paras[:5] + ["#"] + paras[5:]), "OK",
+                         "vorhandener Marker")):
+                    open(G.F["quelle"], "w", encoding="utf-8").write(text)
+                    s = _Sammler()
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        pruefe_text(probe, s)
+                    treffer = [a for a, t in s.zeilen if "ahmenmarker" in t]
+                    if treffer != [erwartet]:
+                        fehler.append(f"{was}: {treffer} statt "
+                                      f"['{erwartet}']")
+            finally:
+                os.chdir(alt_cwd)
+
+        # Kein verwaistes Dokument. NEUES_BUCH.md lag ein halbes Jahr im
+        # Repo, ohne dass irgendein anderes es erwaehnt haette — die
+        # Datei, die man zuerst braucht, war die einzige unauffindbare.
+        docs = [os.path.basename(p) for p in _glob_md()]
+        texte = {d: quelltext(os.path.join(CODE, d)) for d in docs}
+        # Gefragt ist, ob ein ANDERES Dokument darauf zeigt — der eigene
+        # Text zaehlt nicht. Die drei Einstiege zeigen auf die anderen,
+        # nicht umgekehrt, und sind deshalb ausgenommen.
+        verwaist = [d for d in docs
+                    if d not in ("README.md", "CLAUDE.md",
+                                 "ENTSCHEIDUNGEN.md")
+                    and not any(d in t for k, t in texte.items() if k != d)]
+        if verwaist:
+            fehler.append(f"von keinem anderen Dokument erwaehnt: "
+                          f"{', '.join(verwaist)}")
+
+        if fehler:
+            b.add("FEHLER", "Vorlage projekt.json unvollstaendig",
+                  "; ".join(fehler))
+        else:
+            b.add("OK", f"Vorlage projekt.json nennt alle "
+                        f"{len(G.STANDARD)} Einstellungen, "
+                        f"{len(docs)} Dokumente sind verlinkt")
+    except Exception as e:
+        b.add("FEHLER", "Vorlage nicht pruefbar", repr(e))
+
+    # --- Stapelbetrieb: Ketten, Wellen, halber Tarif -------------------
+    # Der Stapel rechnet zum halben Preis und kann genau eines nicht: Ein
+    # Chunk sieht die Fassung des vorigen nicht, wenn beide im selben
+    # Stapel liegen. Ketten halten das aufrecht; was hier schiefgeht,
+    # kostet keine Fehlermeldung, sondern die Anschluesse im ganzen Buch.
+    try:
+        fehler = []
+
+        # Ketten decken den Text genau einmal ab und schneiden zuerst an
+        # den Ebenenfugen — dort setzt die Rueckschau ohnehin zurueck.
+        kl = G.ketten(20, {10}, 5)
+        flach = [i for k in kl for i in k]
+        if flach != list(range(20)):
+            fehler.append(f"Ketten decken den Text nicht genau einmal ab: "
+                          f"{flach}")
+        if [k[0] for k in kl] != [0, 5, 10, 15]:
+            fehler.append(f"Kettenanfaenge falsch: {[k[0] for k in kl]}")
+        if G.zusatzfugen(kl, {10}) != [5, 15]:
+            fehler.append(f"bezahlte Naehte falsch gezaehlt: "
+                          f"{G.zusatzfugen(kl, {10})}")
+        # kette_max 0: nur die Ebenenfugen, also keine bezahlte Naht.
+        if G.zusatzfugen(G.ketten(20, {10}, 0), {10}):
+            fehler.append("kette_max 0 erzeugt trotzdem bezahlte Naehte")
+        if [len(k) for k in G.ketten(20, {10}, 0)] != [10, 10]:
+            fehler.append("kette_max 0 trennt nicht an der Ebenenfuge")
+        # Gleichmaessig teilen: eine Restkette mit einem Chunk bestimmt
+        # die Wellenzahl genauso wie eine volle und stuende sonst still.
+        laengen = [len(k) for k in G.ketten(11, set(), 10)]
+        if max(laengen) - min(laengen) > 1:
+            fehler.append(f"Ketten ungleich lang: {laengen}")
+        w = G.wellen(kl)
+        if len(w) != 5 or sorted(i for x in w for i in x) != list(range(20)):
+            fehler.append(f"Wellen decken den Text nicht ab: {w}")
+
+        # Was die Stapel-API ablehnt, darf gar nicht erst hinausgehen.
+        b_a = G.AnthropicBackend()
+        roh = b_a.payload(dict(cfg, fallback_modelle="default"),
+                          "S", "U", "uebersetzung", "claude-opus-5")
+        gefiltert = G.stapel_payload(dict(roh, stream=True))
+        for k in ("fallbacks", "stream"):
+            if k in gefiltert:
+                fehler.append(f"'{k}' geht in den Stapel")
+        if gefiltert.get("model") != "claude-opus-5" \
+                or "system" not in gefiltert:
+            fehler.append("Stapelpayload verliert den eigentlichen Inhalt")
+        if G.stapel_payload({"max_tokens": 0})["max_tokens"] != 1:
+            fehler.append("max_tokens 0 wird nicht angehoben")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}",
+                            G.stapel_id_saeubern("ueb/0007 äöü")):
+            fehler.append("custom_id entspricht nicht der Anbieterregel")
+
+        # Halber Tarif, und zwar als eigene Buchungszeile.
+        t = {"ein": 5.0, "aus": 25.0, "geprueft": True}
+        posten = {"ein": 1000000, "aus": 0}
+        if abs(G.kosten_dollar(dict(posten, stapel=True), t)
+               - G.kosten_dollar(posten, t) * 0.5) > 1e-9:
+            fehler.append("Stapeltarif ist nicht der halbe Preis")
+        if G.kosten_schluessel("voll", "uebersetzung", "m", True) == \
+                G.kosten_schluessel("voll", "uebersetzung", "m"):
+            fehler.append("Stapel und synchron teilen sich eine Zeile")
+
+        # Und der Wellenlauf am kleinen Text: Was innerhalb einer Kette
+        # steht, bekommt die eigene Rueckschau; ein Kettenanfang nicht —
+        # wohl aber den niederlaendischen Quellschluss, der an keiner
+        # Uebersetzung haengt. Das ist der ganze Unterschied zum
+        # seriellen Lauf, und er muss genau so gross sein.
+        import uebersetzung as U_
+        with tempfile.TemporaryDirectory() as tmp:
+            alt_cwd, alt_stapel, alt_chat = os.getcwd(), G.Stapel, G.chat
+            try:
+                os.chdir(tmp)
+                paras = [f"Zin {i} met genoeg woorden om te tellen hier."
+                         for i in range(1, 41)]
+                open(G.F["quelle"], "w", encoding="utf-8").write(
+                    "\n\n".join(paras))
+                json.dump([{"beginn": "Zin 1 met", "ebene": "Rahmen"},
+                           {"beginn": "Zin 21 met", "ebene": "Binnen"}],
+                          open(G.F["ebenen"], "w", encoding="utf-8"))
+                probe = dict(cfg, chunk_words=20, kette_max=5,
+                             revision_pass=False, stapel_takt=0,
+                             modell_uebersetzung="claude-opus-5")
+                gesendet, einzeln = [], []
+
+                def _uebersetzt(user):
+                    roh = user.split(
+                        "=== ZU ÜBERSETZENDER TEXT ===")[-1].strip()
+                    return "\n\n".join(p.replace("Zin", "Satz")
+                                       for p in G.absaetze(roh))
+
+                class _Stapel:
+                    def __init__(s, cfg_): pass
+
+                    def senden(s, anfragen):
+                        gesendet.append(anfragen)
+                        return f"b{len(gesendet):04d}"
+
+                    def stand(s, k): return "ended", {}
+
+                    def ergebnisse(s, k):
+                        for cid, p in gesendet[int(k[1:]) - 1]:
+                            # Ein Eintrag je Welle laeuft ins Leere — der
+                            # synchrone Weg muss ihn auffangen.
+                            if cid.endswith("0005"):
+                                yield cid, "expired", {}
+                                continue
+                            u = p["messages"][0]["content"]
+                            yield cid, "succeeded", {
+                                "content": [{"type": "text",
+                                             "text": _uebersetzt(u)}],
+                                "stop_reason": "end_turn", "usage": {}}
+                G.Stapel = _Stapel
+                G.chat = lambda c, s_, u, **k: (einzeln.append(u)
+                                                or _uebersetzt(u))
+                _, chunks, fugen, ebenen = G.quellchunks(
+                    probe, paras, [], 20, drucken=lambda *a: None)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    U_.wellenlauf(probe, {
+                        "chunks": chunks, "fugen": fugen, "ebenen": ebenen,
+                        "kapitelzeilen": [""] * len(chunks),
+                        "daten": {"glossar": {}, "personen": {},
+                                  "figuren": {}, "anrede": {},
+                                  "leitmotive": {}, "kapitel": {}},
+                        "perspektive": None, "p_ueb": "S", "p_rev": "S",
+                        "praefix": "", "revision": False})
+
+                erste = dict(gesendet[0])
+                if sorted(erste) != ["ueb-0000", "ueb-0005", "ueb-0010",
+                                     "ueb-0015"]:
+                    fehler.append(f"erste Welle falsch besetzt: "
+                                  f"{sorted(erste)}")
+                for cid in erste:
+                    u = erste[cid]["messages"][0]["content"]
+                    if "DEINE ÜBERSETZUNG" in u:
+                        fehler.append(f"{cid}: Kettenanfang hat eine "
+                                      f"Rueckschau, die es nicht geben kann")
+                # Chunk 5 ist eine bezahlte Naht, keine Ebenenfuge: Der
+                # Quellschluss steht dort trotzdem zur Verfuegung.
+                if "ORIGINAL (nur Kontext)" not in \
+                        erste["ueb-0005"]["messages"][0]["content"]:
+                    fehler.append("bezahlte Naht bekommt nicht einmal den "
+                                  "Quellschluss")
+                # Chunk 10 ist die Ebenenfuge — dort ist auch der
+                # Quellschluss falsch, die Ebene wechselt.
+                if "ORIGINAL (nur Kontext)" in \
+                        erste["ueb-0010"]["messages"][0]["content"]:
+                    fehler.append("an der Ebenenfuge blutet der Quellkontext "
+                                  "in die naechste Ebene")
+                zweite = dict(gesendet[1])
+                if "DEINE ÜBERSETZUNG" not in \
+                        zweite["ueb-0001"]["messages"][0]["content"]:
+                    fehler.append("innerhalb der Kette fehlt die Rueckschau")
+                if len(einzeln) != 1:
+                    fehler.append(f"abgelaufener Eintrag nicht einzeln "
+                                  f"nachgeholt: {len(einzeln)}")
+
+                ganz = G.teile_zusammensetzen("uebersetzung", len(chunks))
+                z = G.absaetze(ganz or "")
+                if len(z) != len(paras) or any(
+                        a.replace("Zin", "Satz") != c
+                        for a, c in zip(paras, z)):
+                    fehler.append(f"Wellenlauf paart falsch: {len(z)} von "
+                                  f"{len(paras)} Absätzen")
+
+                # Resume: ein zweiter Durchgang schickt nichts mehr los,
+                # weil alle Teile vorliegen.
+                vorher = len(gesendet)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    U_.wellenlauf(probe, {
+                        "chunks": chunks, "fugen": fugen, "ebenen": ebenen,
+                        "kapitelzeilen": [""] * len(chunks),
+                        "daten": {"glossar": {}, "personen": {},
+                                  "figuren": {}, "anrede": {},
+                                  "leitmotive": {}, "kapitel": {}},
+                        "perspektive": None, "p_ueb": "S", "p_rev": "S",
+                        "praefix": "", "revision": False})
+                if len(gesendet) != vorher:
+                    fehler.append("Resume schickt fertige Chunks erneut los")
+            finally:
+                G.Stapel, G.chat = alt_stapel, alt_chat
+                os.chdir(alt_cwd)
+
+        if fehler:
+            b.add("FEHLER", "Stapelbetrieb fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Ketten schneiden an den Ebenenfugen, Wellen decken "
+                        "den Text, Stapel zahlt den halben Tarif")
+    except Exception as e:
+        b.add("FEHLER", "Stapelbetrieb nicht pruefbar", repr(e))
+
+    # --- Eine Quelle fuer die Chunkeinteilung --------------------------
+    # Drei Schritte stellen Quelle und Fassung nebeneinander: der Lauf,
+    # die Leseausgabe und das Screening. Sie hatten drei Nachbauten der
+    # Chunkbildung, die gleich aussahen — bis der Lauf ebenen.json las
+    # und die beiden anderen weiter nur den Rahmenmarker. Danach stand
+    # ueberall der falsche Absatz neben dem falschen, und keine der
+    # beiden Spalten sah fuer sich falsch aus.
+    try:
+        fehler = []
+        # 'rahmen_gruppen' ist der Rueckfallpfad und gehoert nur noch
+        # nach gemeinsam. Wer ihn direkt ruft, umgeht ebenen.json.
+        drin = sorted(os.path.basename(n) for n in _glob_py()
+                      if "rahmen_gruppen(" in quelltext(n)
+                      and os.path.basename(n) not in ("gemeinsam.py",
+                                                      "preflight.py"))
+        if drin:
+            fehler.append(f"eigener Nachbau der Gruppierung in "
+                          f"{', '.join(drin)}")
+
+        # Und die Einteilung folgt ebenen.json, wo es sie gibt.
+        paras = ["Erster Absatz der Rahmenebene, lang genug zum Zaehlen.",
+                 "Zweiter Absatz derselben Ebene, ebenfalls lang genug.",
+                 "Hier beginnt die Binnenerzaehlung mit eigenen Woertern.",
+                 "Und sie geht hier noch ein Stueck weiter, mit Worten."]
+        with tempfile.TemporaryDirectory() as tmp:
+            alt_cwd = os.getcwd()
+            try:
+                os.chdir(tmp)
+                probe = dict(cfg, chunk_words=6, rahmen_marker="#")
+                json.dump([{"beginn": "Erster Absatz der",
+                            "ebene": "Rahmen"},
+                           {"beginn": "Hier beginnt die",
+                            "ebene": "Binnen"}],
+                          open(G.F["ebenen"], "w", encoding="utf-8"))
+                _, chunks, fugen, ebenen = G.quellchunks(
+                    probe, paras, [], 6, drucken=lambda *a: None)
+                if set(ebenen) != {"Rahmen", "Binnen"}:
+                    fehler.append(f"Ebenen kommen nicht aus ebenen.json: "
+                                  f"{ebenen}")
+                if not fugen:
+                    fehler.append("keine Fuge an der Ebenengrenze")
+                # Ohne ebenen.json gilt wieder der Marker — der Rueckfall
+                # bleibt, er ist nur nicht mehr die zweite Meinung.
+                os.remove(G.F["ebenen"])
+                _, _, ohne, _ = G.quellchunks(
+                    probe, paras, [], 6, drucken=lambda *a: None)
+                if ohne:
+                    fehler.append("ohne Marker und ohne ebenen.json "
+                                  "entsteht trotzdem eine Fuge")
+            finally:
+                os.chdir(alt_cwd)
+
+        if fehler:
+            b.add("FEHLER", "Chunkeinteilung laeuft auseinander",
+                  "; ".join(fehler))
+        else:
+            b.add("OK", "Lauf, Leseausgabe und Screening teilen den Text "
+                        "ueber dieselbe Funktion ein")
+    except Exception as e:
+        b.add("FEHLER", "Chunkeinteilung nicht pruefbar", repr(e))
+
     # --- Ueberlaengen: gezaehlt, nicht gekappt -------------------------
     # Kappen waere die naheliegende Reaktion und die falsche: Ein Absatz
     # gehoert zusammen, ein geschuetztes Zitat erst recht. Was bleibt, ist
@@ -1640,6 +1979,46 @@ installiert, requests-Pfad"
         if k1 == A.kennung(8, "Wort", "lief", "ging"):
             fehler.append("Kennung unterscheidet Chunks nicht")
 
+        # Eine Liste mit GENAU EINEM Objekt muss eine Liste bleiben. Vorher
+        # lag die geschweifte Klammer innerhalb der eckigen, der Parser
+        # probierte sie zuerst und lieferte das Objekt — der Aufrufer
+        # erwartet eine Liste und verwarf es. Jeder Befund, der allein in
+        # seinem Buendel stand, ging so verloren.
+        einer = A.json_lesen('[{"chunk": 3, "art": "x", "befund": "y"}]')
+        if not isinstance(einer, list) or len(einer) != 1:
+            fehler.append(f"einzelner Befund geht verloren: {einer!r}")
+        if not isinstance(A.json_lesen('[{"a":1},{"b":2}]'), list):
+            fehler.append("Liste mit zwei Objekten wird nicht gelesen")
+        if not isinstance(A.json_lesen('```json\n{"a": 1}\n```'), dict):
+            fehler.append("Objekt im Codezaun wird nicht gelesen")
+
+        # Gleichlautende Meldungen fallen im Bericht zusammen. Ein
+        # wiederkehrender falscher Freund erzeugt sonst 37 Zeilen, und in
+        # eine solche Liste sieht niemand mehr hinein.
+        wieder = [{"chunk": 4, "art": "falscher Freund",
+                   "befund": "»lopen« als »laufen«"},
+                  {"chunk": 40, "art": "Falscher Freund ",
+                   "befund": "»lopen« als »laufen«."},
+                  {"chunk": 7, "art": "Auslassung", "befund": "Satz fehlt"}]
+        if len({A.muster(x) for x in wieder}) != 2:
+            fehler.append("gleichlautende Meldungen fallen nicht zusammen")
+        # Aber nur woertlich Gleiches. Aehnliches zu verschmelzen hiesse
+        # raten, und ein verschmolzener Befund verschwindet ungesehen.
+        if A.muster({"art": "a", "befund": "»lopen« als »rennen«"}) == \
+                A.muster({"art": "a", "befund": "»lopen« als »laufen«"}):
+            fehler.append("verschiedene Befunde werden verschmolzen")
+
+        # Das Gedaechtnis gehoert in den User-Prompt. Im System-Prompt
+        # waere es ein wachsendes Praefix und zerstoerte bei jedem Aufruf
+        # die Cache-Trefferquote.
+        g = A.gedaechtnis(wieder)
+        if "»lopen«" not in g:
+            fehler.append("Gedaechtnis nennt die bisherigen Muster nicht")
+        if "BEREITS GEMELDET" in A.SYSTEM_SCREENING:
+            fehler.append("Gedaechtnis steht im System-Prompt")
+        if A.gedaechtnis([]) != "":
+            fehler.append("leeres Gedaechtnis erzeugt trotzdem einen Block")
+
         # Und der Bericht zeigt die Begruendung genau dann, wenn es eine
         # gibt — dieselbe Kennung auf beiden Seiten.
         html_mit = D.fmt_html("Wort", 7, "Stil", "er", "lief", "ging", "los",
@@ -1648,6 +2027,96 @@ installiert, requests-Pfad"
             fehler.append("Begruendung erscheint nicht im HTML-Bericht")
         if "grund" in D.fmt_html("Typografie", 1, "det", "a", "-", "–", "b"):
             fehler.append("leere Begruendung erzeugt trotzdem eine Spalte")
+
+        # Resume, Luecken und dieselbe Chunkeinteilung wie der Lauf.
+        with tempfile.TemporaryDirectory() as tmp:
+            alt_cwd, alt_chat = os.getcwd(), G.chat
+            try:
+                os.chdir(tmp)
+                quelle = [f"Alinea {i} met genoeg woorden erin om te tellen."
+                          for i in range(1, 13)]
+                open(G.F["quelle"], "w", encoding="utf-8").write(
+                    "\n\n".join(quelle))
+                probe = dict(cfg, chunk_words=8, rahmen_marker="#")
+                _, ch, _, _ = G.quellchunks(
+                    probe, G.absaetze("\n\n".join(quelle)), [], 8,
+                    drucken=lambda *a: None)
+                for i, (t, _) in enumerate(ch):
+                    G.teil_schreiben("uebersetzung", i,
+                                     t.replace("Alinea", "Absatz"))
+                json.dump({"total": len(ch), "chunk_words": 8},
+                          open("uebersetzung_state.json", "w"))
+
+                paare = A.chunkpaare(probe)
+                # Die Quellseite muss wirklich die Quelle sein. Vorher
+                # baute dieser Schritt sie selbst nach — mit dem
+                # Rahmenmarker, waehrend der Lauf laengst ebenen.json las.
+                if not paare or "Alinea" not in paare[0][1]:
+                    fehler.append(f"Quellchunk fehlt im Paar: {paare[:1]}")
+
+                rufe = []
+
+                def _screen(cfg_, sysp, user, **kw):
+                    rufe.append(user)
+                    if len(rufe) == 3:
+                        raise RuntimeError("Netzwerk weg")
+                    return json.dumps([{"chunk": 1, "art": "x",
+                                        "befund": "y"}])
+                G.chat = _screen
+                bef, luecken = A.screenen(probe, paare,
+                                          drucken=lambda *a: None)
+                if len(bef) != 2 or len(luecken) != A.CHUNKS_JE_AUFRUF:
+                    fehler.append(f"gescheitertes Buendel falsch verbucht: "
+                                  f"{len(bef)} Befunde, {luecken}")
+                if "BEREITS GEMELDET" not in (rufe[1] if len(rufe) > 1
+                                              else ""):
+                    fehler.append("Gedaechtnis erreicht den Aufruf nicht")
+
+                # Zweiter Lauf: nur das gescheiterte Buendel laeuft noch
+                # einmal. Ein Absturz bei Aufruf 30 von 37 darf nicht 30
+                # Aufrufe kosten.
+                vorher = len(rufe)
+                G.chat = lambda *a, **k: (rufe.append(a[2]) or
+                                          '[{"chunk": 9, "art": "z", '
+                                          '"befund": "w"}]')
+                bef2, luecken2 = A.screenen(probe, paare,
+                                            drucken=lambda *a: None)
+                if len(rufe) - vorher != 1:
+                    fehler.append(f"Resume wiederholt fertige Buendel: "
+                                  f"{len(rufe) - vorher} Aufrufe")
+                if luecken2 or len(bef2) != 3:
+                    fehler.append(f"Nachlauf unvollstaendig: {len(bef2)} "
+                                  f"Befunde, {luecken2}")
+
+                # Eine Luecke steht im Bericht. Ohne sie sieht er
+                # vollstaendig aus, obwohl vier Chunks nie geprueft wurden.
+                A.screening_schreiben(bef, luecken)
+                text = open(A.SCREENING, encoding="utf-8").read()
+                if "Nicht geprüft" not in text:
+                    fehler.append("uebersprungene Chunks fehlen im Bericht")
+
+                # Der Zwischenstand liegt unter teile/, nicht neben dem
+                # Buch — und 'schreiben' nimmt ihn weiterhin nicht an.
+                if not os.path.isdir(os.path.join("teile", "screening")):
+                    fehler.append("Zwischenstand liegt nicht in teile/")
+                try:
+                    A.schreiben("screening_0.json", "[]")
+                    fehler.append("schreiben() nimmt den Zwischenstand an")
+                except A.SchreibSperre:
+                    pass
+
+                # Und eine abweichende Quelle bricht ab, statt fremde
+                # Absaetze zu vergleichen.
+                open(G.F["quelle"], "a", encoding="utf-8").write(
+                    "\n\nAlinea 13 met genoeg woorden erin om te tellen.")
+                try:
+                    A.chunkpaare(probe)
+                    fehler.append("geaenderte Quelle wird nicht gemeldet")
+                except G.ChunksWeichenAb:
+                    pass
+            finally:
+                G.chat = alt_chat
+                os.chdir(alt_cwd)
 
         if fehler:
             b.add("FEHLER", "Annotation fehlerhaft", "; ".join(fehler))
@@ -2185,11 +2654,16 @@ installiert, requests-Pfad"
 
                 # Gegenprobe 1 (Quellseite): die Quelle waechst, die
                 # Chunkfolge passt nicht mehr zu der, die gelaufen ist.
+                # Das ist kein Warnfall — eine verschobene, aber
+                # ausgelieferte Leseausgabe ist schlimmer als gar keine.
                 open(G.F["quelle"], "a", encoding="utf-8").write(
                     "\n\nVierde alinea, die er nog niet was, met genoeg "
                     "woorden om een eigen chunk te vullen.")
-                if not LA.zeilen_bauen(probe)[1]:
+                try:
+                    LA.zeilen_bauen(probe)
                     fehler.append("geaenderte Quelle wird nicht gemeldet")
+                except G.ChunksWeichenAb:
+                    pass
 
                 # Gegenprobe 2 (Zielseite): das Manuskript enthaelt einen
                 # Absatz, den die Zielspalte aus teile/ nicht hergibt —
@@ -2927,6 +3401,33 @@ def pruefe_text(cfg, b):
     b.add("INFO", "Evidentielles 'zou'",
           f"{zou} Vorkommen — jedes braucht die Entscheidung "
           f"'soll' gegen 'wuerde'")
+
+    # Wie sind die Erzaehlebenen in DIESEM Text ausgezeichnet? Die Frage
+    # steht hier, weil sie hier zum ersten Mal beantwortbar ist — und
+    # weil sie beim Buch 1919 niemand gestellt hat: fuenf Ebenen im
+    # Stilprofil, ein Marker, den der Autor nie benutzt, eine Gruppe ueber
+    # 147 Chunks. Die deutsche Rueckschau lief ueber jeden Wechsel hinweg,
+    # und keine buchweite Metrik konnte das sehen.
+    marker = str(cfg.get("rahmen_marker", "") or "").strip()
+    treffer = sum(1 for p in paras if marker and p.strip() == marker)
+    if not marker:
+        b.add("INFO", "Kein Rahmenmarker eingestellt",
+              "Die Erzaehlebenen kommen dann ausschliesslich aus "
+              "ebenen.json (vorbereitung.py --nur ebenen).")
+    elif treffer:
+        b.add("OK", f"Rahmenmarker »{marker}«: {treffer} Wechsel im Text",
+              "Er gilt als Rueckfall, wenn ebenen.json fehlt.")
+    else:
+        b.add("WARN", f"Rahmenmarker »{marker}« kommt im Text nicht vor",
+              "Erzaehlebenen koennen dann NUR aus ebenen.json kommen.\n"
+              "           Hat der Text mehrere Ebenen (Rahmen, Rueckblende, "
+              "Einschub),\n"
+              "           entstehen ohne sie null Fugen — Tempus und Person "
+              "der einen\n"
+              "           Ebene bluten dann in die andere, und keine "
+              "buchweite Zahl\n"
+              "           zeigt es an. Genau so ist der Lauf 1919 gelaufen.\n"
+              "           Siehe NEUES_BUCH.md, Punkt 3.")
     return text
 
 
@@ -3170,6 +3671,14 @@ def pruefe_config(cfg, b):
     b.add("INFO", "Antworttransport",
           ("Stream" if cfg.get("streaming", True) else "ein Stueck")
           + (", SDK" if cfg.get("sdk_nutzen", True) else ", requests"))
+    kmax = int(cfg.get("kette_max", 0) or 0)
+    b.add("INFO", "Stapelbetrieb ('uebersetzung.py --stapel')",
+          (f"kette_max {kmax} — Ketten werden zusaetzlich zu den "
+           f"Ebenenfugen getrennt, jede Trennung ist eine Naht ohne "
+           f"Rueckschau." if kmax else
+           "kette_max 0 — nur an den Ebenenfugen getrennt, keine "
+           "zusaetzlichen Naehte.")
+          + " 'pipeline.py wellen' zeigt den Plan.")
     w = G.websuche_werkzeug(cfg)
     if w:
         b.add("INFO", "Websuche der Zitatrecherche",

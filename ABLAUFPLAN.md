@@ -47,12 +47,20 @@ Sagt sie „Die Anmeldung gilt nur in dieser Zelle", laufen die Sheets-Aufrufe
 
 ## 2 · Ein neues Buch einrichten
 
+> Wer das zum ersten Mal macht, nimmt **`NEUES_BUCH.md`** — dort steht
+> derselbe Weg ausführlich, mit den Entscheidungen, die dabei anfallen.
+> Hier steht die Kurzfassung für den, der ihn schon kennt.
+
 1. Drive-Ordner anlegen, `input.txt` hineinlegen.
 2. `PROJEKT` in Zelle 0 und Zelle 1 auf diesen Ordner setzen.
 3. Zelle 1 einmal starten — sie kopiert `projekt.json` und `anweisungen.md`
    aus dem Repo, wenn dort keine liegen, und sagt es. **Eine vorhandene
    `projekt.json` wird nie überschrieben.**
-4. Wer mit Sheets arbeitet: Spreadsheet anlegen, die ID oder die volle Adresse
+4. **`rahmen_marker` prüfen.** Er entscheidet, ob die Erzählebenen erkannt
+   werden. Kommt das eingestellte Zeichen im Text nicht vor, meldet der
+   Preflight das — dann hängt alles an `ebenen.json`. Begründung in
+   `NEUES_BUCH.md`, Abschnitt 5a.
+5. Wer mit Sheets arbeitet: Spreadsheet anlegen, die ID oder die volle Adresse
    als `sheets_id` in `projekt.json` eintragen, dann
 
 ```python
@@ -293,6 +301,27 @@ Volllauf: Übersetzung mit Revision rund 36 $, Lektorat rund 23 $,
 Vorbereitung rund 1 $. Die Werte hängen am Modell und an der Chunkgröße —
 `variantenvergleich` weist sie je Variante getrennt aus.
 
+### Halber Preis über den Stapel
+
+`uebersetzung.py --stapel` schickt den Volllauf über die Stapel-API: alles zum
+halben Preis, und statt 147 Aufrufen nacheinander laufen mehrere Ketten
+nebeneinander. Der Preis dafür sind **Nähte ohne deutsche Rückschau** an
+jedem Kettenanfang, der keine Ebenenfuge ist.
+
+```python
+colab_start.lauf("pipeline.py", "wellen", code=CODE)
+```
+
+zeigt für mehrere Werte von `kette_max` nebeneinander, wie viele Wellen und
+wie viele Nähte dabei herauskommen. `kette_max: 0` (Vorgabe) trennt nur an
+den Ebenenfugen — dort setzt die Rückschau ohnehin zurück, diese Schnitte
+kosten nichts. Jeder größere Wert ist eine Abwägung, und wie teuer sie
+wirklich ist, misst `bewertung.py --fugen` nach einem Testlauf.
+
+Der Stapel kennt den Ablehnungsrückfall aus Paket E nicht. Was er nicht
+liefert — abgelehnt, abgelaufen, fehlerhaft —, holt der Lauf einzeln nach,
+und dort greift der Rückfall dann doch.
+
 ---
 
 ## 8 · Wenn etwas klemmt
@@ -311,6 +340,8 @@ Vorbereitung rund 1 $. Die Werte hängen am Modell und an der Chunkgröße —
 | `Verhältnis 0.29 -> Durchgang verworfen` | Antwort kam gekürzt zurück | passiert; der Chunk wird bis zu `max_retries` wiederholt |
 | `unrecognized arguments: --…` | Code in der VM ist alt | Zelle 0, auf „aktuell mit origin/main" achten |
 | `module … has no attribute …` | Kernel hält alte Importe | Zelle 0 leert sie und importiert neu |
+| `N nachgebaute Quellchunks, aber der Lauf hatte M` | `input.txt`, `ebenen.json` oder `zitate.json` haben sich seit dem Lauf geändert | die Datei zurücksetzen — oder den Lauf wiederholen. Leseausgabe und Screening würden sonst fremde Absätze vergleichen |
+| Im Screening-Bericht steht „Nicht geprüft: N Chunks" | einzelne Aufrufe sind gescheitert | `annotation.py --nur screening` erneut; die fertigen Bündel laufen nicht noch einmal |
 
 Ergebnisse löscht **nur** `pipeline.py neu`. Es zeigt erst die Liste und
 löscht dann nichts, solange niemand bestätigt hat — in Colab über ein
