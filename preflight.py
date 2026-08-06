@@ -2823,6 +2823,33 @@ installiert, requests-Pfad"
             RS._buch = echt
             RS.G.lade_json = echt_lade
 
+        # Welcher der beiden Wege laeuft, muss DASTEHEN. Der Sheets-
+        # Betrieb ist ein stiller Unterschied: Ohne sheets_id schreibt die
+        # Vorbereitung in die JSON-Dateien und sagt nichts weiter dazu.
+        # Drei Laeufe lang sah ein erfolgreicher Lauf mit leerem
+        # Spreadsheet genauso aus wie einer mit gefuelltem.
+        b_leer, b_voll = G.Bericht("x"), G.Bericht("y")
+        pruefe_sheets({"sheets_id": ""}, b_leer)
+        alt_buch = RS._buch
+        try:
+            RS._buch = lambda cfg: (_ for _ in ()).throw(
+                RS.SyncFehler("keine Anmeldung"))
+            pruefe_sheets({"sheets_id": "1" + "x" * 30}, b_voll)
+        finally:
+            RS._buch = alt_buch
+        text_leer = " ".join(str(z) for z in b_leer.zeilen)
+        text_voll = " ".join(str(z) for z in b_voll.zeilen)
+        if "sheets_id" not in text_leer or "leer" not in text_leer:
+            fehler.append(f"leere sheets_id wird nicht gemeldet: {text_leer}")
+        if "Spreadsheet" not in text_voll:
+            fehler.append(f"gesetzte sheets_id wird nicht gemeldet: "
+                          f"{text_voll}")
+        if "FEHL" in text_voll:
+            fehler.append("fehlende Anmeldung laesst den Preflight scheitern")
+        # Und die Vorbereitung darf den stillen Zweig nicht stillschweigen.
+        if "Kein Spreadsheet" not in quelltext("vorbereitung.py"):
+            fehler.append("vorbereitung.py meldet den Rueckfallpfad nicht")
+
         # Der Tab 'Modelle' wird geschrieben und NIE gelesen. Steht er in
         # TABS, liest ihn 'sync' zurueck und die Modellwahl waere die
         # dritte Quelle neben Repo- und Projekt-projekt.json.
@@ -3601,6 +3628,62 @@ def umbruchdiagnose(text, n_absaetze):
             "Absaetze erhaelt (docx, epub).")
 
 
+def pruefe_sheets(cfg, b):
+    """Laeuft dieser Lauf mit Spreadsheet oder ohne?
+
+    Diese Zeile hat gefehlt, und ihr Fehlen hat drei Laeufe gekostet.
+    Der Sheets-Betrieb ist ein STILLER Unterschied: Ist 'sheets_id' leer,
+    schreibt die Vorbereitung ihre Ergebnisse in die JSON-Dateien und
+    sagt nichts weiter dazu — genau wie im Sheets-Betrieb, nur ohne die
+    eine Zeile 'Uebertragung ins Spreadsheet'. Wer sie nicht kennt, sieht
+    einen erfolgreichen Lauf und ein leeres Spreadsheet und hat keinen
+    Anhaltspunkt, welcher der beiden Wege gelaufen ist.
+
+    Der Preflight ist die Stelle dafuer: vor dem ersten Modellaufruf und
+    lange vor der Vorbereitung. Eine falsch eingetragene ID kostet hier
+    nichts und dort sechs Minuten und zwei Dollar.
+
+    Die Erreichbarkeit wird geprueft, wenn sie sich pruefen laesst, und
+    ist nie ein FEHLER: Ohne Google-Anmeldung ist der Preflight der
+    falsche Ort zum Abbrechen — er laeuft auch als erster Schritt eines
+    Laufes, den man gerade erst angestossen hat."""
+    import referenz_sync as RS
+    roh = str(cfg.get("sheets_id", "")).strip()
+    if not roh:
+        b.add("INFO", "Referenzdaten: JSON-Dateien (kein Spreadsheet)",
+              "'sheets_id' ist leer. Glossar, Personen, Figurenblatt, "
+              "Anrede,\n           Leitmotive und Kapitel werden als "
+              "Dateien im Projektordner\n           gepflegt. Das ist ein "
+              "gueltiger Betrieb — aber wenn du ein\n           "
+              "Spreadsheet erwartest, steht die ID nicht in "
+              f"{G.CONFIG}.")
+        return
+    try:
+        kennung = RS.sheet_id(roh)
+    except Exception as e:
+        b.add("FEHLER", "'sheets_id' ist keine Spreadsheet-ID", str(e))
+        return
+    b.add("OK", "Referenzdaten: Spreadsheet", f"{kennung[:12]}…")
+    try:
+        buch = RS._buch(cfg)
+        da = {blatt.title for blatt in buch.worksheets()}
+    except Exception as e:
+        b.add("WARN", "Spreadsheet jetzt nicht pruefbar",
+              f"{str(e).splitlines()[0]}\n"
+              f"           Der Lauf versucht es beim ersten "
+              f"Sheets-Schritt erneut.")
+        return
+    soll = [t for t, *_ in RS.TABS] + [RS.TAB_ZITATE[0], RS.TAB_MODELLE[0]]
+    fehlen = [t for t in soll if t not in da]
+    if fehlen:
+        b.add("OK", f"Spreadsheet erreichbar, {len(da)} Tabs",
+              f"Angelegt werden beim ersten Schreiben: "
+              f"{', '.join(fehlen)}")
+    else:
+        b.add("OK", f"Spreadsheet erreichbar, alle {len(soll)} Tabs "
+                    f"vorhanden")
+
+
 def umbrueche_richten():
     """'--umbrueche': aus einer Zeile je Absatz einen Absatz je Absatz.
 
@@ -4306,6 +4389,7 @@ def pruefe_config(cfg, b):
     b.add("INFO", "Antworttransport",
           ("Stream" if cfg.get("streaming", True) else "ein Stueck")
           + (", SDK" if cfg.get("sdk_nutzen", True) else ", requests"))
+    pruefe_sheets(cfg, b)
     kmax = int(cfg.get("kette_max", 0) or 0)
     b.add("INFO", "Stapelbetrieb ('uebersetzung.py --stapel')",
           (f"kette_max {kmax} — Ketten werden zusaetzlich zu den "
