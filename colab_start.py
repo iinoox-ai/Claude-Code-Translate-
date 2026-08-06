@@ -237,15 +237,23 @@ def projektordner_richten(projekt, code=CODE):
         meldungen.append(f"Projektordner neu angelegt: {projekt}")
 
     ziel = os.path.join(projekt, G.CONFIG)
-    quelle = os.path.join(code, G.CONFIG)
+    quelle = os.path.join(code, G.VORLAGE)
+    if not os.path.exists(quelle):
+        # Aeltere Auschecks fuehren die Vorlage noch unter dem Namen der
+        # Arbeitsdatei. Der Rueckfall kostet nichts und verhindert, dass
+        # ein halb aktualisierter Stand ohne Konfiguration dasteht.
+        quelle = os.path.join(code, G.CONFIG)
     if os.path.exists(ziel):
         meldungen.append(f"{G.CONFIG} im Projektordner vorhanden — "
                          f"unveraendert uebernommen")
         meldungen += _technik_melden(ziel, quelle)
     elif os.path.exists(quelle):
         shutil.copy2(quelle, ziel)
-        meldungen.append(f"{G.CONFIG} aus dem Repo kopiert (Erstlauf). "
-                         f"Aenderungen bitte hier vornehmen, nicht im Repo.")
+        meldungen.append(f"{G.CONFIG} aus {os.path.basename(quelle)} "
+                         f"angelegt (Erstlauf).")
+        meldungen.append(f"  Ab jetzt gilt {ziel} — "
+                         f"sheets_id, rahmen_marker und alles Weitere")
+        meldungen.append(f"  dort aendern, nicht im Repo.")
     else:
         meldungen.append(f"WARNUNG: weder {ziel} noch {quelle} vorhanden — "
                          f"'python3 pipeline.py init' anlegen")

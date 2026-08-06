@@ -13,7 +13,7 @@ den Resume auf Schrittebene, und den kann das Manifest allein leisten.
 
 ## Ablauf
 
-1. **Lauf starten.** Zelle 1 ausführen. Sobald der Übersetzungsschritt
+1. **Lauf starten.** Zelle 2 ausführen. Sobald der Übersetzungsschritt
    beginnt, meldet er `Eingabe: … in N Chunks` — diese Zahl merken.
 2. **Mitlesen.** Jeder fertige Chunk erzeugt zwei Zeilen:
 
@@ -24,12 +24,12 @@ den Resume auf Schrittebene, und den kann das Manifest allein leisten.
    Warten, bis **mindestens drei** Chunks fertig sind. Den Stand aus der
    letzten `fertig`-Zeile notieren.
 
-   Nicht über Zelle 4 (`status`) gehen: Colab arbeitet Zellen nacheinander
+   Nicht über Zelle 6 (`status`) gehen: Colab arbeitet Zellen nacheinander
    ab, sie würde nur eingereiht und liefe erst nach dem Lauf.
 3. **VM hart trennen.** Laufzeit → *Sitzung beenden*. Nicht nur den Tab
    schließen — der Abbruch soll unangekündigt kommen.
 4. **Neue VM.** Notebook erneut öffnen, Laufzeit verbinden.
-5. **Zelle 1 erneut ausführen.** Sonst nichts. Kein `reset`, kein `neu`,
+5. **Zelle 2 erneut ausführen.** Sonst nichts. Kein `reset`, kein `neu`,
    keine Handgriffe im Dateibrowser.
 
 ## Erwartet
@@ -54,7 +54,7 @@ den Resume auf Schrittebene, und den kann das Manifest allein leisten.
 |---|---|
 | Lauf beginnt wieder bei Chunk 1 | `teile/` liegt nicht in Drive — Arbeitsverzeichnis prüfen |
 | `projekt.json` wurde überschrieben | Überschreibschutz in `colab_start.projektordner_richten` defekt |
-| Einzelne Chunkdateien fehlen oder sind leer | `os.replace` auf dem FUSE-Mount unzuverlässig — die Verifikation (Zelle 3, Schritt 1) hätte das gemeldet |
+| Einzelne Chunkdateien fehlen oder sind leer | `os.replace` auf dem FUSE-Mount unzuverlässig — die Verifikation (Zelle 5, Schritt 1) hätte das gemeldet |
 | „Es läuft bereits ein Lauf (PID …)" | PID-Sperre greift fälschlich in Colab |
 
 ## Ergebnis
@@ -76,7 +76,7 @@ Ergebnis: 0 Fehler, 1 Warnung (die Gemini-Beobachtung), **BESTANDEN**.
 
 ### 31.07.2026 — Abbruchprobe teilweise nachvollzogen (Ian, Colab)
 
-Laufzeit gelöscht, neue VM, Zelle 1 erneut. Was dabei belegt ist:
+Laufzeit gelöscht, neue VM, Zelle 2 erneut. Was dabei belegt ist:
 
 | | |
 |---|---|
@@ -94,7 +94,7 @@ Schrittebene.
 ### 31.07.2026 — Abbruchprobe vollständig nachvollzogen (Ian, Colab)
 
 Abbruch während `test` nach 3 von 5 Chunks, Laufzeit gelöscht, neue VM,
-nur Zelle 1 erneut. Die Ausgabe des Testschritts nach dem Neustart:
+nur Zelle 2 erneut. Die Ausgabe des Testschritts nach dem Neustart:
 
 ```
 3 Chunks liegen vor, Fortsetzung ab 4.

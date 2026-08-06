@@ -1337,7 +1337,7 @@ installiert, requests-Pfad"
     # der Autor von 1919 ihn nie benutzt hat.
     try:
         fehler = []
-        vorlage = json.load(open(os.path.join(CODE, G.CONFIG),
+        vorlage = json.load(open(os.path.join(CODE, G.VORLAGE),
                                  encoding="utf-8"))
         fehlt = sorted(k for k in G.STANDARD if k not in vorlage)
         if fehlt:
@@ -1407,6 +1407,23 @@ installiert, requests-Pfad"
                     fehler.append(
                         f"{os.path.basename(d)}: modell_{rolle} steht dort "
                         f"als '{name}', eingestellt ist '{soll}'")
+
+        # Die Zellnummern in der Doku muessen die des Runners sein. Als
+        # die Anmeldezelle dazukam, rutschten alle Zellen um eins, und
+        # 27 Verweise in drei Dokumenten zeigten auf die falsche.
+        nb = os.path.join(CODE, "colab_runner.ipynb")
+        if os.path.exists(nb):
+            zellen = json.load(open(nb, encoding="utf-8"))["cells"]
+            da = set(re.findall(r"^## (\d+) ", "\n".join(
+                "".join(c["source"]) for c in zellen
+                if c["cell_type"] == "markdown"), re.M))
+            for d in _glob_md():
+                falsch = sorted({n for n in re.findall(
+                    r"Zelle (\d+)", quelltext(d))} - da)
+                if falsch:
+                    fehler.append(f"{os.path.basename(d)}: verweist auf "
+                                  f"Zelle {', '.join(falsch)} — die gibt es "
+                                  f"im Runner nicht")
 
         # Kein verwaistes Dokument. NEUES_BUCH.md lag ein halbes Jahr im
         # Repo, ohne dass irgendein anderes es erwaehnt haette — die

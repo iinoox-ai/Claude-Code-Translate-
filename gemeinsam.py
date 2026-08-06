@@ -22,6 +22,12 @@ import requests
 RICHTUNG = "NL \u2192 DE"
 
 CONFIG      = "projekt.json"
+# Die Vorlage im Repo. Sie heisst absichtlich anders als die Arbeitsdatei:
+# Gearbeitet wird IMMER mit der projekt.json im Projektordner, die Vorlage
+# wird beim Erstlauf einmal dorthin kopiert und danach nie wieder angefasst.
+# Solange beide gleich hiessen, sah die Vorlage aus wie "die" Konfiguration
+# — und wer eine Einstellung suchte, aenderte die falsche Datei.
+VORLAGE     = "projekt_vorlage.json"
 ANWEISUNGEN = "anweisungen.md"
 MANIFEST    = "manifest.json"
 
@@ -242,10 +248,35 @@ AENDERBAR = {
 } | {f"modell_{r}" for r in ROLLEN} | {f"effort_{r}" for r in ROLLEN}
 
 
+def vorlage_pfad():
+    """Die Vorlage neben dem Code, oder ''.
+
+    Sie liegt im Code-Verzeichnis, nicht im Arbeitsverzeichnis: Sie
+    gehoert dem Repo, die Arbeitsdatei dem Buch."""
+    hier = os.path.dirname(os.path.abspath(__file__))
+    for name in (VORLAGE, CONFIG):        # CONFIG: aelterer Auscheck
+        p = os.path.join(hier, name)
+        if os.path.exists(p) and os.path.abspath(p) != os.path.abspath(CONFIG):
+            return p
+    return ""
+
+
 def lade_config(pfad=CONFIG, pflicht=True):
     if not os.path.exists(pfad):
         if pflicht:
             sys.exit(f"FEHLER: {pfad} fehlt. Erst 'python3 pipeline.py init'.")
+        # Ohne Arbeitsdatei gilt die Vorlage. Das betrifft nur Aufrufer,
+        # die ohne Projekt auskommen — den Selbsttest, die Schrittliste.
+        # Ein Buchlauf verlangt weiterhin seine eigene Konfiguration:
+        # Er soll nicht mit fremden Werten anlaufen.
+        v = vorlage_pfad()
+        if v:
+            cfg = dict(STANDARD)
+            try:
+                cfg.update(json.load(open(v, encoding="utf-8")))
+            except Exception:
+                pass
+            return cfg
         return dict(STANDARD)
     cfg = dict(STANDARD)
     try:

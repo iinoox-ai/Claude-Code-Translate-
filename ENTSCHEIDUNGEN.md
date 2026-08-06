@@ -1661,6 +1661,70 @@ Zwei Stellen hatten dieselbe blinde Stelle:
 
 ---
 
+## Die Vorlage heißt anders als die Arbeitsdatei
+
+**Entschieden (August 2026).** Gearbeitet wird mit der `projekt.json` im
+Drive-Projektordner. Das war schon immer so — die Pipeline wechselt beim Start
+dorthin, `lade_config()` liest relativ zum Arbeitsverzeichnis, und der Runner
+sagt seit jeher „Änderungen bitte hier vornehmen, nicht im Repo".
+
+Trotzdem hat genau das nicht funktioniert, und der Grund war der Name: Die
+Vorlage im Repo hieß ebenfalls `projekt.json`. Wer eine Einstellung suchte,
+fand zwei identisch benannte Dateien und keinen Hinweis, welche die
+Arbeitsgrundlage ist.
+
+Die Vorlage heißt jetzt `projekt_vorlage.json`. Damit ist die Rollenteilung am
+Namen ablesbar:
+
+- **`projekt_vorlage.json`** liegt im Repo, ist getrackt, bleibt zwischen den
+  Büchern unverändert und trägt die Ursprungsparameter.
+- **`projekt.json`** entsteht daraus beim Erstlauf im Projektordner, gehört dem
+  Buch, wird nie überschrieben und ist der einzige Ort, an dem etwas geändert
+  wird. Sie steht jetzt in `.gitignore`.
+
+**Verworfen: die geänderte Datei zurück ins Repo kopieren.** Der Vorschlag war,
+in Drive zu editieren und das Ergebnis als `projekt.json` ins Repo
+zurückzuspielen. Das löst nichts und schafft zwei Probleme. Es widerspricht
+dem eigentlichen Ziel — „für ein neues Buch das Repo nicht mehr anfassen" —,
+denn Zurückkopieren *ist* Anfassen. Und es trägt buchspezifische Werte in die
+Versionsverwaltung: Die `sheets_id` des einen Buchs würde zum Startwert des
+nächsten, das dann in das Spreadsheet seines Vorgängers schriebe. Genau solche
+stillen Übernahmen bekämpft dieses Projekt an jeder anderen Stelle.
+
+Damit ein Aufruf ohne Projektordner weiter funktioniert — der Selbsttest, die
+Schrittliste — fällt `lade_config(pflicht=False)` auf die Vorlage zurück. Ein
+Buchlauf verlangt weiterhin seine eigene Konfiguration und bricht ohne sie ab:
+Er soll nicht mit fremden Werten anlaufen.
+
+---
+
+## Der Runner hatte den Bootstrap zweimal
+
+**Entschieden (August 2026).** `colab_runner.ipynb` trug den git-Bootstrap in
+zwei Zellen: 36 Zeilen in der einen, 25 in der anderen. `PROJEKT` stand
+zweimal da, und die Anleitung musste dazu sagen, dass man beide ändert — eine
+Handlungsanweisung, die es nur gibt, weil der Code doppelt war.
+
+Der Grund für die Verdopplung war ein echter: Nach einem Verbindungsabbruch
+sollte ein Klick auf die Laufzelle genügen, und der muss frischen Code sehen.
+Das lässt sich billiger haben. Die Laufzelle zieht jetzt nur noch den Code
+nach und leert die Modulimporte — sieben Zeilen —, `PROJEKT` und der Klon
+stehen einmal in Zelle 0. Nach einem VM-Neustart ist der Kernel ohnehin tot
+und Zelle 0 unvermeidlich; überlebt er, überleben auch die Variablen.
+
+**Dazugekommen sind zwei Zellen, die gefehlt haben:** die Google-Anmeldung
+(Zelle 1) — ihr Fehlen hat einen halben Vormittag gekostet, siehe „Die
+Anmeldung der VM ist keine Anmeldung" — und das Freigeben einer Pause
+(Zelle 3), das seit `pipeline.py weiter` ein Einzeiler ist und trotzdem nur in
+der Doku stand.
+
+Das Umnummerieren traf 27 Verweise in drei Dokumenten. Ein Selbsttest prüft
+jetzt, dass jede in der Doku genannte Zellnummer im Runner auch existiert —
+von Hand nachgezogen habe ich sie einmal, ein zweites Mal soll das niemand
+müssen.
+
+---
+
 ## Verworfen — und warum
 
 **API-Frontier-Modell als Primärübersetzer** (zunächst). Die Kostenrechnung

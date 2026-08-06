@@ -19,8 +19,8 @@ niederländischen Volltext als reine Textdatei.
 
 ### 2 · Notebook auf das Buch zeigen lassen
 
-`colab_runner.ipynb` öffnen. In **Zelle 0 und Zelle 1** jeweils die erste
-Zeile ändern:
+`colab_runner.ipynb` öffnen. In **Zelle 0** die erste Zeile ändern — das ist
+die einzige Stelle im Notebook, die ein neues Buch braucht:
 
 ```python
 PROJEKT = "/content/drive/MyDrive/uebersetzung/neuesbuch"
@@ -40,9 +40,14 @@ alten Stand. Dann erst das klären — jeder weitere Versuch ist verschwendet.
 
 ### 4 · Projektordner einrichten
 
-**Zelle 1** einmal ausführen. Sie mountet Drive, lädt die Secrets und kopiert
-`projekt.json` und `anweisungen.md` aus dem Repo in den Projektordner. Eine
-vorhandene `projekt.json` wird nie überschrieben.
+**Zelle 2** einmal ausführen. Sie mountet Drive, lädt die Secrets und legt
+`projekt.json` und `anweisungen.md` im Projektordner an — die Konfiguration
+aus `projekt_vorlage.json` des Repos.
+
+**Ab hier gilt die Datei im Drive-Ordner.** Sie wird nie überschrieben, und
+alles Weitere — `sheets_id`, `rahmen_marker`, die Modellwahl — wird dort
+geändert. Das Repo fasst man für ein neues Buch nicht mehr an. Die Vorlage
+bleibt unverändert liegen und ist beim nächsten Buch wieder der Ausgangspunkt.
 
 Der Lauf startet dabei gleich mit — das ist in Ordnung, er hält beim ersten
 Modellschritt ohnehin nicht lange auf. Wer das nicht will, bricht die Zelle
@@ -179,14 +184,14 @@ colab_start.lauf("pipeline.py", "technik", "--uebernehmen", code=CODE)
 
 ### 9 · Starten
 
-**Zelle 1.** Von hier an arbeitet die Pipeline durch: Selbsttest, Tarifabgleich,
+**Zelle 2.** Von hier an arbeitet die Pipeline durch: Selbsttest, Tarifabgleich,
 Preflight, Zitatrecherche, Konkordanzanalyse, Vorbereitung. Dann hält sie an.
 
-**Bricht etwas ab: Zelle 1 erneut starten.** Der Resume zählt die fertigen
+**Bricht etwas ab: Zelle 2 erneut starten.** Der Resume zählt die fertigen
 Abschnitte in `teile/` und macht dort weiter. Verloren geht höchstens der eine
 Abschnitt, an dem gerade gearbeitet wurde.
 
-Stand ansehen, solange Zelle 1 nicht läuft:
+Stand ansehen, solange Zelle 2 nicht läuft:
 
 ```python
 colab_start.lauf("pipeline.py", "status", code=CODE)
@@ -245,7 +250,7 @@ Wenn alles stimmt, Pause schließen:
 colab_start.lauf("pipeline.py", "reset", "--ab", "PAUSE_review", "--fertig", code=CODE)
 ```
 
-Danach **Zelle 1** erneut.
+Danach **Zelle 2** erneut.
 
 ### 11 · Zweiter Halt: `PAUSE_pruefung`
 
@@ -286,7 +291,7 @@ Entscheidungen kommen nach `projekt.json` — typisch `chunk_words`,
 colab_start.lauf("pipeline.py", "reset", "--ab", "PAUSE_pruefung", "--fertig", code=CODE)
 ```
 
-Danach **Zelle 1** erneut. Ab hier läuft alles durch: Volltext, Lektorat,
+Danach **Zelle 2** erneut. Ab hier läuft alles durch: Volltext, Lektorat,
 Qualitätsprüfungen, Annotation, Konsistenz, Paket.
 
 Größenordnung für 110.000 Wörter: ein Arbeitstag Maschinenzeit, rund 60 $.
@@ -390,7 +395,7 @@ Freigabe.
 | `unrecognized arguments: --…` | Code ist alt: Zelle 0, auf „aktuell mit origin/main" achten |
 | `module … has no attribute …` | Kernel hält alte Importe: Zelle 0 leert sie |
 | „Verbindung wird wiederhergestellt" | meist nur der Browser; `teile/` prüfen, ob Dateien wachsen |
-| Laufzeit weg | Zelle 1 erneut — der Resume zählt `teile/` |
+| Laufzeit weg | Zelle 2 erneut — der Resume zählt `teile/` |
 | `Referenzdaten fehlerhaft: …, Zeile N` | im Spreadsheet korrigieren, Schritt erneut |
 | `Das Spreadsheet wuerde vorhandene Daten loeschen` | erst `referenz_sync.py --erstbefuellung` |
 | `Verhältnis 0.29 -> Durchgang verworfen` | passiert; der Chunk wird wiederholt |
@@ -412,7 +417,7 @@ Konfiguration und Referenzdateien.
 
 ```
 Zelle 0            Code laden, Stand prüfen
-Zelle 1            einrichten und starten
+Zelle 2            einrichten und starten
                    ↓
    selbsttest · tarife · preflight · zitatrecherche · konkordanz · vorbereitung
                    ↓

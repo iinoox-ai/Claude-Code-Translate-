@@ -9,6 +9,11 @@ stilprofil.json
 kapitel.json
 ebenen.json
 *.env
+
+# Arbeitskonfiguration. Sie entsteht im Projektordner aus
+# projekt_vorlage.json und traegt buchspezifische Werte (sheets_id,
+# kalibrierte Pruefgrenzen). Getrackt ist nur die Vorlage.
+projekt.json
 teile/
 test/
 testB/
