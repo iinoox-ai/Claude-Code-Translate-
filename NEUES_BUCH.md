@@ -17,6 +17,14 @@ Im Google Drive einen Ordner für das Buch anlegen, zum Beispiel
 `MyDrive/uebersetzung/neuesbuch`, und `input.txt` hineinlegen — den
 niederländischen Volltext als reine Textdatei.
 
+**Absätze werden durch Leerzeilen getrennt.** Viele Exporte liefern
+stattdessen eine Zeile je Absatz ohne Leerzeile dazwischen; für die Pipeline
+ist das *ein* Absatz, und die Chunkeinteilung hat dann nichts, woran sie
+schneiden kann. Der Preflight erkennt den Fall und unterscheidet ihn von einem
+Text, der mitten im Satz umbrochen ist (PDF-Extraktion). Im ersten Fall hilft
+**Zelle 8**, im zweiten nur ein besserer Export — dort sind die Absatzgrenzen
+nicht mehr im Text enthalten.
+
 ### 2 · Notebook auf das Buch zeigen lassen
 
 `colab_runner.ipynb` öffnen. In **Zelle 0** die erste Zeile ändern — das ist
