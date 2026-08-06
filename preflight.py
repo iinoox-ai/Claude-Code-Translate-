@@ -2514,6 +2514,55 @@ installiert, requests-Pfad"
                               "die Zielanrede nicht in den Prompt — "
                               f"Feldnamen weichen ab: {block!r}")
 
+        # Die Anmeldung der VM ist keine Anmeldung. In Colab findet
+        # google.auth.default() immer die Compute-Engine-Anmeldung, an der
+        # kein Dienstkonto haengt: Sie laesst sich bauen und scheitert
+        # erst beim Zugriff — mit einem 404 auf metadata.google.internal,
+        # das nach einem Problem des Spreadsheets aussieht. Genau so ist
+        # jemand auf die Suche nach einer Freigabe geschickt worden, die
+        # laengst erteilt war.
+        import types
+        class _CE:
+            pass
+        ce = types.ModuleType("google.auth.compute_engine")
+        ce.Credentials = _CE
+        ga = types.ModuleType("google.auth")
+        ga.compute_engine = ce
+        gg = types.ModuleType("google")
+        gg.auth = ga
+        alt_module = {k: sys.modules.get(k) for k in
+                      ("google", "google.auth", "google.auth.compute_engine")}
+        echt_colab = G.ist_colab
+        try:
+            sys.modules.update({"google": gg, "google.auth": ga,
+                                "google.auth.compute_engine": ce})
+            G.ist_colab = lambda: True
+            if RS.anmeldung_taugt(_CE()):
+                fehler.append("Metadaten-Anmeldung der VM gilt in Colab als "
+                              "Anmeldung")
+            if not RS.anmeldung_taugt(object()):
+                fehler.append("echte Anmeldung wird in Colab verworfen")
+            # Ausserhalb von Colab ist dieselbe Anmeldung der normale Weg
+            # einer GCE-Maschine mit Dienstkonto.
+            G.ist_colab = lambda: False
+            if not RS.anmeldung_taugt(_CE()):
+                fehler.append("Dienstkonto einer echten GCE-Maschine wird "
+                              "verworfen")
+        finally:
+            G.ist_colab = echt_colab
+            for k, v in alt_module.items():
+                if v is None:
+                    sys.modules.pop(k, None)
+                else:
+                    sys.modules[k] = v
+
+        # Und die Meldung muss auf die Anmeldung zeigen, nicht auf die
+        # Freigabe. Eine falsche Fährte kostet hier eine Stunde.
+        quelle_rs = quelltext("referenz_sync.py")
+        if "metadata.google.internal" not in quelle_rs:
+            fehler.append("der Metadaten-404 wird nicht als fehlende "
+                          "Anmeldung erkannt")
+
         if fehler:
             b.add("FEHLER", "Sheets-Anbindung fehlerhaft", "; ".join(fehler))
         else:

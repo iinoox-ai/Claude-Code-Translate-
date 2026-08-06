@@ -1612,6 +1612,55 @@ verlinkt hat. Die Entscheidungen stehen dort, wo sie anfallen — im Ablauf.
 
 ---
 
+## Die Anmeldung der VM ist keine Anmeldung
+
+**Entschieden (August 2026), nach einer Fehlersuche in der falschen Richtung.**
+
+Beim Einrichten eines neuen Buchs meldete der Preflight:
+
+```
+FEHLER: Spreadsheet 1shKsTkG_una… nicht erreichbar:
+  Failed to retrieve http://metadata.google.internal/…/service-accounts/
+  default/?recursive=true from the Google Compute Engine metadata service.
+  Status: 404
+  Stimmt die ID, und ist das Dokument fuer dieses Konto freigegeben?
+```
+
+ID und Freigabe waren in Ordnung. Was fehlte, war die Anmeldung — und die
+Meldung fragte nach etwas anderem.
+
+Die Ursache liegt in `_credentials()`. Der mittlere der drei Wege ist
+`google.auth.default()`, und er ist der wichtige: Über ihn sehen die
+Unterprozesse, was in der Zelle angemeldet wurde. Nur findet dieser Aufruf in
+Colab **immer** etwas. Die Laufzeit ist eine Google-VM mit Metadatendienst,
+und der liefert eine Compute-Engine-Anmeldung. An ihr hängt kein Dienstkonto.
+Das Objekt lässt sich bauen, `default()` gibt es ohne Ausnahme zurück, und
+erst der erste Zugriff scheitert — mit einem HTTP 404 auf einen Host, der mit
+Google Sheets nichts zu tun hat.
+
+`_credentials()` nahm den Rückfall also für eine Anmeldung, kam nie beim
+Colab-Zweig an und erreichte auch die dort hinterlegte, richtige Meldung
+(„Einmal je Sitzung: `colab_start.sheets_anmelden()`") nie.
+
+Seither prüft `anmeldung_taugt()`, ob es sich um die Metadaten-Anmeldung der
+VM handelt, und verwirft sie **nur in Colab**. Außerhalb ist dieselbe
+Anmeldung der normale Weg einer GCE-Maschine mit Dienstkonto; sie dort zu
+verwerfen wäre der umgekehrte Fehler.
+
+Zwei Stellen hatten dieselbe blinde Stelle:
+
+- **Die Anmeldeprüfung selbst.** `sheets_anmelden()` startet einen
+  Unterprozess und meldete „SICHTBAR", wenn `default()` nicht wirft — also
+  auch dann, wenn nur der Rückfall gefunden wurde. Eine grüne Zelle und
+  trotzdem kein Zugriff, genau das, was die Prüfung verhindern sollte. Sie
+  benutzt jetzt `anmeldung_taugt()`.
+- **Die Fehlermeldung.** Ein Metadaten-404 zeigt jetzt auf die Anmeldung und
+  nicht auf ID und Freigabe. Eine falsche Fährte kostet hier eine Stunde, und
+  sie kostet sie beim Einrichten — dann, wenn man dem Werkzeug noch nicht
+  ansieht, wo es lügt.
+
+---
+
 ## Verworfen — und warum
 
 **API-Frontier-Modell als Primärübersetzer** (zunächst). Die Kostenrechnung

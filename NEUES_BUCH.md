@@ -138,6 +138,19 @@ Sheets-Aufrufe über `colab_start.sync_im_kernel()` statt über
 `colab_start.lauf(...)`. Im Normalfall steht dort „Unterprozesse sehen die
 Anmeldung".
 
+**Dieser Schritt ist nicht optional, und er gilt je Sitzung.** Wird er
+vergessen, meldet der Preflight:
+
+```
+Keine Google-Anmeldung — die ID und die Freigabe sind nicht das Problem.
+```
+
+Vor August 2026 stand dort stattdessen „Spreadsheet … nicht erreichbar —
+stimmt die ID, und ist das Dokument freigegeben?", zusammen mit einem
+Fehler von `metadata.google.internal`. Beides zeigte in die falsche
+Richtung: Was da antwortete, war der Metadatendienst der Colab-VM, nicht
+Google Sheets.
+
 ### 7 · Tabs im Spreadsheet anlegen
 
 ```python
@@ -382,6 +395,7 @@ Freigabe.
 | `Das Spreadsheet wuerde vorhandene Daten loeschen` | erst `referenz_sync.py --erstbefuellung` |
 | `Verhältnis 0.29 -> Durchgang verworfen` | passiert; der Chunk wird wiederholt |
 | `Keine Eingabe moeglich` bei `neu` | denselben Aufruf mit `--ja` wiederholen |
+| `Keine Google-Anmeldung — die ID und die Freigabe sind nicht das Problem` | `colab_start.sheets_anmelden()` in einer Zelle, dann den Schritt erneut |
 | `Rahmenmarker »#« kommt im Text nicht vor` | kein Fehler, aber lesen: Abschnitt 5a |
 | `N nachgebaute Quellchunks, aber der Lauf hatte M` | `input.txt`, `ebenen.json` oder `zitate.json` haben sich seit dem Lauf geändert — zurücksetzen oder den Lauf wiederholen |
 | „Nicht geprüft: N Chunks" im Screening | `annotation.py --nur screening` erneut |

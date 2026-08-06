@@ -148,10 +148,18 @@ def sheets_anmelden(code=CODE):
     auth.authenticate_user()
     print("Angemeldet.")
 
-    pruef = ("import google.auth, sys\n"
+    # Geprueft wird ueber referenz_sync.anmeldung_taugt und nicht ueber
+    # 'default() wirft nicht': In Colab findet default() immer die
+    # Compute-Engine-Anmeldung der VM, an der kein Dienstkonto haengt.
+    # Diese Zelle haette also 'SICHTBAR' gemeldet, und der Fehler waere
+    # erst im Schritt aufgetaucht — als angebliches Problem des
+    # Spreadsheets.
+    pruef = ("import google.auth, referenz_sync as R\n"
              "try:\n"
-             "    google.auth.default()\n"
-             "    print('SICHTBAR')\n"
+             "    creds, _ = google.auth.default()\n"
+             "    gut = R.anmeldung_taugt(creds)\n"
+             "    print('SICHTBAR' if gut else\n"
+             "          'UNSICHTBAR nur die Metadaten-Anmeldung der VM')\n"
              "except Exception as e:\n"
              "    print('UNSICHTBAR', e)\n")
     r = subprocess.run([sys.executable, "-c", pruef],

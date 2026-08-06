@@ -157,6 +157,37 @@ def _im_kernel():
         return False
 
 
+def anmeldung_taugt(creds):
+    """Ist das eine echte Anmeldung — oder nur der Rueckfall der VM?
+
+    'google.auth.default()' findet in Colab IMMER etwas: Die Laufzeit ist
+    eine Google-VM mit Metadatendienst, und der liefert eine
+    Compute-Engine-Anmeldung. Nur haengt an ihr kein Dienstkonto. Das
+    Objekt laesst sich bauen, der Aufruf gibt es zurueck, und erst beim
+    ersten Zugriff kommt
+
+        Failed to retrieve http://metadata.google.internal/…/service-
+        accounts/default/ from the Google Compute Engine metadata
+        service. Status: 404
+
+    — eine Meldung, die nach einem Problem des Spreadsheets aussieht und
+    keines ist. Ohne diese Pruefung nahm '_credentials' den Rueckfall fuer
+    eine Anmeldung, kam nie beim Colab-Zweig an und meldete am Ende
+    'Stimmt die ID, und ist das Dokument freigegeben?', obwohl beides
+    stimmte.
+
+    Ausserhalb von Colab ist dieselbe Anmeldung voellig in Ordnung: Auf
+    einer echten GCE-Maschine mit Dienstkonto ist sie der normale Weg.
+    Verworfen wird sie deshalb nur dort, wo sie nichts bedeutet."""
+    if not G.ist_colab():
+        return True
+    try:
+        import google.auth.compute_engine as ce
+        return not isinstance(creds, ce.Credentials)
+    except Exception:
+        return True
+
+
 def _credentials():
     """Drei Wege, in dieser Reihenfolge: Dienstkonto, bereits vorhandene
     Anmeldung, interaktive Anmeldung. Der mittlere ist der wichtige —
@@ -171,7 +202,8 @@ def _credentials():
     try:
         import google.auth
         creds, _ = google.auth.default()
-        return creds
+        if anmeldung_taugt(creds):
+            return creds
     except Exception:
         pass
     if G.ist_colab() and _im_kernel():
@@ -210,6 +242,19 @@ def _buch(cfg):
     except SyncFehler:
         raise
     except Exception as e:
+        # Scheitert die Anmeldung selbst, hat das mit dem Spreadsheet
+        # nichts zu tun — und die Frage nach ID und Freigabe schickt
+        # jemanden eine Stunde in die falsche Richtung. Der Metadaten-404
+        # ist der haeufigste Fall: keine Anmeldung, nur die VM.
+        if "metadata.google.internal" in str(e):
+            raise SyncFehler(
+                "Keine Google-Anmeldung — die ID und die Freigabe sind "
+                "nicht das Problem.\n"
+                "  Was hier antwortet, ist der Metadatendienst der VM, "
+                "nicht Google Sheets.\n\n"
+                "  Einmal je Sitzung in einer Zelle ausfuehren:\n"
+                "      colab_start.sheets_anmelden()\n\n"
+                "  Danach diesen Schritt erneut starten.")
         raise SyncFehler(
             f"Spreadsheet {kennung[:12]}… nicht erreichbar: {e}\n"
             f"  Stimmt die ID, und ist das Dokument fuer dieses Konto "
