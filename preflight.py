@@ -1702,7 +1702,13 @@ installiert, requests-Pfad"
             da = set(re.findall(r"^## (\d+) ", "\n".join(
                 "".join(c["source"]) for c in zellen
                 if c["cell_type"] == "markdown"), re.M))
-            for d in _glob_md():
+            # Die Skripte zaehlen mit. 'pipeline.py' schickte an der Pause
+            # zu 'Zelle 1 erneut ausfuehren' — Zelle 1 ist die
+            # Google-Anmeldung. Die Nummer stammte aus der Zeit vor ihr,
+            # und weil der Waechter nur die Dokumente las, ist sie zwei
+            # Umnummerierungen lang stehen geblieben. Wer an einer Pause
+            # steht, liest diese Zeile und nicht NEUES_BUCH.md.
+            for d in _glob_md() + _glob_py():
                 falsch = sorted({n for n in re.findall(
                     r"Zelle (\d+)", quelltext(d))} - da)
                 if falsch:
