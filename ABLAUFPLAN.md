@@ -72,14 +72,21 @@ Damit steht die Einrichtung. Alles Weitere macht der Lauf.
 ### Ein anderes Modell für dieses Buch
 
 Die Modellbelegung steht je Rolle in `projekt.json` (`modell_uebersetzung`,
-`modell_revision`, `modell_stil`, …). Wer sie für ein Buch ändert, trägt die
-betroffenen Schlüssel zusätzlich in `technik_ausnahmen` ein:
+`modell_revision`, `modell_stil`, …). Wer sie für ein Buch beansprucht — ob
+unverändert oder abweichend —, trägt die betroffenen Schlüssel zusätzlich in
+`technik_ausnahmen` ein:
 
 ```json
-"modell_uebersetzung": "claude-sonnet-5",
-"modell_revision": "claude-sonnet-5",
+"modell_uebersetzung": "claude-opus-5",
+"modell_revision": "claude-opus-5",
 "technik_ausnahmen": ["modell_uebersetzung", "modell_revision"]
 ```
+
+Die Namen hier sind die eingestellten. Wer sie ersetzt, ersetzt **beide** —
+sonst übersetzt das eine Modell und revidiert das andere. Was die Belegung je
+Rolle bedeutet, stellt `pipeline.py modelle` neben die Empfehlung aus
+`gemeinsam.EMPFEHLUNG`; für Übersetzung und Revision steht dort „hier wird
+nicht gespart".
 
 Ohne diese Liste zieht `pipeline.py technik --uebernehmen` die Werte aus dem
 Repo nach und setzt die Wahl still zurück. Mit ihr meldet der Abgleich sie als

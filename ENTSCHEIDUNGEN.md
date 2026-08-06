@@ -1584,6 +1584,20 @@ Drei Dinge, die aus einer Erinnerung eine Prüfung machen:
   darunter `rahmen_marker`. Wer eine `projekt.json` für ein neues Buch
   durchsieht, sieht einen fehlenden Schlüssel nicht; er entscheidet sich
   hinter dem Rücken. Ein Selbsttest hält die Vorlage vollständig.
+- **Modellnamen in der Doku sind die eingestellten.** Die Anleitung zeigte als
+  Beispiel für `technik_ausnahmen` die Rolle `modell_uebersetzung` mit dem
+  Korrektoratsmodell besetzt — in einem Block, den sie selbst zum Kopieren
+  anbietet. Wer ihn übernahm, tauschte das wichtigste Modell der Pipeline
+  gegen ein schwächeres, und `technik_ausnahmen` schützte den Fehler dann
+  auch noch vor `pipeline.py technik --uebernehmen`, weil genau das seine
+  Aufgabe ist. Für Übersetzung und Revision steht in `EMPFEHLUNG` „hier wird
+  nicht gespart"; das Beispiel sagte das Gegenteil.
+
+  Ein Selbsttest vergleicht jetzt jede Modellzuweisung in der Doku mit der
+  Vorlage. Ausgenommen ist `ARBEITSAUFTRAG.md` — ein Dokument, das
+  beschreibt, was war, darf nicht mitwandern. Nicht ausgenommen ist diese
+  Datei hier: Der Test kann Beleg und Anweisung nicht unterscheiden und soll
+  es nicht, deshalb steht der falsche Name oben in Prosa statt in JSON.
 - **Kein verwaistes Dokument.** `NEUES_BUCH.md` lag ein halbes Jahr im Repo,
   ohne dass irgendein anderes Dokument es erwähnt hätte — ausgerechnet die
   Datei, die man zuerst braucht, war die einzige unauffindbare. Ein
