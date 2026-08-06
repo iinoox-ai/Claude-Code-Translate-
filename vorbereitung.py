@@ -286,9 +286,15 @@ def ebenen_liefern(cfg, paras, perspektive):
         print("  stilprofil.json nennt keine 'perspektive' — ohne "
               "Ebenennamen waere jede Benennung geraten. Uebersprungen.")
         return None, 0
-    system = (EBENEN_SYSTEM + "\n\nErlaubte Ebenennamen (aus "
-              "stilprofil.json, genau so schreiben):\n"
-              + "\n".join(f"  {n}: {perspektive[n]}" for n in namen))
+    # Der Name steht in Anfuehrungszeichen, die Beschreibung dahinter.
+    # Frueher stand hier 'Name: Beschreibung' und darunter 'genau so
+    # schreiben' — das Modell nahm die ganze Zeile als Namen, und jeder
+    # Eintrag wurde als unbekannte Ebene abgewiesen.
+    system = (EBENEN_SYSTEM + "\n\nErlaubte Ebenennamen aus "
+              "stilprofil.json. Als 'ebene' steht genau der Name "
+              "zwischen den Zeichen »«, ohne die Beschreibung "
+              "dahinter:\n"
+              + "\n".join(f"  »{n}«  {perspektive[n]}" for n in namen))
     antwort = G.chat(cfg, system, absatzanfaenge(paras), rolle="ebenen",
                      roh=True, schema=EBENEN_SCHEMA)
     daten = G.json_aus_antwort(antwort)
@@ -297,6 +303,9 @@ def ebenen_liefern(cfg, paras, perspektive):
               f"nicht geschrieben")
         return None, 0
 
+    daten, gerichtet = G.ebenen_namen_richten(daten, perspektive)
+    for z in gerichtet:
+        print(f"  Name gerichtet: {z}")
     maengel = G.ebenen_maengel(daten, perspektive)
     if maengel:
         print("  FEHLER: " + "; ".join(maengel[:4]))
@@ -444,8 +453,11 @@ def main():
               f"{os.getcwd()}")
         print("  und werden dort gepflegt. War ein Spreadsheet gemeint, "
               "gehoert die ID")
-        print(f"  in {G.CONFIG} — danach 'pipeline.py reset --ab "
-              "vorbereitung' und der Schritt laeuft erneut.")
+        print(f"  in {G.CONFIG}. Die Uebertragung holt dann")
+        print("    python3 referenz_sync.py --erstbefuellung")
+        print("  nach — ohne Modellaufruf. Diesen Schritt nicht wiederholen: "
+              "Er kostet")
+        print("  erneut und schreibt seine Ergebnisse dann nach '.neu'.")
         return
     print("\nsheets_id ist gesetzt — Uebertragung ins Spreadsheet:")
     try:

@@ -2309,6 +2309,43 @@ def ebenen_gruppen(paras, ebenen):
     return gruppen, namen
 
 
+def ebenen_namen_richten(ebenen, perspektive):
+    """Macht aus 'Name: Beschreibung' den blossen Namen — und nur das.
+
+    Der Prompt listete die erlaubten Namen samt Beschreibung ('Name:
+    Beschreibung') und verlangte darunter 'genau so schreiben'. Das
+    Modell hat die ganze Zeile als Namen genommen, alle vier Eintraege
+    wurden als unbekannte Ebene abgewiesen, und ebenen.json entstand
+    nicht — beim Buch Wilhelm mit fuenf Ebenen und sieben Wechseln.
+
+    Der Prompt ist geschaerft. Die Reparatur bleibt trotzdem, weil die
+    Abweichung mechanisch und eindeutig ist: Genau ein bekannter Name
+    ist ein Praefix, und dahinter steht ein Trennzeichen. Passen zwei,
+    wird nicht geraten — dann bleibt es ein Mangel, und die Datei wird
+    nicht geschrieben. Ein falsch benannter Eintrag saesse sonst mit der
+    Beschreibung einer anderen Ebene im Prompt.
+
+    Gibt (ebenen, gerichtet) zurueck; 'gerichtet' gehoert in die
+    Ausgabe, damit eine stille Korrektur keine stille bleibt."""
+    bekannt = list(perspektive) if isinstance(perspektive, dict) else []
+    if not isinstance(ebenen, list) or not bekannt:
+        return ebenen, []
+    gerichtet = []
+    for e in ebenen:
+        if not isinstance(e, dict):
+            continue
+        name = str(e.get("ebene", ""))
+        if name in bekannt:
+            continue
+        treffer = [b for b in bekannt
+                   if name.startswith(b)
+                   and name[len(b):].lstrip().startswith((":", "—", "-", "–"))]
+        if len(treffer) == 1:
+            e["ebene"] = treffer[0]
+            gerichtet.append(f"{name} -> {treffer[0]}")
+    return ebenen, gerichtet
+
+
 def ebenen_maengel(ebenen, perspektive):
     """Was an ebenen.json nicht stimmt, als Liste von Zeilen.
 
