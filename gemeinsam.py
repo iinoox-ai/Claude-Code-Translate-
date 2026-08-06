@@ -131,7 +131,11 @@ STANDARD = {
     # dann macht der Lauf die Wiederholung selbst. 'default' kann das
     # nicht, weil nur der Anbieter weiss, welches Ersatzmodell zu welcher
     # Ablehnungskategorie passt.
-    "fallback_modelle":          "default",
+    # Vorgabe ist die Liste und nicht "default": Der serverseitige
+    # Weg ist eine Beta, und beim Buch Alexander war sie fuer den
+    # Schluessel nicht freigeschaltet. Eine Vorgabe, die auf dem
+    # Konto dieses Projekts nicht traegt, ist die falsche Vorgabe.
+    "fallback_modelle":          ["claude-sonnet-5"],
     # Serverseitige Websuche der Zitatrecherche. Die Fassung ab Februar 2026
     # filtert Treffer vor dem Kontextfenster; 'websuche_filtern: false'
     # erzwingt den direkten Aufruf ohne diesen Zwischenschritt.
