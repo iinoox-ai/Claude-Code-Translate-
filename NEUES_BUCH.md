@@ -57,9 +57,15 @@ alles Weitere — `sheets_id`, `rahmen_marker`, die Modellwahl — wird dort
 geändert. Das Repo fasst man für ein neues Buch nicht mehr an. Die Vorlage
 bleibt unverändert liegen und ist beim nächsten Buch wieder der Ausgangspunkt.
 
-Der Lauf startet dabei gleich mit — das ist in Ordnung, er hält beim ersten
-Modellschritt ohnehin nicht lange auf. Wer das nicht will, bricht die Zelle
-nach der Ordnermeldung ab.
+**Beim Erstlauf startet die Zelle den Lauf nicht.** Sie legt die Datei an und
+hält an, mit der Liste dessen, was jetzt einzutragen ist. Das ist der einzige
+Zeitpunkt, zu dem das geht: `sheets_id` liest die Vorbereitung, um die
+Referenzdaten ins Spreadsheet zu stellen, und `rahmen_marker` entscheidet über
+die Chunkgrenzen. Beides nachträglich zu setzen heißt, die betroffenen Schritte
+zu wiederholen.
+
+Nach dem Eintragen (Abschnitt 5) einfach **Zelle 2 erneut** ausführen — dann
+läuft sie durch.
 
 ### 5 · `projekt.json` anpassen
 
@@ -72,6 +78,25 @@ willst) — die ID oder die volle Adresse aus der Browserzeile:
 ```json
 "sheets_id": "1a2B3c4D5e6F7g8H9i0JklMnoPqrStUvWxYz"
 ```
+
+**Das Spreadsheet bleibt dabei leer, und das ist richtig so.** Die Tabs werden
+nicht von Hand gefüllt — sie werden angelegt und dann von der Vorbereitung
+beschrieben. Anlegen:
+
+```python
+colab_start.lauf("referenz_sync.py", "--vorlage", code=CODE)
+```
+
+Das legt jeden fehlenden Tab mit seiner Kopfzeile an und lässt vorhandene in
+Ruhe. Gefüllt werden sie später: `vorbereitung.py` erzeugt Glossar, Personen,
+Figurenblatt, Anrede, Leitmotive und Kapitel aus dem Analysepaket und trägt sie
+ins Spreadsheet ein (`erstbefuellung`, nur in leere Tabs). Erst **ab
+`PAUSE_review`** ist das Spreadsheet die Quelle: Was du dort änderst, holt
+`referenz_sync` in die JSON-Dateien zurück. Sie von Hand zu editieren ist ab
+dann sinnlos — sie werden überschrieben.
+
+Ohne `sheets_id` gilt derselbe Ablauf ohne Google: Die Vorbereitung schreibt
+die JSON-Dateien, und die pflegst du direkt.
 
 **Die Modellwahl für dieses Buch festhalten.** Übersetzung und Revision laufen
 mit `claude-opus-5` — dort wird nicht gespart, weil jeder Fehler dieses Passes
