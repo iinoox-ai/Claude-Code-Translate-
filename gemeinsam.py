@@ -1027,6 +1027,40 @@ class ApiFehler(RuntimeError):
     """Fehler eines API-Backends, den der Aufrufer als Versuch zaehlen darf."""
 
 
+def kontingent_erschoepft(fehler):
+    """Ist das ein erreichtes Ausgabenlimit des Kontos?
+
+    Der Anbieter meldet es als HTTP 400 — formal ein Anwendungsfehler,
+    tatsaechlich ein Zustand des Kontos, an dem sich durch Wiederholen
+    nichts aendert. Die Chunk-Schleifen probieren jeden Fehler dreimal;
+    beim Lauf Lars standen dadurch drei identische Absaetze im Log, und
+    der wirkliche Grund — 'You have reached your specified API usage
+    limits' — stand dreimal als API-Rohtext darin, statt einmal als
+    Aussage."""
+    t = str(fehler).lower()
+    return ("usage limit" in t or "regain access" in t
+            or "credit balance" in t)
+
+
+def kontingent_text(fehler):
+    """Was zu tun ist, wenn das Kontingent erschoepft ist."""
+    wann = re.search(r"regain access on ([0-9-]+)(?: at ([0-9:]+ ?UTC))?",
+                     str(fehler))
+    zeile = (f"  Wieder verfuegbar ab {wann.group(1)}"
+             + (f" {wann.group(2)}" if wann.group(2) else "") + ".\n"
+             if wann else "")
+    return ("\nDas Ausgabenlimit des Kontos ist erreicht — kein Fehler "
+            "des Laufs.\n" + zeile +
+            "  Das Limit steht in der Konsole des Anbieters (Billing -> "
+            "usage limits)\n"
+            "  und laesst sich dort anheben.\n\n"
+            "  Wiederholen hilft nicht; der Lauf bricht deshalb sofort ab "
+            "statt\n"
+            "  dreimal dieselbe Anfrage zu schicken. Alles bisher "
+            "Gerechnete bleibt\n"
+            "  liegen, der Neustart setzt am offenen Chunk fort.")
+
+
 def _warte(antwort, versuch):
     """Wartezeit vor dem naechsten Versuch. 'retry-after' hat Vorrang."""
     if antwort is not None:

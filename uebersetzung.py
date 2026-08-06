@@ -1142,6 +1142,12 @@ def main():
                 break
 
             except Exception as e:
+                # Ein erschoepftes Kontingent aendert sich durch
+                # Wiederholen nicht — sofort abbrechen, mit dem Grund
+                # statt mit dreimal demselben API-Rohtext.
+                if G.kontingent_erschoepft(e):
+                    sys.exit(G.kontingent_text(e)
+                             + f"\n\n  Abbruch bei Chunk {i+1}.")
                 print(f"    Versuch {versuch}/{cfg['max_retries']}: {e}")
                 if versuch == cfg["max_retries"]:
                     sys.exit(f"\nAbbruch bei Chunk {i+1}. "
