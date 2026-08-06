@@ -563,6 +563,12 @@ def main():
                     time.sleep(2)
 
                 except Exception as e:
+                    # Ein erschoepftes Kontingent aendert sich durch
+                    # Wiederholen nicht. Dreimal dieselbe Anfrage kostet
+                    # Zeit und verschuettet den Grund unter Rohtext.
+                    if G.kontingent_erschoepft(e):
+                        sys.exit(G.kontingent_text(e)
+                                 + f"\n\n  Abbruch bei Chunk {i+1}.")
                     print(f"    Versuch {versuch}/{cfg['max_retries']}: {e}")
                     if versuch == cfg["max_retries"]:
                         sys.exit(f"\nAbbruch bei Chunk {i+1}. "

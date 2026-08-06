@@ -3027,6 +3027,32 @@ installiert, requests-Pfad"
             fehler.append("Ebenenprompt listet Name und Beschreibung "
                           "wieder ununterscheidbar")
 
+        # Ein erschoepftes Kontingent ist ein Zustand des Kontos, kein
+        # Fehler des Laufs — und aendert sich durch Wiederholen nicht.
+        # Die Chunk-Schleifen probierten jeden Fehler dreimal; im Lauf
+        # Lars standen dadurch drei identische API-Rohtexte im Log, und
+        # der Grund stand nirgends als Aussage.
+        echt = ("HTTP 400: {'type': 'error', 'error': {'type': "
+                "'invalid_request_error', 'message': 'You have reached "
+                "your specified API usage limits. You will regain access "
+                "on 2026-09-01 at 00:00 UTC.'}}")
+        if not G.kontingent_erschoepft(echt):
+            fehler.append("erschoepftes Kontingent wird nicht erkannt")
+        text = G.kontingent_text(echt)
+        if "2026-09-01" not in text or "00:00 UTC" not in text:
+            fehler.append(f"Kontingenttext nennt den Termin nicht: {text!r}")
+        # Und ein gewoehnlicher Fehler darf nicht als Kontingent gelten —
+        # sonst bricht der Lauf ab, wo er wiederholen sollte.
+        for harmlos in ("HTTP 500: upstream", "Netzwerkfehler: timeout",
+                        "HTTP 400: ttl: unsupported"):
+            if G.kontingent_erschoepft(harmlos):
+                fehler.append(f"'{harmlos}' gilt faelschlich als Kontingent")
+        # Die beiden langen Schleifen muessen es auch benutzen.
+        for skript in ("uebersetzung.py", "lektorat.py"):
+            if "kontingent_erschoepft" not in quelltext(skript):
+                fehler.append(f"{skript} wiederholt bei erschoepftem "
+                              f"Kontingent")
+
         # Der Tab 'Modelle' wird geschrieben und NIE gelesen. Steht er in
         # TABS, liest ihn 'sync' zurueck und die Modellwahl waere die
         # dritte Quelle neben Repo- und Projekt-projekt.json.
