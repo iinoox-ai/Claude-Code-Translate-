@@ -97,6 +97,56 @@ def selbsttest(cfg, b):
         else:
             b.add("OK", "Spatien: vor … erhalten, vor Komma und "
                         "Semikolon getilgt")
+        # Ein zurueckgewiesener Schluessel ist ein Fehler, keine Warnung:
+        # Er wiederholt sich bei jedem Aufruf. Als Warnung durchgewinkt
+        # lief der Preflight weiter, und der naechste Schritt kostete
+        # Geld, bevor er an derselben Stelle starb.
+        fehler = []
+        for text, soll in (
+                ("HTTP 401 — Schluessel fehlt oder ist abgelaufen", True),
+                ("HTTP 403: forbidden", True),
+                ('HTTP 400: {"error": {"message": "API key not valid."}}',
+                 True),
+                ("HTTP 429: rate limited", False),
+                ("HTTP 400: max_tokens: too large", False),
+                ("Netzwerkfehler: timeout", False)):
+            if _anmeldung_gescheitert(Exception(text)) != soll:
+                fehler.append(f"Anmeldefehler falsch erkannt: {text[:40]}")
+        # Und die Form des Schluessels verraet vertauschte Geheimnisse,
+        # ohne den Wert zu zeigen. Das ist der einzige Fehler, bei dem
+        # BEIDE Anbieter gleichzeitig 'invalid api key' melden.
+        if G.schluesselform("anthropic", "sk-ant-api03-x"):
+            fehler.append("richtiger Anthropic-Schluessel wird bemaengelt")
+        if G.schluesselform("google", "AIzaSyX"):
+            fehler.append("richtiger Google-Schluessel wird bemaengelt")
+        if "google" not in G.schluesselform("anthropic", "AIzaSyX"):
+            fehler.append("vertauschte Geheimnisse werden nicht benannt")
+        if "anthropic" not in G.schluesselform("google", "sk-ant-api03-x"):
+            fehler.append("vertauschte Geheimnisse werden nicht benannt")
+        if G.schluesselform("anthropic", ""):
+            fehler.append("ein fehlender Schluessel gilt als falsche Form")
+        # Zu wenige Absaetze hat zwei sehr verschiedene Ursachen, und sie
+        # brauchen verschiedene Handgriffe. Als ein Sammelbefund gemeldet,
+        # laesst die Diagnose den falschen versuchen.
+        eine_zeile = "\n".join(f"Alinea {i} eindigt netjes." for i in
+                               range(1, 60))
+        mitten = "\n".join(["Dit is een lange zin die", "over regels loopt en",
+                            "pas hier eindigt."] * 20)
+        d1, d2 = (umbruchdiagnose(eine_zeile, 1), umbruchdiagnose(mitten, 1))
+        if "EINE ZEILE JE ABSATZ" not in d1:
+            fehler.append("Zeile-je-Absatz wird nicht erkannt")
+        if "MITTEN IM SATZ" not in d2:
+            fehler.append("Umbruch mitten im Satz wird nicht erkannt")
+        if umbruchdiagnose("A.\n\nB.\n\nC.", 3):
+            fehler.append("gesunder Text bekommt eine Umbruchdiagnose")
+
+        if fehler:
+            b.add("FEHLER", "Schluesselpruefung fehlerhaft", "; ".join(fehler))
+        else:
+            b.add("OK", "Zurueckgewiesene Schluessel sind ein Fehler, "
+                        "vertauschte Geheimnisse werden an der Form erkannt, "
+                        "Umbruchdiagnose unterscheidet beide Faelle")
+
         # Absatztrennung unabhaengig vom Zeilenende. Eine Datei aus Word
         # trennt mit '\r\n\r\n'; ohne Normalisierung wurden aus dem Buch
         # Alexander (56 000 Woerter) zehn Absaetze — gemeldet als
@@ -3237,10 +3287,77 @@ def pruefe_belegung(cfg, b):
               f"{modell} ({anbieter}, Effort {G.effort_fuer(cfg, rolle)})")
 
 
+# Ein Ping darf klein sein, aber nicht so klein, dass die Antwort
+# abgeschnitten wird — sonst meldet jeder Ping 'Ausgabe abgeschnitten'.
+PING_TOKENS = 16
+
+
+def _anmeldung_gescheitert(e):
+    """Hat der Anbieter den Schluessel zurueckgewiesen?
+
+    Eng gefasst und ueber beide Anbieter: Anthropic antwortet mit
+    HTTP 401 und 'invalid x-api-key', Google mit HTTP 400 und
+    'API key not valid'. Beide sind Anmeldefehler und keine Stoerungen —
+    sie wiederholen sich bei jedem Aufruf."""
+    t = str(e).lower()
+    if "http 401" in t or "http 403" in t:
+        return True
+    return "api key not valid" in t or "api_key_invalid" in t
+
+
+# Satzschliesser: Was am Zeilenende steht, wenn die Zeile ein Absatz ist.
+# Schlusszeichen duerfen von Anfuehrungs- und Klammerzeichen gefolgt sein.
+SATZENDE = re.compile(r"[.!?…][\"'»«“”’)\]]*$")
+
+
+def umbruchdiagnose(text, n_absaetze):
+    """Warum sind es so wenige Absaetze — und was hilft dagegen?
+
+    Zwei sehr verschiedene Faelle sehen in der Zaehlung gleich aus:
+
+    - EINE ZEILE JE ABSATZ, ohne Leerzeile dazwischen. Dann steht am
+      Zeilenende fast immer ein Satzschlusszeichen, und die Abhilfe ist
+      eine Verdopplung der Umbrueche.
+    - ZEILENWEISE UMBROCHEN mitten im Satz (PDF-Extraktion). Dann endet
+      die Mehrzahl der Zeilen ohne Schlusszeichen, und die Absatzgrenzen
+      sind aus dem Text allein nicht zurueckzugewinnen — da hilft nur ein
+      besserer Export.
+
+    Beide brauchen verschiedene Handgriffe. 'zeilenweise umbrochen' als
+    Sammelbefund zu melden, laesst den Leser den falschen versuchen."""
+    zeilen = [z for z in text.replace("\r\n", "\n").replace("\r", "\n")
+              .split("\n") if z.strip()]
+    if len(zeilen) <= max(4 * n_absaetze, 20):
+        return ""
+    ganz = sum(1 for z in zeilen if SATZENDE.search(z.strip()))
+    anteil = ganz / len(zeilen)
+    kopf = (f"\n           Der Text hat {len(zeilen)} nichtleere Zeilen, "
+            f"aber nur {n_absaetze} Absaetze.")
+    if anteil >= 0.7:
+        return (kopf + f"\n           {anteil:.0%} davon enden auf einem "
+                f"Satzzeichen: Es ist EINE ZEILE JE ABSATZ,\n"
+                "           nur ohne Leerzeile dazwischen. Abhilfe — "
+                "jeden Umbruch verdoppeln:\n"
+                "           python3 -c \"import io;p='input.txt';"
+                "s=io.open(p,encoding='utf-8').read();"
+                "io.open(p+'.bak','w',encoding='utf-8').write(s);"
+                "io.open(p,'w',encoding='utf-8')"
+                ".write(s.replace('\\r\\n','\\n').replace('\\n','\\n\\n'))\"\n"
+                "           (legt input.txt.bak an, bevor sie schreibt)")
+    return (kopf + f"\n           Nur {anteil:.0%} enden auf einem "
+            f"Satzzeichen: Der Text ist MITTEN IM SATZ umbrochen\n"
+            "           (typisch fuer eine PDF-Extraktion). Die "
+            "Absatzgrenzen stehen dann nicht mehr\n"
+            "           im Text — sie lassen sich nicht zuverlaessig "
+            "zurueckgewinnen.\n"
+            "           Abhilfe ist ein Export, der Absaetze als "
+            "Absaetze erhaelt (docx, epub).")
+
+
 def pruefe_api(cfg, b, backends, ping):
     """Schluessel und Erreichbarkeit der genutzten API-Anbieter.
 
-    Der Ping schickt genau einen Token — er kostet praktisch nichts und
+    Der Ping schickt ein paar Token — er kostet praktisch nichts und
     faengt abgelaufene Schluessel ab, bevor ein Volllauf startet."""
     b.abschnitt("API-Anbieter")
     if G.ist_colab():
@@ -3255,6 +3372,17 @@ def pruefe_api(cfg, b, backends, ping):
                   f"Sonst: export {var}=...")
             ok = False
             continue
+        # Die FORM des Schluessels, ohne ihn zu zeigen. Vertauschte
+        # Geheimnisse sind der einzige Fehler, bei dem beide Anbieter
+        # gleichzeitig 'invalid api key' melden — und keine der beiden
+        # Anbietermeldungen sagt einem das.
+        form = G.schluesselform(anbieter, G.api_schluessel(anbieter))
+        if form:
+            b.add("FEHLER", f"Schluessel fuer {anbieter} hat die falsche Form",
+                  f"Der hinterlegte Wert {form}\n"
+                  f"           Colab: Secret '{secret}' pruefen.")
+            ok = False
+            continue
         b.add("OK", f"Schluessel fuer {anbieter} vorhanden")
         if not ping:
             continue
@@ -3262,7 +3390,7 @@ def pruefe_api(cfg, b, backends, ping):
                      if G.backend_name(G.modell_fuer(cfg, r)) == anbieter)
         modell = G.modell_fuer(cfg, rolle)
         probe = dict(cfg)
-        probe["max_tokens_api"] = 1
+        probe["max_tokens_api"] = PING_TOKENS
         try:
             G.BACKENDS[anbieter].chat(probe, "Antworte mit OK.", "OK",
                                       rolle=rolle, modell=modell)
@@ -3277,8 +3405,23 @@ def pruefe_api(cfg, b, backends, ping):
                       f"Rolle '{rolle}'. Verfuegbare Namen zeigt\n"
                       f"           python3 verifikation.py")
                 ok = False
+            elif _anmeldung_gescheitert(e):
+                # Eine abgelehnte Anmeldung wird durch Wiederholen nicht
+                # besser. Als Warnung durchgewinkt lief der Preflight
+                # weiter und der naechste Schritt kostete Geld, bevor er
+                # an derselben Stelle starb.
+                b.add("FEHLER", f"{anbieter} weist den Schluessel zurueck",
+                      f"{e}\n"
+                      f"           Das wiederholt sich bei jedem Aufruf. "
+                      f"Zu pruefen:\n"
+                      f"           - ist das Secret '{secret}' das des "
+                      f"richtigen Anbieters?\n"
+                      f"           - ist der Schluessel noch gueltig, "
+                      f"vollstaendig, nicht widerrufen?\n"
+                      f"           - hat diese Colab-Sitzung Zugriff auf "
+                      f"das Secret?")
+                ok = False
             else:
-                # Ein am Limit abgeschnittener Ein-Token-Ping ist kein Fehler.
                 b.add("WARN", f"Ping an {modell} ohne verwertbare Antwort",
                       f"{e}\n           Der Schluessel ist da; die Anfrage "
                       f"selbst wird im Lauf erneut versucht.")
@@ -3556,17 +3699,10 @@ def pruefe_text(cfg, b):
         # trennt keine Leerzeile die Absaetze, und der Hinweis
         # 'muessen durch Leerzeilen getrennt sein' laesst offen, was zu
         # tun ist.
-        zeilen = text.count("\n")
-        verdacht = ("\n           Der Text hat "
-                    f"{zeilen} Zeilenumbrueche, aber nur {len(paras)} "
-                    f"Absaetze: Er ist vermutlich zeilenweise umbrochen "
-                    f"(Word- oder PDF-Export).\n"
-                    "           Absaetze brauchen eine LEERZEILE "
-                    "dazwischen, kein einfaches Zeilenende."
-                    if zeilen > 4 * len(paras) else "")
         b.add("FEHLER", f"Nur {len(paras)} Absaetze erkannt",
               "Absaetze muessen durch Leerzeilen getrennt sein."
-              + verdacht + "\n           head -c 600 input.txt")
+              + umbruchdiagnose(text, len(paras))
+              + "\n           head -c 600 input.txt")
         return None
 
     laengen = sorted(len(p.split()) for p in paras)
