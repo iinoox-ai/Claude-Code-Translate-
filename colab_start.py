@@ -19,6 +19,7 @@ Alles, was der Lauf schreibt, entsteht relativ zum Arbeitsverzeichnis und
 liegt damit sofort dauerhaft in Drive.
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -321,6 +322,106 @@ def bericht(stand, git_hinweis=""):
     else:
         print(f"  {G.F['quelle']}: fehlt im Projektordner")
     print()
+
+
+def _merkmal(wert):
+    """Was sich ueber einen Schluessel sagen laesst, ohne ihn zu zeigen.
+
+    Laenge, Praefix und ein kurzer Fingerabdruck. Der Fingerabdruck
+    dient genau einem Zweck: Zwei Werte vergleichen, ohne einen davon zu
+    sehen. Der Wert selbst erscheint nirgends — nicht im Notebook, nicht
+    im Log, nicht im Bericht."""
+    if not wert:
+        return "fehlt"
+    roh = str(wert)
+    sauber = "".join(roh.split())
+    fp = hashlib.sha256(sauber.encode("utf-8")).hexdigest()[:8]
+    hinweise = []
+    if roh != sauber:
+        hinweise.append(f"enthaelt {len(roh) - len(sauber)} Leerzeichen "
+                        f"oder Umbrueche")
+    if any(ord(z) > 126 for z in sauber):
+        hinweise.append("enthaelt Zeichen ausserhalb von ASCII")
+    return (f"{len(sauber)} Zeichen, beginnt mit "
+            f"{sauber[:7]!r}, Fingerabdruck {fp}"
+            + ("  ACHTUNG: " + "; ".join(hinweise) if hinweise else ""))
+
+
+def schluessel_diagnose(code=CODE):
+    """Warum weist der Anbieter den Schluessel zurueck?
+
+    Beantwortet drei Fragen, die die Fehlermeldung des Anbieters offen
+    laesst, und keine davon zeigt den Schluessel:
+
+      1. Was steht in der Umgebung, was im Colab-Secret — und ist es
+         dasselbe? Die Umgebung hat Vorrang. Ein einmal falsch gesetzter
+         Wert bleibt die ganze Sitzung und verdeckt das richtige Secret.
+      2. Sieht ein Unterprozess dasselbe? Die Schritte laufen alle als
+         Unterprozess.
+      3. Antwortet der Anbieter, wenn der Wert DIREKT aus dem Secret
+         kommt, an unserem Lesepfad vorbei? Das trennt 'der Schluessel
+         ist ungueltig' von 'unser Code verdirbt ihn unterwegs'."""
+    G.kopf("SCHLUESSEL-DIAGNOSE")
+    for anbieter, (var, secret) in sorted(G.SCHLUESSEL.items()):
+        print(f"\n--- {anbieter}  (Umgebung {var}, Secret {secret})")
+        aus_umgebung = os.environ.get(var)
+        print(f"  Umgebung: {_merkmal(aus_umgebung)}")
+        aus_secret = None
+        try:
+            from google.colab import userdata
+            aus_secret = userdata.get(secret)
+        except Exception as e:
+            print(f"  Secret:   nicht lesbar — {e}")
+        else:
+            print(f"  Secret:   {_merkmal(aus_secret)}")
+        if aus_umgebung and aus_secret:
+            gleich = "".join(str(aus_umgebung).split()) == \
+                "".join(str(aus_secret).split())
+            print(f"  Gleich:   {'ja' if gleich else 'NEIN'}")
+            if not gleich:
+                print(f"            Die Umgebung hat Vorrang. Ein Wert, der "
+                      f"einmal falsch\n"
+                      f"            hineingeraten ist, bleibt die ganze "
+                      f"Sitzung und verdeckt\n"
+                      f"            das Secret. Abhilfe:\n"
+                      f"                import os; "
+                      f"os.environ.pop({var!r}, None)\n"
+                      f"            danach diese Diagnose erneut.")
+        form = G.schluesselform(anbieter, "".join(str(aus_secret or "").split()))
+        if form:
+            print(f"  Form:     {form}")
+
+    # Der entscheidende Test: derselbe Schluessel, aber roh aus dem
+    # Secret und an unserem Lesepfad vorbei. Antwortet der Anbieter hier,
+    # liegt es an unserem Code; antwortet er nicht, am Schluessel.
+    print("\n--- Direkter Aufruf, an unserem Lesepfad vorbei")
+    try:
+        from google.colab import userdata
+        roh = "".join(str(userdata.get("ANTHROPIC_API_KEY") or "").split())
+    except Exception as e:
+        print(f"  Secret nicht lesbar — {e}")
+        return
+    if not roh:
+        print("  Kein Secret ANTHROPIC_API_KEY vorhanden.")
+        return
+    import requests
+    r = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        json={"model": "claude-opus-5", "max_tokens": 4,
+              "messages": [{"role": "user", "content": "OK"}]},
+        headers={"x-api-key": roh, "anthropic-version": "2023-06-01",
+                 "content-type": "application/json"},
+        timeout=(10, 60))
+    print(f"  HTTP {r.status_code}")
+    if r.status_code == 200:
+        print("  Der Schluessel ist gueltig. Dann verdirbt ihn etwas auf "
+              "dem Weg —\n  vermutlich ein alter Wert in der Umgebung "
+              "(siehe oben).")
+    else:
+        print(f"  {(r.text or '')[:300]}")
+        print("  Der Anbieter weist den Schluessel auch direkt zurueck. "
+              "Dann liegt es\n  nicht an diesem Code, sondern am "
+              "Schluessel oder am Konto.")
 
 
 def lauf(skript="pipeline.py", *argumente, code=CODE, projekt=None):
