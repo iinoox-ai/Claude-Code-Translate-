@@ -77,12 +77,18 @@ Zwei Eigenheiten, die nicht „repariert" werden dürfen:
   `effort_<rolle>` (deutsch in `projekt.json`, Abbildung auf `low`…`max` in
   `gemeinsam.EFFORT`).
 - **Eine Ablehnung des Sicherheitsklassifikators bricht den Lauf nicht ab.**
-  `fallbacks` (Standard `default`) lässt ein Ersatzmodell antworten; gebucht
-  wird unter dem Modell, das wirklich geantwortet hat, und damit steht die
-  Stelle als eigene Zeile in der Kostenübersicht. Der Beleg für einen
-  Rückfall ist `usage.iterations`, **nie** der Modellname — ein Alias löst
-  auf einen datierten Namen auf und wäre jedes Mal ein Fehlalarm. Achtung
-  Paket G: Die Stapel-API nimmt `fallbacks` nicht an.
+  `fallbacks` lässt ein Ersatzmodell antworten; gebucht wird unter dem
+  Modell, das wirklich geantwortet hat, und damit steht die Stelle als eigene
+  Zeile in der Kostenübersicht. Der Beleg für einen Rückfall ist
+  `usage.iterations`, **nie** der Modellname — ein Alias löst auf einen
+  datierten Namen auf und wäre jedes Mal ein Fehlalarm. Achtung Paket G: Die
+  Stapel-API nimmt `fallbacks` nicht an.
+  **Der serverseitige Weg ist eine Beta und kann fehlen.** Trägt
+  `fallback_modelle` eine **Liste** statt `"default"`, wiederholt der Lauf
+  die abgelehnte Anfrage selbst (`eigene_rueckfaelle`) — ohne jede Beta, und
+  nur dann, wenn der serverseitige Weg nicht schon läuft. `"default"` lässt
+  sich nicht nachbauen: Welches Ersatzmodell zu welcher Kategorie passt,
+  weiß nur der Anbieter.
 - **Der System-Prompt trägt einen Cache-Marker** (Anthropic
   `cache_control`). Wer Prompt-Bausteine umsortiert, zerstört unbemerkt die
   Cache-Trefferquote — identische Präfixe sind Geld. Die Lebensdauer steht in

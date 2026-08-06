@@ -125,7 +125,17 @@ STANDARD = {
     # 'default' laesst den Anbieter das Ersatzmodell nach Kategorie waehlen,
     # eine Liste von bis zu drei Modellnamen bestimmt es selbst, '' schaltet
     # den Rueckfall ab. Das antwortende Modell steht in der Kostenuebersicht.
-    "fallback_modelle":          "default",
+    #
+    # Eine LISTE ist der belastbarere Wert: Sie funktioniert auch, wenn die
+    # Betafunktion des serverseitigen Rueckfalls nicht freigeschaltet ist —
+    # dann macht der Lauf die Wiederholung selbst. 'default' kann das
+    # nicht, weil nur der Anbieter weiss, welches Ersatzmodell zu welcher
+    # Ablehnungskategorie passt.
+    # Vorgabe ist die Liste und nicht "default": Der serverseitige
+    # Weg ist eine Beta, und beim Buch Alexander war sie fuer den
+    # Schluessel nicht freigeschaltet. Eine Vorgabe, die auf dem
+    # Konto dieses Projekts nicht traegt, ist die falsche Vorgabe.
+    "fallback_modelle":          ["claude-sonnet-5"],
     # Serverseitige Websuche der Zitatrecherche. Die Fassung ab Februar 2026
     # filtert Treffer vor dem Kontextfenster; 'websuche_filtern: false'
     # erzwingt den direkten Aufruf ohne diesen Zwischenschritt.
@@ -1162,6 +1172,43 @@ def fallbacks_wert(cfg):
     return None
 
 
+class Ablehnung(ApiFehler):
+    """Der Sicherheitsklassifikator hat die Anfrage abgelehnt.
+
+    Eine eigene Klasse, weil dieser Fehler anders behandelt wird als jeder
+    andere: Wiederholen mit demselben Modell ist aussichtslos — ein
+    Klassifikatorurteil wuerfelt nicht —, mit einem anderen Modell aber
+    aussichtsreich. Fuer alles Uebrige gilt weiter ApiFehler."""
+
+    def __init__(self, text, kategorie=""):
+        super().__init__(text)
+        self.kategorie = kategorie
+
+
+def eigene_rueckfaelle(cfg):
+    """Modelle, die der Lauf bei einer Ablehnung SELBST versucht.
+
+    Der serverseitige Rueckfall braucht eine Betafreischaltung. Ist sie
+    nicht da — beim Buch Alexander war sie es nicht —, verschwindet die
+    Absicherung sonst ersatzlos. Dieser Weg braucht keine: Er liest
+    'stop_reason: refusal' und schickt dieselbe Anfrage an ein anderes
+    Modell. Das ist gewoehnliche Messages-API.
+
+    Er greift genau dann, wenn der serverseitige Weg nicht in Betrieb ist
+    — weil er abgelehnt wurde oder weil er gar nicht eingestellt war.
+    Beides gleichzeitig waere eine Wiederholung zu viel.
+
+    'default' taugt hier nicht: Welches Ersatzmodell zu welcher
+    Ablehnungskategorie passt, weiss nur der Anbieter. Wer die Absicherung
+    ohne Beta will, nennt die Modelle."""
+    if fallbacks_wert(cfg):
+        return []                      # der Server macht es bereits
+    w = cfg.get("fallback_modelle", "")
+    if not isinstance(w, (list, tuple)):
+        return []
+    return [str(m).strip() for m in w if str(m).strip()][:3]
+
+
 def fallback_abgelehnt(fehler):
     """Ist dieser Fehler die Ablehnung des serverseitigen Rueckfalls?
 
@@ -1338,10 +1385,10 @@ class AnthropicBackend(Backend):
             # gezeigt, nicht ausgewertet. Fuer den Menschen vor dem Log ist
             # er das einzige, was die Kategorie greifbar macht.
             erklaerung = str(s.get("explanation") or "").strip()
-            raise ApiFehler(
+            raise Ablehnung(
                 f"Das Modell hat die Anfrage abgelehnt (Kategorie: {grund})."
                 + (f" {erklaerung}" if erklaerung else "")
-                + " Der Chunk bleibt unuebersetzt.")
+                + " Der Chunk bleibt unuebersetzt.", grund)
         text = "".join(b.get("text", "") for b in d.get("content", [])
                        if b.get("type") == "text")
         u = d.get("usage") or {}
@@ -1451,9 +1498,15 @@ class AnthropicBackend(Backend):
         k = self.klient(cfg)
         streamen = bool(cfg.get("streaming", True))
 
+        # Die Kette der Modelle: das angefragte, dann die eigenen
+        # Ersatzmodelle. Sie ist einelementig, solange der serverseitige
+        # Rueckfall laeuft — dann macht der Anbieter das schon.
+        kette = [modell] + [m for m in eigene_rueckfaelle(cfg) if m != modell]
+        laeuft = {"modell": modell}
+
         def neues_payload():
-            return self.payload(cfg, system, user, rolle, modell, werkzeuge,
-                                schema)
+            return self.payload(cfg, system, user, rolle, laeuft["modell"],
+                                werkzeuge, schema)
 
         # Ein Payloadbauer, ein Antwortleser, zwei Transportwege. Wer die
         # SDK an 'payload' vorbei aufruft, hat zwei Wahrheiten darueber,
@@ -1482,20 +1535,45 @@ class AnthropicBackend(Backend):
                     # Der Gespraechsverlauf bleibt, er gehoert nicht dazu.
                     p = dict(neues_payload(), messages=p["messages"])
 
+        def abgelehnt_weiter(e, nr):
+            """Naechstes Modell der Kette, oder weiterreichen."""
+            if nr + 1 >= len(kette):
+                raise e
+            laeuft["modell"] = kette[nr + 1]
+            print(f"    HINWEIS: {kette[nr]} hat abgelehnt "
+                  f"(Kategorie: {e.kategorie or 'ohne Angabe'}) — "
+                  f"neuer Versuch mit {laeuft['modell']}.")
+
         p = neues_payload()
         text, usage = "", dict.fromkeys(USAGE_FELDER, 0)
         gefunden, bedient = [], modell
         for _ in range(self.PAUSEN_MAX + 1):
-            d = mit_versicherung(p)
-            # Gesaeubert wird erst am Ende: saeubern() schneidet Vorreden
-            # und Codezaeune ab, und ein Zaun, der ueber zwei Runden geht,
-            # waere nach zwei Teilreinigungen unpaarig.
-            stueck, u = self.antwort_lesen(d, roh=True)
+            # Eine Ablehnung wiederholt sich mit demselben Modell immer;
+            # mit einem anderen meistens nicht. Deshalb wird hier die
+            # Modellkette durchgegangen und nicht der Aufruf wiederholt.
+            for nr in range(len(kette)):
+                try:
+                    d = mit_versicherung(p)
+                    # Das Lesen gehoert in denselben Versuch: Die Ablehnung
+                    # ist eine gueltige Antwort mit HTTP 200 und faellt
+                    # erst hier auf, nicht beim Senden.
+                    #
+                    # Gesaeubert wird erst am Ende — saeubern() schneidet
+                    # Vorreden und Codezaeune ab, und ein Zaun ueber zwei
+                    # Runden waere nach zwei Teilreinigungen unpaarig.
+                    stueck, u = self.antwort_lesen(d, roh=True)
+                    break
+                except Ablehnung as e:
+                    abgelehnt_weiter(e, nr)
+                    p = dict(neues_payload(), messages=p["messages"])
             text += stueck
             for f in USAGE_FELDER:
                 usage[f] += int(u.get(f, 0) or 0)
             gefunden += belege(d)
-            bedient = bedient_von(d, modell)
+            # Nach einem eigenen Rueckfall wissen wir selbst, an wen die
+            # Anfrage ging; 'bedient_von' deckt zusaetzlich den
+            # serverseitigen Fall ab, der nur in den Iterationen steht.
+            bedient = bedient_von(d, laeuft["modell"])
             if d.get("stop_reason") != "pause_turn":
                 break
             # Die Werkzeugschleife wurde angehalten, nicht beendet. Die
@@ -1510,9 +1588,9 @@ class AnthropicBackend(Backend):
                   f"unvollstaendig sein.")
 
         if bedient != modell:
-            print(f"    HINWEIS: {modell} hat abgelehnt, geantwortet hat "
-                  f"{bedient}. Die Stelle steht in der Kostenuebersicht "
-                  f"unter diesem Modell.")
+            print(f"    HINWEIS: geantwortet hat {bedient}, nicht {modell}. "
+                  f"Die Stelle steht in der Kostenuebersicht unter dem "
+                  f"Modell, das geantwortet hat.")
         usage_buchen(rolle, bedient, usage)
         return (text if roh else saeubern(text)), \
             {"modell": bedient, "belege": gefunden,

@@ -1142,6 +1142,84 @@ installiert, requests-Pfad"
             if "general_harms" not in str(e) or "Gewalt" not in str(e):
                 fehler.append(f"Ablehnungsgrund unvollstaendig: {e}")
 
+        # (3b) Der eigene Rueckfall, ohne jede Beta. Beim Buch Alexander
+        # war die Betafunktion fuer den serverseitigen Rueckfall nicht
+        # freigeschaltet — die Absicherung waere sonst ersatzlos
+        # verschwunden. Dieser Weg liest 'refusal' und schickt dieselbe
+        # Anfrage an das naechste Modell der Liste.
+        eigen = dict(cfg_f, fallback_modelle=["claude-sonnet-5"])
+        if G.eigene_rueckfaelle(eigen):
+            fehler.append("eigener Rueckfall laeuft, obwohl der Server ihn "
+                          "schon macht")
+        merker = G._FALLBACK_ABGELEHNT
+        try:
+            G._FALLBACK_ABGELEHNT = True       # Server lehnt ab
+            if G.eigene_rueckfaelle(eigen) != ["claude-sonnet-5"]:
+                fehler.append("eigener Rueckfall greift nicht, wenn der "
+                              "serverseitige abgelehnt wird")
+            if G.eigene_rueckfaelle(dict(eigen, fallback_modelle="default")):
+                fehler.append("'default' taugt als eigener Rueckfall — "
+                              "die Kategorie kennt nur der Anbieter")
+
+            gesehen = []
+
+            class _Kette:
+                def create(s, **kw):
+                    gesehen.append(kw["model"])
+                    if kw["model"] == "claude-opus-5":
+                        d = {"content": [], "stop_reason": "refusal",
+                             "stop_details": {"category": "general_harms"},
+                             "usage": {"input_tokens": 400,
+                                       "output_tokens": 0}}
+                    else:
+                        d = {"content": [{"type": "text", "text": "Ersatz."}],
+                             "stop_reason": "end_turn",
+                             "usage": {"input_tokens": 400,
+                                       "output_tokens": 9}}
+                    return type("A", (), {"model_dump":
+                                          lambda self, x=d: x})()
+
+            kette = _Kette()
+            b_a.klient = lambda cfg_: type(
+                "K", (), {"messages": kette,
+                          "beta": type("B", (), {"messages": kette})()})()
+            with tempfile.TemporaryDirectory() as tmp2:
+                alt2 = os.getcwd()
+                try:
+                    os.chdir(tmp2)
+                    G.api_schluessel = lambda *a, **k: "test"
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        t3, m3 = b_a.chat_meta(eigen, "S", "U",
+                                               rolle="uebersetzung",
+                                               modell="claude-opus-5")
+                    if t3 != "Ersatz.":
+                        fehler.append(f"eigener Rueckfall liefert nichts: "
+                                      f"{t3!r}")
+                    if gesehen != ["claude-opus-5", "claude-sonnet-5"]:
+                        fehler.append(f"Modellkette falsch: {gesehen}")
+                    if m3.get("modell") != "claude-sonnet-5":
+                        fehler.append(f"unter dem falschen Modell gebucht: "
+                                      f"{m3.get('modell')}")
+                    # Ohne Ersatzmodell bleibt die Ablehnung eine Ablehnung
+                    # — verschluckt werden darf sie nie.
+                    gesehen.clear()
+                    try:
+                        with contextlib.redirect_stdout(io.StringIO()):
+                            b_a.chat_meta(dict(eigen, fallback_modelle=""),
+                                          "S", "U", rolle="uebersetzung",
+                                          modell="claude-opus-5")
+                        fehler.append("Ablehnung ohne Ersatzmodell wird "
+                                      "verschluckt")
+                    except G.Ablehnung as e:
+                        if e.kategorie != "general_harms":
+                            fehler.append(f"Kategorie geht verloren: "
+                                          f"{e.kategorie!r}")
+                finally:
+                    os.chdir(alt2)
+        finally:
+            G._FALLBACK_ABGELEHNT = merker
+            del b_a.klient
+
         # (4) Wer geantwortet hat, entscheidet die Iterationsliste — nicht
         # der Modellname. Ein Alias loest auf einen datierten Namen auf;
         # danach zu buchen zerlegte die Kostenzeile in zwei halbe.

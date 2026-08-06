@@ -2,7 +2,7 @@
   "_hinweis_ebenen": "rahmen_marker ist das Zeichen, mit dem der Autor Ebenenwechsel auszeichnet — ein Absatz, der nur daraus besteht. Kommt es im Text nicht vor, meldet der Preflight das, und die Erzaehlebenen koennen NUR aus ebenen.json kommen (vorbereitung.py --nur ebenen). ebenen.json hat ohnehin Vorrang; der Marker ist der Rueckfall. Leer setzen heisst: ausschliesslich ebenen.json. Warum das die wichtigste Einstellung eines neuen Buchs ist, steht in NEUES_BUCH.md, Abschnitt 5a.",
   "_hinweis_kalibrierung": "Diese Werte gehoeren dem Projekt, nicht dem Code. Sie werden im Pruefenster entschieden und von 'pipeline.py technik' nie angefasst.",
   "_hinweis_modelle": "Modellbelegung je Rolle. Das Backend ergibt sich aus dem Modellnamen. Jede aktive Rolle braucht einen Eintrag — es gibt keinen Rueckfall mehr. Aenderungen hier gehoeren ins Repo und wandern per 'pipeline.py technik' in die Projektordner.",
-  "_hinweis_rueckfall": "Lehnt der Sicherheitsklassifikator einen Chunk ab, beantwortet ihn ein Ersatzmodell, statt den Lauf abzubrechen. 'default' laesst den Anbieter waehlen, eine Liste von bis zu drei Modellnamen bestimmt selbst, '' schaltet ab. Welcher Chunk vom Ersatzmodell kam, steht in der Kostenuebersicht: dort erscheint es als eigene Zeile. 'websuche_werkzeug' ist die Fassung der serverseitigen Suche der Zitatrecherche; sie altert beim Anbieter und gehoert deshalb hierher, nicht in den Code.",
+  "_hinweis_rueckfall": "Lehnt der Sicherheitsklassifikator einen Chunk ab, beantwortet ihn ein Ersatzmodell, statt den Lauf abzubrechen. Eine LISTE funktioniert auf beiden Wegen: serverseitig, wenn die Betafunktion freigeschaltet ist, sonst wiederholt der Lauf die Anfrage selbst — dafuer braucht es keine Beta. \"default\" kann nur den serverseitigen Weg und laesst sich nicht nachbauen, weil nur der Anbieter weiss, welches Ersatzmodell zu welcher Ablehnungskategorie passt. '' schaltet den Rueckfall ab. Welcher Chunk vom Ersatzmodell kam, steht in der Kostenuebersicht als eigene Zeile.",
   "_hinweis_stapel": "Stapelbetrieb: 'uebersetzung.py --stapel' laesst den Buchlauf in Wellen ueber die Stapel-API laufen — halber Preis, aber ein Chunk sieht die Fassung des vorigen nur innerhalb seiner Kette. 'kette_max' ist die laengste Kette, die seriell bleibt; 0 trennt nur an den Ebenenfugen und kostet damit keine Qualitaet. Jeder weitere Schnitt ist eine Naht ohne Rueckschau. 'pipeline.py wellen' zeigt den Handel, 'bewertung.py --fugen' misst ihn.",
   "_hinweis_varianten": "Vergleichsvarianten des Testlaufs. Je Eintrag ein Name und, was abweicht: chunk_words und/oder modell_uebersetzung. Der Vergleich laeuft bei jedem Buch mit, weil die beste Chunkgroesse vom Text abhaengt und Modelle sich weiterentwickeln. Eine Modellvariante (z.B. {\"name\": \"C\", \"chunk_words\": 800, \"modell_uebersetzung\": \"claude-fable-5\"}) kostet ein Mehrfaches und wird bewusst hinzugefuegt, wenn ein neues Modell zu pruefen ist. Leere Liste = kein Vergleich.",
   "anrede_vorgabe": "u=Sie, jij/je=du",
@@ -28,7 +28,9 @@
   "eszett": true,
   "export_bewertung": true,
   "export_glossar": true,
-  "fallback_modelle": "default",
+  "fallback_modelle": [
+    "claude-sonnet-5"
+  ],
   "figuren_nachhall": 3,
   "glossar_quelle": "extern",
   "kette_max": 0,

@@ -1335,11 +1335,61 @@ Drei Dinge, die daran nicht wegvereinfacht werden dürfen:
   bei der Cache-Lebensdauer. Ein weiterer Fang verschluckte echte
   Payloadfehler und gäbe still ein zweites Mal Geld aus.
 
-Lehnt der Anbieter den Rückfall ab (unbekanntes Betakennwort, keine
-Freischaltung), meldet der Lauf das einmal und läuft ohne ihn weiter — dann
-gilt wieder das alte Verhalten. Für **Paket G** steht die Einschränkung im
-Code: Die Stapel-API nimmt `fallbacks` nicht an, der Stapeladapter muss das
-Feld entfernen statt es zu erben.
+### Wenn die Betafunktion nicht freigeschaltet ist
+
+**Nachtrag August 2026, aus dem ersten Lauf des Buchs Alexander.** Der
+serverseitige Rückfall ist eine Beta, und sie war für diesen Schlüssel nicht
+freigeschaltet:
+
+```
+WARNUNG: Serverseitiger Rueckfall wird abgelehnt — der Lauf geht ohne
+         ihn weiter.
+```
+
+Die Versicherung hat funktioniert — der Lauf lief weiter —, aber die
+Absicherung war ersatzlos weg. Das ist zu wenig für etwas, das über 147
+Chunks irgendwann gebraucht wird.
+
+Es gibt drei Wege zum Rückfall, und sie unterscheiden sich darin, was sie
+voraussetzen:
+
+| Weg | Braucht |
+|---|---|
+| Serverseitig (`fallbacks`) | Beta `server-side-fallback-2026-07-01` |
+| SDK-Middleware | schickt `fallback-credit-2026-07-01` auf jeder Anfrage |
+| **Selbst wiederholen** | **nichts** |
+
+Der dritte ist der einzige, der ohne jede Freischaltung funktioniert, und er
+ist einfach: `stop_reason: "refusal"` lesen, dieselbe Anfrage an ein anderes
+Modell schicken. Das ist gewöhnliche Messages-API.
+
+`eigene_rueckfaelle()` tut genau das — **und nur dann, wenn der serverseitige
+Weg nicht in Betrieb ist.** Läuft der, macht der Anbieter die Wiederholung
+bereits; beides zugleich wäre eine Wiederholung zu viel und ein zweites Mal
+bezahlt.
+
+Damit bekommt die Form von `fallback_modelle` eine Bedeutung, die sie vorher
+nicht hatte:
+
+- **`"default"`** — nur serverseitig. Ohne Freischaltung: keine Absicherung.
+  Selbst nachbauen lässt es sich nicht, weil nur der Anbieter weiß, welches
+  Ersatzmodell zu welcher Ablehnungskategorie passt.
+- **Eine Liste** — serverseitig, wenn die Beta da ist; sonst macht es der
+  Lauf selbst. **Das ist der belastbarere Wert.**
+
+Der Preis des eigenen Wegs: Die abgelehnte Anfrage wird nicht berechnet (die
+API stellt eine Ablehnung vor der ersten Ausgabe nicht in Rechnung), aber die
+Wiederholung zahlt ihre Eingabe erneut, und der Prompt-Cache des anderen
+Modells ist kalt. Das trifft einzelne Chunks und ist gegen einen Abbruch kein
+Argument.
+
+`Ablehnung` ist eine eigene Ausnahmeklasse, kein `ApiFehler` unter vielen: Sie
+wird anders behandelt, weil Wiederholen mit **demselben** Modell aussichtslos
+ist — ein Klassifikatorurteil würfelt nicht.
+
+Für **Paket G** steht die Einschränkung im Code: Die Stapel-API nimmt
+`fallbacks` nicht an, der Stapeladapter muss das Feld entfernen statt es zu
+erben. Der eigene Rückfall greift dort über den synchronen Nachlauf.
 
 ---
 

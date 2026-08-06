@@ -302,16 +302,34 @@ def pruefe_rueckfall(e, cfg, anbieter_rollen, tragen):
         # und den Merker gesetzt, und diese Pruefung meldete danach
         # 'ist leer', obwohl in projekt.json etwas steht.
         if cfg.get("fallback_modelle"):
+            eigen = G.eigene_rueckfaelle(cfg)
+            if eigen:
+                e.ok("Rueckfall laeuft im Lauf selbst",
+                     f"Der Anbieter nimmt 'fallbacks' fuer diesen "
+                     f"Schluessel nicht an — die Betafunktion ist nicht "
+                     f"freigeschaltet.\n"
+                     f"  Der Lauf macht es deshalb selbst: Bei einer "
+                     f"Ablehnung geht dieselbe Anfrage an "
+                     f"{', '.join(eigen)}.\n"
+                     f"  Das braucht keine Beta und ist gewoehnliche "
+                     f"Messages-API. Gebucht wird unter dem Modell, das "
+                     f"geantwortet hat.")
+                return
             e.warn("Rueckfall ist eingestellt, wird aber abgelehnt",
                    "Der Anbieter nimmt 'fallbacks' fuer diesen Schluessel "
                    "nicht an —\n  die Betafunktion ist fuer diese "
                    "Organisation nicht freigeschaltet.\n"
-                   "  Folge: Eine Ablehnung des Sicherheitsklassifikators "
-                   "bricht den Chunk ab.\n"
-                   "  Der Resume setzt an derselben Stelle wieder an; "
-                   "verloren geht nur dieser Chunk.\n"
-                   "  Wer die Meldung nicht mehr sehen will, leert "
-                   "'fallback_modelle' in projekt.json.")
+                   "  'default' laesst sich nicht selbst nachbauen: Welches "
+                   "Ersatzmodell zu welcher\n"
+                   "  Ablehnungskategorie passt, weiss nur der Anbieter.\n\n"
+                   "  Abhilfe — in projekt.json statt \"default\" die "
+                   "Modelle nennen:\n"
+                   '      "fallback_modelle": ["claude-sonnet-5"]\n'
+                   "  Dann faellt der Lauf selbst zurueck, ganz ohne Beta.\n\n"
+                   "  Ohne das gilt: Eine Ablehnung bricht den Chunk ab, "
+                   "der Resume setzt\n"
+                   "  an derselben Stelle wieder an, verloren geht nur "
+                   "dieser Chunk.")
             return
         e.info("Rueckfall abgeschaltet",
                "'fallback_modelle' ist leer. Eine Ablehnung des "
