@@ -1337,7 +1337,7 @@ installiert, requests-Pfad"
     # der Autor von 1919 ihn nie benutzt hat.
     try:
         fehler = []
-        vorlage = json.load(open(os.path.join(CODE, G.CONFIG),
+        vorlage = json.load(open(os.path.join(CODE, G.VORLAGE),
                                  encoding="utf-8"))
         fehlt = sorted(k for k in G.STANDARD if k not in vorlage)
         if fehlt:
@@ -1407,6 +1407,23 @@ installiert, requests-Pfad"
                     fehler.append(
                         f"{os.path.basename(d)}: modell_{rolle} steht dort "
                         f"als '{name}', eingestellt ist '{soll}'")
+
+        # Die Zellnummern in der Doku muessen die des Runners sein. Als
+        # die Anmeldezelle dazukam, rutschten alle Zellen um eins, und
+        # 27 Verweise in drei Dokumenten zeigten auf die falsche.
+        nb = os.path.join(CODE, "colab_runner.ipynb")
+        if os.path.exists(nb):
+            zellen = json.load(open(nb, encoding="utf-8"))["cells"]
+            da = set(re.findall(r"^## (\d+) ", "\n".join(
+                "".join(c["source"]) for c in zellen
+                if c["cell_type"] == "markdown"), re.M))
+            for d in _glob_md():
+                falsch = sorted({n for n in re.findall(
+                    r"Zelle (\d+)", quelltext(d))} - da)
+                if falsch:
+                    fehler.append(f"{os.path.basename(d)}: verweist auf "
+                                  f"Zelle {', '.join(falsch)} — die gibt es "
+                                  f"im Runner nicht")
 
         # Kein verwaistes Dokument. NEUES_BUCH.md lag ein halbes Jahr im
         # Repo, ohne dass irgendein anderes es erwaehnt haette — die
@@ -2513,6 +2530,55 @@ installiert, requests-Pfad"
                 fehler.append("aus dem Sheet gebaute anrede.json traegt "
                               "die Zielanrede nicht in den Prompt — "
                               f"Feldnamen weichen ab: {block!r}")
+
+        # Die Anmeldung der VM ist keine Anmeldung. In Colab findet
+        # google.auth.default() immer die Compute-Engine-Anmeldung, an der
+        # kein Dienstkonto haengt: Sie laesst sich bauen und scheitert
+        # erst beim Zugriff — mit einem 404 auf metadata.google.internal,
+        # das nach einem Problem des Spreadsheets aussieht. Genau so ist
+        # jemand auf die Suche nach einer Freigabe geschickt worden, die
+        # laengst erteilt war.
+        import types
+        class _CE:
+            pass
+        ce = types.ModuleType("google.auth.compute_engine")
+        ce.Credentials = _CE
+        ga = types.ModuleType("google.auth")
+        ga.compute_engine = ce
+        gg = types.ModuleType("google")
+        gg.auth = ga
+        alt_module = {k: sys.modules.get(k) for k in
+                      ("google", "google.auth", "google.auth.compute_engine")}
+        echt_colab = G.ist_colab
+        try:
+            sys.modules.update({"google": gg, "google.auth": ga,
+                                "google.auth.compute_engine": ce})
+            G.ist_colab = lambda: True
+            if RS.anmeldung_taugt(_CE()):
+                fehler.append("Metadaten-Anmeldung der VM gilt in Colab als "
+                              "Anmeldung")
+            if not RS.anmeldung_taugt(object()):
+                fehler.append("echte Anmeldung wird in Colab verworfen")
+            # Ausserhalb von Colab ist dieselbe Anmeldung der normale Weg
+            # einer GCE-Maschine mit Dienstkonto.
+            G.ist_colab = lambda: False
+            if not RS.anmeldung_taugt(_CE()):
+                fehler.append("Dienstkonto einer echten GCE-Maschine wird "
+                              "verworfen")
+        finally:
+            G.ist_colab = echt_colab
+            for k, v in alt_module.items():
+                if v is None:
+                    sys.modules.pop(k, None)
+                else:
+                    sys.modules[k] = v
+
+        # Und die Meldung muss auf die Anmeldung zeigen, nicht auf die
+        # Freigabe. Eine falsche Fährte kostet hier eine Stunde.
+        quelle_rs = quelltext("referenz_sync.py")
+        if "metadata.google.internal" not in quelle_rs:
+            fehler.append("der Metadaten-404 wird nicht als fehlende "
+                          "Anmeldung erkannt")
 
         if fehler:
             b.add("FEHLER", "Sheets-Anbindung fehlerhaft", "; ".join(fehler))

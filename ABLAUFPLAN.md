@@ -52,10 +52,11 @@ Sagt sie „Die Anmeldung gilt nur in dieser Zelle", laufen die Sheets-Aufrufe
 > Hier steht die Kurzfassung für den, der ihn schon kennt.
 
 1. Drive-Ordner anlegen, `input.txt` hineinlegen.
-2. `PROJEKT` in Zelle 0 und Zelle 1 auf diesen Ordner setzen.
-3. Zelle 1 einmal starten — sie kopiert `projekt.json` und `anweisungen.md`
-   aus dem Repo, wenn dort keine liegen, und sagt es. **Eine vorhandene
-   `projekt.json` wird nie überschrieben.**
+2. `PROJEKT` in **Zelle 0** setzen — nur dort, die Zelle ist die einzige,
+   die für ein neues Buch angefasst wird.
+3. Zelle 2 einmal starten. Beim Erstlauf entsteht die `projekt.json` im
+   Projektordner aus `projekt_vorlage.json`; **ab dann gilt sie und wird
+   nie überschrieben.** Geändert wird dort, nicht im Repo.
 4. **`rahmen_marker` prüfen.** Er entscheidet, ob die Erzählebenen erkannt
    werden. Kommt das eingestellte Zeichen im Text nicht vor, meldet der
    Preflight das — dann hängt alles an `ebenen.json`. Begründung in
@@ -100,7 +101,7 @@ Erreichbarkeit des Modellnamens, bevor Kosten entstehen.
 
 ## 3 · Der Lauf
 
-Zelle 1. Sie mountet Drive, holt den Code, lädt die Secrets, wechselt in den
+Zelle 2. Sie mountet Drive, holt den Code, lädt die Secrets, wechselt in den
 Projektordner und startet den Lauf im Vordergrund:
 
 ```python
@@ -110,7 +111,7 @@ colab_start.lauf("pipeline.py", "run", code=CODE)
 Die laufende Fortschrittsausgabe hält die Sitzung nebenbei wach. Sie ist kein
 Beiwerk — ohne sie stuft Colab die Sitzung als untätig ein.
 
-**Bricht etwas ab: Zelle 1 erneut starten.** Der Resume zählt die Dateien in
+**Bricht etwas ab: Zelle 2 erneut starten.** Der Resume zählt die Dateien in
 `teile/` und setzt am nächsten offenen Abschnitt fort. Verloren geht höchstens
 der eine Abschnitt, an dem gerade gearbeitet wurde.
 
@@ -147,8 +148,8 @@ Die aktuelle Liste mit Restzeiten und Chunkstand:
 colab_start.lauf("pipeline.py", "status", code=CODE)
 ```
 
-Solange Zelle 1 läuft, wird diese Zelle nur eingereiht. Den Chunkstand liest
-man während eines Laufs an der Ausgabe von Zelle 1 ab.
+Solange Zelle 2 läuft, wird diese Zelle nur eingereiht. Den Chunkstand liest
+man während eines Laufs an der Ausgabe von Zelle 2 ab.
 
 ---
 
@@ -336,11 +337,11 @@ und dort greift der Rückfall dann doch.
 | Meldung | Was los ist | Was hilft |
 |---|---|---|
 | `ANTHROPIC_API_KEY fehlt` | Secret nicht hinterlegt oder der Sitzung nicht freigegeben | Colab-Reiter „Secrets", Schalter für dieses Notebook |
-| `Schluessel google: fehlt` | Secret heißt nicht `GoogleKI` | umbenennen, Zelle 1 erneut |
+| `Schluessel google: fehlt` | Secret heißt nicht `GoogleKI` | umbenennen, Zelle 2 erneut |
 | HTTP 429 | Ratenlimit des Anbieters | nichts tun — die Pipeline wartet und wiederholt bis `max_retries` |
 | HTTP 400 bei einem Modell | Modellname veraltet oder Parameter abgelehnt | `pipeline.py technik --uebernehmen`, dann erneut |
 | Zelle bricht ab, „Verbindung wird wiederhergestellt" | Browser hat die Verbindung verloren, die VM läuft meist weiter | Dateien in `teile/` ansehen; wachsen sie, nur neu verbinden |
-| Laufzeit wirklich weg | VM recycelt | Zelle 1 erneut — der Resume zählt `teile/` |
+| Laufzeit wirklich weg | VM recycelt | Zelle 2 erneut — der Resume zählt `teile/` |
 | `Referenzdaten fehlerhaft: …, Zeile N` | Sheet-Zeile unvollständig oder doppelt | im Spreadsheet korrigieren, denselben Schritt erneut |
 | `Das Spreadsheet wuerde vorhandene Daten loeschen` | Tabs leer, JSONs gefüllt | erst `referenz_sync.py --erstbefuellung` |
 | `Tab 'X' fehlt im Spreadsheet` | Tabname vertippt oder Tab fehlt | Namen prüfen, sonst `referenz_sync.py --vorlage` |

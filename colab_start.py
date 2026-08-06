@@ -148,10 +148,18 @@ def sheets_anmelden(code=CODE):
     auth.authenticate_user()
     print("Angemeldet.")
 
-    pruef = ("import google.auth, sys\n"
+    # Geprueft wird ueber referenz_sync.anmeldung_taugt und nicht ueber
+    # 'default() wirft nicht': In Colab findet default() immer die
+    # Compute-Engine-Anmeldung der VM, an der kein Dienstkonto haengt.
+    # Diese Zelle haette also 'SICHTBAR' gemeldet, und der Fehler waere
+    # erst im Schritt aufgetaucht — als angebliches Problem des
+    # Spreadsheets.
+    pruef = ("import google.auth, referenz_sync as R\n"
              "try:\n"
-             "    google.auth.default()\n"
-             "    print('SICHTBAR')\n"
+             "    creds, _ = google.auth.default()\n"
+             "    gut = R.anmeldung_taugt(creds)\n"
+             "    print('SICHTBAR' if gut else\n"
+             "          'UNSICHTBAR nur die Metadaten-Anmeldung der VM')\n"
              "except Exception as e:\n"
              "    print('UNSICHTBAR', e)\n")
     r = subprocess.run([sys.executable, "-c", pruef],
@@ -229,15 +237,23 @@ def projektordner_richten(projekt, code=CODE):
         meldungen.append(f"Projektordner neu angelegt: {projekt}")
 
     ziel = os.path.join(projekt, G.CONFIG)
-    quelle = os.path.join(code, G.CONFIG)
+    quelle = os.path.join(code, G.VORLAGE)
+    if not os.path.exists(quelle):
+        # Aeltere Auschecks fuehren die Vorlage noch unter dem Namen der
+        # Arbeitsdatei. Der Rueckfall kostet nichts und verhindert, dass
+        # ein halb aktualisierter Stand ohne Konfiguration dasteht.
+        quelle = os.path.join(code, G.CONFIG)
     if os.path.exists(ziel):
         meldungen.append(f"{G.CONFIG} im Projektordner vorhanden — "
                          f"unveraendert uebernommen")
         meldungen += _technik_melden(ziel, quelle)
     elif os.path.exists(quelle):
         shutil.copy2(quelle, ziel)
-        meldungen.append(f"{G.CONFIG} aus dem Repo kopiert (Erstlauf). "
-                         f"Aenderungen bitte hier vornehmen, nicht im Repo.")
+        meldungen.append(f"{G.CONFIG} aus {os.path.basename(quelle)} "
+                         f"angelegt (Erstlauf).")
+        meldungen.append(f"  Ab jetzt gilt {ziel} — "
+                         f"sheets_id, rahmen_marker und alles Weitere")
+        meldungen.append(f"  dort aendern, nicht im Repo.")
     else:
         meldungen.append(f"WARNUNG: weder {ziel} noch {quelle} vorhanden — "
                          f"'python3 pipeline.py init' anlegen")

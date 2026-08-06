@@ -597,7 +597,9 @@ def cmd_technik(args):
     einmal importierte Module fest, ein frisch geholtes Repo aendert daran
     nichts. Ein Unterprozess sieht immer den Code auf der Platte."""
     projekt = os.path.abspath(G.CONFIG)
-    repo = os.path.join(CODE, G.CONFIG)
+    repo = os.path.join(CODE, G.VORLAGE)
+    if not os.path.exists(repo):
+        repo = os.path.join(CODE, G.CONFIG)     # aelterer Auscheck
     G.kopf("TECHNIK-ABGLEICH")
     print(f"Projekt: {projekt}")
     print(f"Repo:    {repo}\n")
